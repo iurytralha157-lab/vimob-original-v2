@@ -243,7 +243,7 @@ export function EventSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-[420px] p-0 flex flex-col bg-card border-l border-border shadow-2xl"
+        className="w-full p-0 flex flex-col bg-card border-l border-border shadow-2xl sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:h-[80vh] sm:max-h-[80vh] sm:w-[min(720px,80vw)] sm:max-w-none sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{isExisting ? "Detalhes da Atividade" : "Nova Atividade"}</SheetTitle>
