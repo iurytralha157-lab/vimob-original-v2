@@ -1015,8 +1015,8 @@ export function AccountTab() {
 
             {/* Financial Settings */}
             {isAdmin && <div className="pt-4 border-t">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <h4 className="text-sm font-semibold text-foreground flex items-center gap-2 whitespace-nowrap">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <h4 className="text-sm font-semibold leading-tight text-foreground flex items-center gap-2 min-w-0">
                   Configurações Financeiras
                   <TooltipProvider>
                     <Tooltip>
@@ -1029,8 +1029,8 @@ export function AccountTab() {
                     </Tooltip>
                   </TooltipProvider>
                 </h4>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-                  <Label className="flex items-center gap-2 text-xs whitespace-nowrap">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto_minmax(5rem,6rem)_auto] sm:items-center lg:justify-end">
+                  <Label className="flex items-center gap-2 text-xs leading-tight">
                     <Percent className="h-3 w-3" />
                     Comissão Padrão (%)
                   </Label>
@@ -1043,7 +1043,7 @@ export function AccountTab() {
                     value={orgForm.default_commission_percentage}
                     onChange={(e) => setOrgForm((prev) => ({ ...prev, default_commission_percentage: e.target.value }))}
                     disabled={!isAdmin}
-                    className="w-full sm:w-24 h-9"
+                    className="w-full h-9"
                   />
                   <Button
                     size="sm"
