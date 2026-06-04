@@ -648,7 +648,7 @@ export function AccountTab() {
                     Sua senha fica protegida e so abre quando voce escolher atualizar.
                   </p>
                 )}
-                <p className="text-xs text-muted-foreground">{passwordStatus.lastChangeText}</p>
+                <p className="text-xs text-amber-300/85">{passwordStatus.lastChangeText}</p>
                 {passwordStatus.isLocked && (
                   <p className="text-xs text-destructive">
                     Por seguranca, nova alteracao disponivel em {passwordStatus.remainingText}.
