@@ -181,6 +181,7 @@ Deno.serve(async (req) => {
         } else if (channel === 'push' && user_id) {
           const notificationData = {
             event_key,
+            type: template.category || 'info',
             lead_id: lead_id || null,
             organization_id,
             url: lead_id ? `/crm/conversas?lead=${lead_id}` : "/notifications",

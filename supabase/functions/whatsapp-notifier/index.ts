@@ -97,20 +97,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 4. Send the message via Evolution API
+    // 4. Send the exact template-rendered message via Evolution API
     const formattedPhone = targetPhone.replace(/\D/g, "");
-    
-    // Fetch organization name to add context if it's not already in the message
-    const { data: org } = await supabase
-      .from("organizations")
-      .select("name")
-      .eq("id", organization_id)
-      .single();
-    
-    let finalMessage = message;
-    if (org?.name && !message.includes(org.name)) {
-      finalMessage = `${message}\n\n🏢 *Organização:* ${org.name}`;
-    }
+    const finalMessage = message;
 
     if (notificationSession?.provider === "evolution_go") {
       const proxyResponse = await fetch(`${SUPABASE_URL}/functions/v1/evolution-go-proxy`, {

@@ -754,21 +754,74 @@ export function useSendWhatsAppMessage() {
 
         if (rebindError) {
           console.error("[useSendWhatsAppMessage] Failed to rebind conversation session:", rebindError);
-          throw new Error("Mensagem enviada no WhatsApp, mas o CRM não conseguiu religar a conversa à sessão ativa.");
-        }
+          const { error: directRebindError } = await supabase
+            .from("whatsapp_conversations")
+            .update({
+              session_id: session.id,
+              organization_id: session.organization_id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", conversation.id);
 
-        conversation.id = reboundConversation?.id || conversation.id;
-        conversation.session_id = reboundConversation?.session_id || session.id;
-        conversation.organization_id = reboundConversation?.organization_id || conversation.organization_id;
-        conversation.lead_id = reboundConversation?.lead_id || conversation.lead_id;
-        (conversation as any).session = session;
+          if (directRebindError) {
+            console.error("[useSendWhatsAppMessage] Direct conversation rebind also failed; message will still be saved.", directRebindError);
+          } else {
+            conversation.session_id = session.id;
+            conversation.organization_id = session.organization_id;
+            (conversation as any).session = session;
+          }
+        } else {
+          conversation.id = reboundConversation?.id || conversation.id;
+          conversation.session_id = reboundConversation?.session_id || session.id;
+          conversation.organization_id = reboundConversation?.organization_id || conversation.organization_id;
+          conversation.lead_id = reboundConversation?.lead_id || conversation.lead_id;
+          (conversation as any).session = session;
+        }
+      }
+
+      if (!conversation.lead_id && !isGroup) {
+        const phoneDigits = normalizePhone(conversation.contact_phone || conversation.remote_jid || phone);
+        const tail = phoneDigits.slice(-8);
+        if (tail) {
+          const { data: leadMatches, error: leadMatchError } = await supabase
+            .from("leads")
+            .select("id, name, phone")
+            .eq("organization_id", session.organization_id)
+            .ilike("phone", `%${tail}%`)
+            .limit(10);
+
+          if (leadMatchError) {
+            console.error("[useSendWhatsAppMessage] Failed to resolve lead by phone before saving message:", leadMatchError);
+          } else {
+            const matchedLead = (leadMatches || []).find((lead: any) =>
+              normalizePhone(lead.phone || "").slice(-8) === tail,
+            );
+
+            if (matchedLead?.id) {
+              conversation.lead_id = matchedLead.id;
+              (conversation as any).lead = {
+                ...((conversation as any).lead || {}),
+                id: matchedLead.id,
+                name: matchedLead.name,
+              };
+              await supabase
+                .from("whatsapp_conversations")
+                .update({
+                  lead_id: matchedLead.id,
+                  contact_name: matchedLead.name || conversation.contact_name,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", conversation.id);
+            }
+          }
+        }
       }
 
       // Insert message in database with client_message_id for deduplication
       const messageId = extractProviderMessageId(sendResult.data) || clientMessageId;
       
       console.log("[useSendWhatsAppMessage] Inserting message into DB");
-      const { error: insertError } = await supabase.from("whatsapp_messages").insert({
+      const { error: insertError } = await supabase.from("whatsapp_messages").upsert({
         conversation_id: conversation.id,
         session_id: session.id,
         message_id: messageId,
@@ -784,7 +837,7 @@ export function useSendWhatsAppMessage() {
         status: "sent",
         sent_at: new Date().toISOString(),
         sender_name: profile?.name || null,
-      });
+      }, { onConflict: "session_id,message_id" });
 
       if (insertError) {
         console.error("[useSendWhatsAppMessage] insert whatsapp_messages Error:", insertError);
