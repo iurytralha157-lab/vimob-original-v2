@@ -241,11 +241,17 @@ export function IntegrationsTab({
         open={!!activeIntegration && activeIntegration !== "vista" && activeIntegration !== "imoview"}
         onOpenChange={(open) => !open && setActiveIntegration(null)}
       >
-        <DialogContent className="max-w-[96vw] lg:max-w-6xl max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className={
+            activeIntegration === "whatsapp" ?
+            "w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto lg:w-[80vw] lg:max-w-[80vw] lg:h-[80vh] lg:max-h-[80vh]" :
+            "max-w-[96vw] lg:max-w-6xl max-h-[90vh] overflow-y-auto"
+          }
+        >
           <DialogHeader>
             <DialogTitle>{activeTitle ? `Integração com ${activeTitle}` : "Integração"}</DialogTitle>
           </DialogHeader>
-          {activeIntegration === "whatsapp" && <WhatsAppTab />}
+          {activeIntegration === "whatsapp" && <WhatsAppTab embedded />}
           {activeIntegration === "meta" && <MetaIntegrationSettings oauthPayload={metaOAuthPayload} />}
           {activeIntegration === "ai-agent" && <AIAgentTab />}
           {activeIntegration === "google-calendar" && <GoogleCalendarConnect />}

@@ -45,7 +45,11 @@ import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 
-export function WhatsAppTab() {
+interface WhatsAppTabProps {
+  embedded?: boolean;
+}
+
+export function WhatsAppTab({ embedded = false }: WhatsAppTabProps = {}) {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
   const { data: sessions, isLoading } = useWhatsAppSessions();
@@ -366,7 +370,19 @@ export function WhatsAppTab() {
   };
 
   return (
-    <Card>
+    <Card className={embedded ? "border-0 bg-transparent shadow-none" : undefined}>
+      {embedded &&
+      <Button
+        data-tour="whatsapp-new-session"
+        size="sm"
+        onClick={() => setCreateDialogOpen(true)}
+        className="absolute right-14 top-4 z-10 shrink-0"
+      >
+          <Plus className="w-4 h-4 mr-1.5" />
+          Nova
+        </Button>
+      }
+      {!embedded &&
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -386,7 +402,8 @@ export function WhatsAppTab() {
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      }
+      <CardContent className={embedded ? "px-0 pb-0 pt-2" : undefined}>
         {isLoading ?
         <div className="flex items-center justify-center py-8">
             <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -404,7 +421,7 @@ export function WhatsAppTab() {
             </Button>
           </div> :
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 px-[10px]">
+        <div className={embedded ? "grid gap-3 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3 px-[10px]"}>
             {sessions?.map((session) =>
           <Card key={session.id} className="border">
                 <CardContent className="p-3 space-y-2.5">
