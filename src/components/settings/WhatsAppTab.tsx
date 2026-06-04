@@ -577,6 +577,16 @@ export function WhatsAppTab() {
                   </p>
                 </div>
               }
+              <div className="mt-4 w-full rounded-lg border border-border bg-muted/70 p-4 text-left">
+                <p className="mb-3 text-sm font-semibold text-foreground">Como conectar:</p>
+                <ol className="list-decimal space-y-1 pl-4 text-sm leading-relaxed text-muted-foreground">
+                  <li>Abra o WhatsApp no seu celular</li>
+                  <li>Toque em Menu ou Configurações</li>
+                  <li>Toque em Dispositivos conectados</li>
+                  <li>Toque em Conectar um dispositivo</li>
+                  <li>Aponte seu celular para esta tela para capturar o código</li>
+                </ol>
+              </div>
               <div className="flex gap-2 mt-4">
                 <Button
                   variant="outline"
