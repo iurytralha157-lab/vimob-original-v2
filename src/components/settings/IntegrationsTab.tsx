@@ -45,6 +45,7 @@ export function IntegrationsTab({
   const { data: whatsappSessions = [] } = useWhatsAppSessions();
   const { data: vistaIntegration } = useVistaIntegration();
   const { data: imoviewIntegration } = useImoviewIntegration();
+  const disabledIntegrations = new Set<IntegrationKey>(["google-calendar"]);
 
   useEffect(() => {
     const parseOAuthPayload = (raw: string) => {
@@ -198,33 +199,42 @@ export function IntegrationsTab({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredIntegrations.map((item) => (
-          <Card key={item.key} className="overflow-hidden">
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="h-11 w-11 rounded-md border bg-background flex items-center justify-center shrink-0">
-                    {item.icon}
+        {filteredIntegrations.map((item) => {
+          const isTemporarilyDisabled = disabledIntegrations.has(item.key);
+
+          return (
+            <Card key={item.key} className={`overflow-hidden ${isTemporarilyDisabled ? "opacity-50 grayscale" : ""}`}>
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-11 w-11 rounded-md border bg-background flex items-center justify-center shrink-0">
+                      {item.icon}
+                    </div>
+                    <div className="min-w-0">
+                      <CardTitle className="text-base truncate">{item.title}</CardTitle>
+                      <CardDescription className="text-xs">{item.detail}</CardDescription>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <CardTitle className="text-base truncate">{item.title}</CardTitle>
-                    <CardDescription className="text-xs">{item.detail}</CardDescription>
-                  </div>
+                  <Badge variant={item.connected ? "default" : "outline"}>
+                    {isTemporarilyDisabled ? "Em breve" : item.connected ? "Integrado" : "Não integrado"}
+                  </Badge>
                 </div>
-                <Badge variant={item.connected ? "default" : "outline"}>
-                  {item.connected ? "Integrado" : "Não integrado"}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="px-4 md:px-6 pb-4 space-y-4">
-              <p className="text-sm text-muted-foreground min-h-[40px]">{item.description}</p>
-              <Button variant={item.connected ? "outline" : "default"} className="w-full gap-2" onClick={() => setActiveIntegration(item.key)}>
-                <Settings2 className="h-4 w-4" />
-                {item.connected ? "Gerenciar" : "Conectar"}
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
+              </CardHeader>
+              <CardContent className="px-4 md:px-6 pb-4 space-y-4">
+                <p className="text-sm text-muted-foreground min-h-[40px]">{item.description}</p>
+                <Button
+                  variant={item.connected ? "outline" : "default"}
+                  className="w-full gap-2"
+                  disabled={isTemporarilyDisabled}
+                  onClick={() => setActiveIntegration(item.key)}
+                >
+                  <Settings2 className="h-4 w-4" />
+                  {isTemporarilyDisabled ? "Indisponível" : item.connected ? "Gerenciar" : "Conectar"}
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       <Dialog
