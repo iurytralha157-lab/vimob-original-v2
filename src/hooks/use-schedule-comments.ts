@@ -1,4 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -16,6 +18,15 @@ export interface ScheduleComment {
     avatar_url?: string | null;
   };
 }
+
+const eventLabels: Record<string, string> = {
+  call: "Ligação",
+  email: "E-mail",
+  meeting: "Reunião",
+  task: "Tarefa",
+  message: "Mensagem",
+  visit: "Visita",
+};
 
 export function useScheduleComments(eventId: string | undefined) {
   const { user, profile } = useAuth();
@@ -52,7 +63,6 @@ export function useScheduleComments(eventId: string | undefined) {
       const orgId = profile?.organization_id;
       if (!orgId) throw new Error("Organização não encontrada");
 
-      // Inserir comentário
       const { data, error } = await (supabase as any)
         .from("schedule_event_comments")
         .insert({
@@ -66,7 +76,6 @@ export function useScheduleComments(eventId: string | undefined) {
 
       if (error) throw error;
 
-      // Buscar evento + responsáveis para histórico e notificações
       const [{ data: eventData }, { data: assignees }] = await Promise.all([
         (supabase as any)
           .from("schedule_events")
@@ -80,7 +89,11 @@ export function useScheduleComments(eventId: string | undefined) {
       ]);
 
       if (eventData) {
-        // Histórico do lead (best-effort)
+        const actorName = profile?.name || user.email || "Usuário";
+        const eventLabel = eventLabels[eventData.event_type || "task"] || "Atividade";
+        const formattedDate = format(new Date(eventData.start_time), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+        const notificationText = `${actorName} deixou um comentário na "${eventLabel}" de ${formattedDate}.`;
+
         if (eventData.lead_id) {
           try {
             await (supabase as any).from("lead_timeline_events").insert({
@@ -89,7 +102,7 @@ export function useScheduleComments(eventId: string | undefined) {
               user_id: user.id,
               event_type: "schedule_comment",
               title: "Comentário em atividade",
-              description: `Comentário em "${eventData.title}": ${content}`,
+              description: `${notificationText} ${content}`,
               metadata: { schedule_event_id: eventId },
             });
           } catch (e) {
@@ -97,7 +110,6 @@ export function useScheduleComments(eventId: string | undefined) {
           }
         }
 
-        // Notificar responsáveis (assignees + user_id principal), exceto autor
         const recipientIds = new Set<string>();
         (assignees || []).forEach((a: any) => a?.user_id && recipientIds.add(a.user_id));
         if (eventData.user_id) recipientIds.add(eventData.user_id);
@@ -108,12 +120,17 @@ export function useScheduleComments(eventId: string | undefined) {
             user_id: uid,
             organization_id: orgId,
             type: "schedule_comment",
-            title: "Novo comentário em tarefa",
-            content: `Comentário em "${eventData.title}": ${content.slice(0, 120)}`,
+            title: "Comentário em atividade",
+            content: notificationText,
+            metadata: {
+              schedule_event_id: eventId,
+              event_type: eventData.event_type,
+              comment_preview: content.slice(0, 160),
+            },
           }));
-          // Fire-and-forget notifications
-          supabase.from("notifications").insert(rows).then(({ error: e }) => {
-            if (e) console.warn("notifications insert failed", e);
+
+          supabase.from("notifications").insert(rows as any).then(({ error: notifyError }) => {
+            if (notifyError) console.warn("notifications insert failed", notifyError);
           });
         }
       }

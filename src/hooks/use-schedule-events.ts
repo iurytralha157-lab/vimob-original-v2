@@ -224,7 +224,7 @@ export function useScheduleEvents(options: UseScheduleEventsOptions = {}) {
         .from('schedule_events')
         .select(`
           id, organization_id, user_id, lead_id, property_id, title, 
-          description, event_type, start_time, end_time, is_all_day, status,
+          description, event_type, start_time, end_time, is_all_day, location, status,
           completed_by, completed_at, recurrence_parent_id, recurrence_rule, recurrence_until, recurrence_count,
           user:users!schedule_events_user_id_fkey(id, name, avatar_url),
           lead:leads(id, name, phone),
