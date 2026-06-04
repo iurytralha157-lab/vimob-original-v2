@@ -42,6 +42,8 @@ import { cn } from '@/lib/utils';
 const EVENT_KEY_OPTIONS = [
   { value: 'deal_won', label: 'Lead Ganho (CRM)', category: 'Vendas' },
   { value: 'new_lead_received', label: 'Novo Lead (Automático)', category: 'Leads' },
+  { value: 'lead_assigned_to_user', label: 'Lead Atribuido ao Responsavel', category: 'Leads' },
+  { value: 'lead_transferred_to_user', label: 'Lead Transferido ao Responsavel', category: 'Leads' },
   { value: 'manual_lead_registered', label: 'Novo Lead (Manual)', category: 'Leads' },
   { value: 'lead_reentry', label: 'Reentrada de Lead', category: 'Leads' },
   { value: 'lead_moved_system', label: 'Lead Movido', category: 'Leads' },
