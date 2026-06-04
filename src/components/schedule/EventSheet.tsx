@@ -266,17 +266,17 @@ export function EventSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full p-0 flex flex-col bg-card border-l border-border shadow-2xl sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:h-[80vh] sm:max-h-[80vh] sm:w-[min(720px,80vw)] sm:max-w-none sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border"
+        className="w-full p-0 flex flex-col bg-card border-l border-border shadow-2xl sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:h-[80vh] sm:max-h-[80vh] sm:w-[min(860px,80vw)] sm:max-w-none sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{isExisting ? "Detalhes da Atividade" : "Nova Atividade"}</SheetTitle>
         </SheetHeader>
 
         {/* Header */}
-        <div className="px-5 py-4 border-b border-border shrink-0 bg-muted/20">
-          <div className="flex items-center justify-between mb-3">
+        <div className="shrink-0 border-b border-white/10 bg-gradient-to-br from-muted/35 via-card to-background px-5 py-4 sm:px-6 sm:py-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <span
-              className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full shadow-sm"
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider shadow-sm"
               style={{ background: `${typeConf.color}20`, color: typeConf.color, border: `1px solid ${typeConf.color}40` }}
             >
               <TypeIcon size={11} />
@@ -285,7 +285,7 @@ export function EventSheet({
             {isExisting && (
               <span
                 className={cn(
-                  "text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full shadow-sm",
+                  "rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider shadow-sm",
                   isCompleted ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" : "bg-amber-500/15 text-amber-400 border border-amber-500/30",
                 )}
               >
@@ -294,14 +294,14 @@ export function EventSheet({
             )}
           </div>
           {locked ? (
-            <h2 className="text-xl font-bold text-foreground leading-tight">{title || "Sem título"}</h2>
+            <h2 className="text-2xl font-bold leading-tight text-foreground">{title || "Sem título"}</h2>
           ) : (
-            <div className="bg-muted/40 rounded-lg px-3 py-1.5 focus-within:ring-1 focus-within:ring-primary/50 transition-all border border-transparent focus-within:border-primary/20">
+            <div className="rounded-xl border border-white/10 bg-background/45 px-3.5 py-2 transition-all focus-within:border-primary/25 focus-within:ring-1 focus-within:ring-primary/50">
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Título da atividade"
-                className="text-xl font-bold h-auto border-0 bg-transparent px-0 py-0 focus-visible:ring-0 placeholder:text-muted-foreground/40"
+                className="h-auto border-0 bg-transparent px-0 py-0 text-2xl font-bold focus-visible:ring-0 placeholder:text-muted-foreground/40"
               />
             </div>
           )}
@@ -313,10 +313,10 @@ export function EventSheet({
         </div>
 
         {/* Body scroll */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5 lg:grid-cols-2">
           {/* Tipo */}
           {!locked && (
-            <Field label="Tipo de atividade">
+            <Field label="Tipo de atividade" className="lg:col-span-2">
               <div className="flex flex-wrap gap-1.5">
                 {eventTypes.map(({ type, label, icon: Icon, color }) => {
                   const active = selectedType === type;
@@ -544,7 +544,7 @@ export function EventSheet({
           </Field>
 
           {/* Data / Hora / Duração */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:col-span-2">
             <Field label="Data">
               {locked ? (
                 <p className="text-sm">{date ? format(date, "dd/MM/yyyy") : "-"}</p>
@@ -586,7 +586,7 @@ export function EventSheet({
           </div>
 
           {/* Repetição */}
-          <Field label="Repetição" icon={Repeat2}>
+          <Field label="Repetição" icon={Repeat2} className="lg:col-span-2">
             {isExisting ? (
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-muted-foreground">
                 {recurrenceRule === "none"
@@ -664,7 +664,7 @@ export function EventSheet({
           </Field>
 
           {/* Descrição */}
-          <Field label="Descrição">
+          <Field label="Descrição" className="lg:col-span-2">
             {locked ? (
               <p className="text-sm text-muted-foreground italic">{description || "Sem descrição"}</p>
             ) : (
@@ -680,7 +680,7 @@ export function EventSheet({
 
           {/* Comentários — só quando o evento já existe */}
           {isExisting && (
-            <div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3 lg:col-span-2">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
                 <MessageSquare size={11} /> Comentários
               </div>
@@ -775,14 +775,14 @@ export function EventSheet({
 }
 
 function Field({
-  label, children, icon: Icon,
-}: { label: string; children: React.ReactNode; icon?: React.ElementType }) {
+  label, children, icon: Icon, className,
+}: { label: string; children: React.ReactNode; icon?: React.ElementType; className?: string }) {
   return (
-    <div>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+    <section className={cn("rounded-xl border border-white/10 bg-white/[0.025] p-3", className)}>
+      <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {Icon && <Icon size={11} />} {label}
       </div>
       {children}
-    </div>
+    </section>
   );
 }
