@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Tables } from '@/integrations/supabase/types';
@@ -38,8 +38,10 @@ export function useProperties(search?: string) {
 }
 
 export function useInfiniteProperties(search?: string, pageSize: number = 24) {
+  const normalizedSearch = search?.trim() || undefined;
+
   return useInfiniteQuery({
-    queryKey: ['properties-infinite', search, pageSize],
+    queryKey: ['properties-infinite', normalizedSearch, pageSize],
     queryFn: async ({ pageParam = 0 }) => {
       let query = supabase
         .from('properties')
@@ -47,8 +49,8 @@ export function useInfiniteProperties(search?: string, pageSize: number = 24) {
         .order('created_at', { ascending: false })
         .range(pageParam * pageSize, (pageParam + 1) * pageSize - 1);
       
-      if (search) {
-        query = query.or(`code.ilike.%${search}%,title.ilike.%${search}%,bairro.ilike.%${search}%,cidade.ilike.%${search}%,uf.ilike.%${search}%,tipo_de_imovel.ilike.%${search}%,tipo_de_negocio.ilike.%${search}%,vista_codigo.ilike.%${search}%,imoview_codigo.ilike.%${search}%`);
+      if (normalizedSearch) {
+        query = query.or(`code.ilike.%${normalizedSearch}%,title.ilike.%${normalizedSearch}%,bairro.ilike.%${normalizedSearch}%,cidade.ilike.%${normalizedSearch}%,uf.ilike.%${normalizedSearch}%,tipo_de_imovel.ilike.%${normalizedSearch}%,tipo_de_negocio.ilike.%${normalizedSearch}%,vista_codigo.ilike.%${normalizedSearch}%,imoview_codigo.ilike.%${normalizedSearch}%`);
       }
       
       const { data, error, count } = await query;
@@ -62,6 +64,7 @@ export function useInfiniteProperties(search?: string, pageSize: number = 24) {
     },
     getNextPageParam: (lastPage) => lastPage.nextPage,
     initialPageParam: 0,
+    placeholderData: keepPreviousData,
   });
 }
 

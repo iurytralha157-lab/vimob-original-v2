@@ -1,4 +1,4 @@
-import { useState, useDeferredValue } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,6 +19,7 @@ import { PropertyCard } from '@/components/properties/PropertyCard';
 import { PropertyPreviewDialog } from '@/components/properties/PropertyPreviewDialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { toast } from 'sonner';
 
 const formatPrice = (value: number | null, tipo: string | null) => {
@@ -46,15 +47,16 @@ export default function Properties() {
   const { profile, isSuperAdmin } = useAuth();
   const isAdmin = profile?.role === 'admin' || isSuperAdmin;
 
-  const deferredSearch = useDeferredValue(search);
+  const debouncedSearch = useDebouncedValue(search.trim(), 350);
   
   const { 
     data, 
     isLoading, 
+    isFetching,
     fetchNextPage, 
     hasNextPage, 
     isFetchingNextPage 
-  } = useInfiniteProperties(deferredSearch);
+  } = useInfiniteProperties(debouncedSearch);
 
   const properties = data?.pages.flatMap(page => page.properties) || [];
   const totalCount = data?.pages[0]?.totalCount || 0;
@@ -101,7 +103,7 @@ export default function Properties() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading && !data) {
     return (
       <AppLayout title="Imóveis">
         <div className="flex items-center justify-center h-64">
@@ -123,8 +125,11 @@ export default function Properties() {
                 placeholder="Buscar imóveis..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
+                className="pl-9 pr-9"
               />
+              {isFetching && !isFetchingNextPage && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+              )}
             </div>
             {!isMobile && (
               <div className="flex items-center gap-2">
