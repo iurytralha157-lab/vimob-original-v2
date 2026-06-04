@@ -2,7 +2,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { format } from "date-fns";
+import { addMonths, addWeeks, addYears, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { getFriendlyErrorMessage } from "@/lib/error-handler";
 
@@ -23,6 +23,10 @@ export interface ScheduleEvent {
   location: string | null;
   status: string | null;
   reminder_minutes: number | null;
+  recurrence_parent_id?: string | null;
+  recurrence_rule?: string | null;
+  recurrence_until?: string | null;
+  recurrence_count?: number | null;
   google_event_id: string | null;
   completed_by: string | null;
   completed_at: string | null;
@@ -47,6 +51,70 @@ export interface ScheduleEvent {
     id: string;
     name: string;
   } | null;
+}
+
+export type ScheduleRecurrenceFrequency = 'none' | 'weekly' | 'monthly' | 'yearly';
+
+function addRecurrenceInterval(date: Date, frequency: ScheduleRecurrenceFrequency, amount: number) {
+  if (frequency === 'weekly') return addWeeks(date, amount);
+  if (frequency === 'monthly') return addMonths(date, amount);
+  if (frequency === 'yearly') return addYears(date, amount);
+  return date;
+}
+
+function buildRecurringOccurrences(params: {
+  baseEvent: {
+    organization_id: string;
+    user_id: string;
+    lead_id: string | null;
+    property_id: string | null;
+    title: string;
+    description: string | null;
+    event_type: string | null;
+    start_time: string;
+    end_time: string;
+    is_all_day: boolean | null;
+    location: string | null;
+  };
+  parentId: string;
+  frequency: ScheduleRecurrenceFrequency;
+  until?: string | null;
+  count?: number | null;
+}) {
+  if (params.frequency === 'none') return [];
+
+  const start = new Date(params.baseEvent.start_time);
+  const end = new Date(params.baseEvent.end_time);
+  const until = params.until ? new Date(params.until) : null;
+  const requestedCount = params.count && params.count > 1 ? params.count : until ? 52 : 1;
+  const maxOccurrences = Math.min(requestedCount, 52);
+  const rows = [];
+
+  for (let index = 1; index < maxOccurrences; index += 1) {
+    const nextStart = addRecurrenceInterval(start, params.frequency, index);
+    if (until && nextStart > until) break;
+
+    const nextEnd = addRecurrenceInterval(end, params.frequency, index);
+    rows.push({
+      organization_id: params.baseEvent.organization_id,
+      user_id: params.baseEvent.user_id,
+      lead_id: params.baseEvent.lead_id,
+      property_id: params.baseEvent.property_id,
+      title: params.baseEvent.title,
+      description: params.baseEvent.description,
+      event_type: params.baseEvent.event_type || 'task',
+      start_time: nextStart.toISOString(),
+      end_time: nextEnd.toISOString(),
+      is_all_day: params.baseEvent.is_all_day || false,
+      location: params.baseEvent.location,
+      recurrence_parent_id: params.parentId,
+      recurrence_rule: params.frequency,
+      recurrence_until: params.until || null,
+      recurrence_count: maxOccurrences,
+    });
+  }
+
+  return rows;
 }
 
 function invalidateScheduleCaches(queryClient: ReturnType<typeof useQueryClient>, leadId?: string | null) {
@@ -157,7 +225,7 @@ export function useScheduleEvents(options: UseScheduleEventsOptions = {}) {
         .select(`
           id, organization_id, user_id, lead_id, property_id, title, 
           description, event_type, start_time, end_time, is_all_day, status,
-          completed_by, completed_at,
+          completed_by, completed_at, recurrence_parent_id, recurrence_rule, recurrence_until, recurrence_count,
           user:users!schedule_events_user_id_fkey(id, name, avatar_url),
           lead:leads(id, name, phone),
           property:properties(id, title, code),
@@ -212,6 +280,9 @@ export function useCreateScheduleEvent() {
       lead_id?: string;
       property_id?: string | null;
       location?: string;
+      recurrence_rule?: ScheduleRecurrenceFrequency;
+      recurrence_until?: string | null;
+      recurrence_count?: number | null;
     }) => {
       if (!profile?.organization_id) throw new Error('Organização não encontrada');
 
@@ -229,11 +300,42 @@ export function useCreateScheduleEvent() {
           end_time: event.end_time,
           is_all_day: event.is_all_day || false,
           location: event.location || null,
+          recurrence_rule: event.recurrence_rule && event.recurrence_rule !== 'none' ? event.recurrence_rule : null,
+          recurrence_until: event.recurrence_rule && event.recurrence_rule !== 'none' ? event.recurrence_until || null : null,
+          recurrence_count: event.recurrence_rule && event.recurrence_rule !== 'none' ? event.recurrence_count || null : null,
         })
         .select()
         .single();
 
       if (error) throw error;
+
+      const recurringRows = buildRecurringOccurrences({
+        baseEvent: {
+          organization_id: data.organization_id,
+          user_id: data.user_id,
+          lead_id: data.lead_id,
+          property_id: data.property_id,
+          title: data.title,
+          description: data.description,
+          event_type: data.event_type,
+          start_time: data.start_time,
+          end_time: data.end_time,
+          is_all_day: data.is_all_day,
+          location: data.location,
+        },
+        parentId: data.id,
+        frequency: event.recurrence_rule || 'none',
+        until: event.recurrence_until,
+        count: event.recurrence_count,
+      });
+
+      if (recurringRows.length > 0) {
+        const { error: recurrenceError } = await supabase
+          .from('schedule_events')
+          .insert(recurringRows as any);
+
+        if (recurrenceError) throw recurrenceError;
+      }
       
       // Log to timeline if lead is present - non-blocking fire-and-forget
       if (data.lead_id && profile) {
@@ -294,7 +396,8 @@ export function useCreateScheduleEvent() {
     },
     onSuccess: (data) => {
       invalidateScheduleCaches(queryClient, data?.lead_id);
-      toast.success('Atividade criada com sucesso!');
+      const extra = data?.recurrence_count && data.recurrence_count > 1 ? ` (${data.recurrence_count} repetições)` : '';
+      toast.success(`Atividade criada com sucesso!${extra}`);
     },
     onError: (error: Error) => {
       console.error('Error creating schedule event:', error);

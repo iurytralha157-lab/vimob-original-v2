@@ -5,6 +5,7 @@ import {
   Phone, Mail, Calendar as CalendarIcon, CheckSquare, MessageSquare,
   MapPin, X, User, Search, Clock, Plus, Send, Building2, Users,
   CheckCircle, CheckCircle2, Trash2, Lock, Edit2, Video, ClipboardList, Eye,
+  Repeat2,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,13 @@ const durationOptions = [
   { value: 120, label: "2 horas" },
 ];
 
+const recurrenceOptions = [
+  { value: "none", label: "Não repetir" },
+  { value: "weekly", label: "Semanal" },
+  { value: "monthly", label: "Mensal" },
+  { value: "yearly", label: "Anual" },
+] as const;
+
 interface EventSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -84,6 +92,10 @@ export function EventSheet({
   const [time, setTime] = useState("");
   const [duration, setDuration] = useState(30);
   const durationTouched = useRef(false);
+  const [recurrenceRule, setRecurrenceRule] = useState<"none" | "weekly" | "monthly" | "yearly">("none");
+  const [recurrenceMode, setRecurrenceMode] = useState<"count" | "until">("count");
+  const [recurrenceCount, setRecurrenceCount] = useState(4);
+  const [recurrenceUntil, setRecurrenceUntil] = useState<Date | undefined>(undefined);
 
   // Lead selector
   const [leadSearch, setLeadSearch] = useState("");
@@ -123,6 +135,10 @@ export function EventSheet({
           ? `${(event as any).property.code ? (event as any).property.code + ' · ' : ''}${(event as any).property.title || 'Imóvel'}`
           : null
       );
+      setRecurrenceRule(((event as any).recurrence_rule as any) || "none");
+      setRecurrenceMode((event as any).recurrence_until ? "until" : "count");
+      setRecurrenceCount((event as any).recurrence_count || 4);
+      setRecurrenceUntil((event as any).recurrence_until ? new Date((event as any).recurrence_until) : undefined);
       if (event.start_time && event.end_time) {
         const d = differenceInMinutes(new Date(event.end_time), new Date(event.start_time));
         setDuration(d > 0 ? d : 30);
@@ -139,6 +155,10 @@ export function EventSheet({
       setSelectedPropertyId(null);
       setSelectedPropertyLabel(null);
       setDuration(30);
+      setRecurrenceRule("none");
+      setRecurrenceMode("count");
+      setRecurrenceCount(4);
+      setRecurrenceUntil(undefined);
       durationTouched.current = false;
     }
     setPendingAssigneeIds([]);
@@ -201,6 +221,9 @@ export function EventSheet({
       user_id: primaryUserId,
       lead_id: selectedLeadId,
       property_id: selectedType === "visit" ? selectedPropertyId : null,
+      recurrence_rule: !event ? recurrenceRule : undefined,
+      recurrence_count: !event && recurrenceRule !== "none" && recurrenceMode === "count" ? recurrenceCount : undefined,
+      recurrence_until: !event && recurrenceRule !== "none" && recurrenceMode === "until" && recurrenceUntil ? recurrenceUntil.toISOString() : undefined,
     };
 
     if (event) {
@@ -561,6 +584,84 @@ export function EventSheet({
               )}
             </Field>
           </div>
+
+          {/* Repetição */}
+          <Field label="Repetição" icon={Repeat2}>
+            {isExisting ? (
+              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-muted-foreground">
+                {recurrenceRule === "none"
+                  ? "Atividade sem repetição"
+                  : `Atividade recorrente (${recurrenceOptions.find((opt) => opt.value === recurrenceRule)?.label || recurrenceRule})`}
+              </div>
+            ) : (
+              <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                  <Select value={recurrenceRule} onValueChange={(value: any) => setRecurrenceRule(value)}>
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {recurrenceOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {recurrenceRule !== "none" && (
+                    <Select value={recurrenceMode} onValueChange={(value: any) => setRecurrenceMode(value)}>
+                      <SelectTrigger className="h-9 min-w-[140px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="count">Por quantidade</SelectItem>
+                        <SelectItem value="until">Até uma data</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                {recurrenceRule !== "none" && (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {recurrenceMode === "count" ? (
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground">Quantidade de ocorrências</Label>
+                        <Input
+                          type="number"
+                          min={2}
+                          max={52}
+                          value={recurrenceCount}
+                          onChange={(event) => setRecurrenceCount(Math.max(2, Math.min(52, Number(event.target.value) || 2)))}
+                          className="h-9 text-xs"
+                        />
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground">Repetir até</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-9 w-full justify-start text-xs font-normal">
+                              <CalendarIcon className="mr-1 h-3 w-3" />
+                              {recurrenceUntil ? format(recurrenceUntil, "dd/MM/yyyy") : "Selecionar data"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar mode="single" selected={recurrenceUntil} onSelect={setRecurrenceUntil} locale={ptBR} />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    )}
+                    <div className="flex items-end">
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                        Mantém o mesmo horário, lead, imóvel e responsável.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </Field>
 
           {/* Descrição */}
           <Field label="Descrição">

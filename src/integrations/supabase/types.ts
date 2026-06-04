@@ -6592,6 +6592,10 @@ export type Database = {
           location: string | null
           organization_id: string
           property_id: string | null
+          recurrence_count: number | null
+          recurrence_parent_id: string | null
+          recurrence_rule: string | null
+          recurrence_until: string | null
           reminder_minutes: number | null
           start_time: string
           status: string | null
@@ -6613,6 +6617,10 @@ export type Database = {
           location?: string | null
           organization_id: string
           property_id?: string | null
+          recurrence_count?: number | null
+          recurrence_parent_id?: string | null
+          recurrence_rule?: string | null
+          recurrence_until?: string | null
           reminder_minutes?: number | null
           start_time: string
           status?: string | null
@@ -6634,6 +6642,10 @@ export type Database = {
           location?: string | null
           organization_id?: string
           property_id?: string | null
+          recurrence_count?: number | null
+          recurrence_parent_id?: string | null
+          recurrence_rule?: string | null
+          recurrence_until?: string | null
           reminder_minutes?: number | null
           start_time?: string
           status?: string | null
