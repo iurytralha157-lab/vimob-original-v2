@@ -468,21 +468,21 @@ export function WhatsAppTab() {
                       <Users className="w-3.5 h-3.5" />
                       Usuários
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5 px-3 text-xs"
+                      onClick={() => handleVerifyConnection(session)}
+                      disabled={verifyingSessionId === session.id}
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${verifyingSessionId === session.id ? "animate-spin" : ""}`} />
+                      Verificar
+                    </Button>
                     {session.status !== "connected" ? (
                       <>
                         <Button variant="outline" size="sm" className="h-8 gap-1.5 px-3 text-xs" onClick={() => handleOpenQRDialog(session)}>
                           <QrCode className="w-3.5 h-3.5" />
                           QR Code
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => handleVerifyConnection(session)}
-                          disabled={verifyingSessionId === session.id}
-                          aria-label="Verificar conexão"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 ${verifyingSessionId === session.id ? "animate-spin" : ""}`} />
                         </Button>
                         <Button
                           variant="destructive"
