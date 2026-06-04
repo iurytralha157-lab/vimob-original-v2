@@ -569,32 +569,34 @@ export function WhatsAppTab({ embedded = false }: WhatsAppTabProps = {}) {
 
         {/* QR Code Dialog */}
         <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>
-          <DialogContent className="w-[90%] sm:max-w-md sm:w-full rounded-lg">
+          <DialogContent className="w-[92vw] max-w-[92vw] rounded-lg md:max-w-3xl">
             <DialogHeader>
               <DialogTitle>Escanear QR Code</DialogTitle>
               <DialogDescription>
                 Abra o WhatsApp no seu celular e escaneie o código abaixo
               </DialogDescription>
             </DialogHeader>
-            <div className="flex flex-col items-center py-6">
-              {isRefreshingQr || getQRCode.isPending ?
-              <div className="w-64 h-64 flex items-center justify-center bg-muted rounded-lg">
-                  <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                </div> :
-              qrCode ?
-              <img
-                src={qrCode.startsWith("data:") ? qrCode : `data:image/png;base64,${qrCode}`}
-                alt="QR Code"
-                className="w-64 h-64 rounded-lg" /> :
+            <div className="grid gap-4 py-6 md:grid-cols-[minmax(240px,280px)_1fr] md:items-center">
+              <div className="flex justify-center">
+                {isRefreshingQr || getQRCode.isPending ?
+                <div className="flex h-64 w-64 items-center justify-center rounded-lg bg-muted">
+                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                  </div> :
+                qrCode ?
+                <img
+                  src={qrCode.startsWith("data:") ? qrCode : `data:image/png;base64,${qrCode}`}
+                  alt="QR Code"
+                  className="h-64 w-64 rounded-lg" /> :
 
 
-              <div className="w-64 h-64 flex items-center justify-center bg-muted rounded-lg">
-                  <p className="text-muted-foreground text-center px-4">
-                    Não foi possível gerar o QR Code
-                  </p>
-                </div>
-              }
-              <div className="mt-4 w-full rounded-lg border border-border bg-muted/70 p-4 text-left">
+                <div className="flex h-64 w-64 items-center justify-center rounded-lg bg-muted">
+                    <p className="text-muted-foreground text-center px-4">
+                      Não foi possível gerar o QR Code
+                    </p>
+                  </div>
+                }
+              </div>
+              <div className="w-full rounded-lg border border-border bg-muted/70 p-4 text-left">
                 <p className="mb-3 text-sm font-semibold text-foreground">Como conectar:</p>
                 <ol className="list-decimal space-y-1 pl-4 text-sm leading-relaxed text-muted-foreground">
                   <li>Abra o WhatsApp no seu celular</li>
@@ -604,7 +606,7 @@ export function WhatsAppTab({ embedded = false }: WhatsAppTabProps = {}) {
                   <li>Aponte seu celular para esta tela para capturar o código</li>
                 </ol>
               </div>
-              <div className="flex gap-2 mt-4">
+              <div className="flex flex-col gap-2 sm:flex-row md:col-span-2 md:justify-center">
                 <Button
                   variant="outline"
                   onClick={() => selectedSession && refreshQRCode(selectedSession)}
