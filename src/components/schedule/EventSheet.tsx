@@ -4,7 +4,7 @@ import { ptBR } from "date-fns/locale";
 import {
   Phone, Mail, Calendar as CalendarIcon, MessageSquare, MapPin, X, User,
   Search, Clock, Plus, Send, Building2, Users, CheckCircle, Trash2, Lock,
-  Video, ClipboardList, Eye, Repeat2,
+  Video, ClipboardList, Eye, Repeat2, Menu, Briefcase, Paperclip,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -89,6 +89,7 @@ export function EventSheet({
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [time, setTime] = useState("");
   const [duration, setDuration] = useState(30);
+  const [isAllDay, setIsAllDay] = useState(false);
   const durationTouched = useRef(false);
   const [recurrenceRule, setRecurrenceRule] = useState<"none" | "weekly" | "monthly" | "yearly">("none");
   const [recurrenceMode, setRecurrenceMode] = useState<"count" | "until">("count");
@@ -121,6 +122,7 @@ export function EventSheet({
       setPrimaryUserId(event.user_id || defaultUserId || "");
       setDate(event.start_time ? new Date(event.start_time) : getBrasiliaTime());
       setTime(event.start_time ? format(new Date(event.start_time), "HH:mm") : getCurrentTimeForInput());
+      setIsAllDay(Boolean(event.is_all_day));
       setSelectedLeadId(event.lead_id || null);
       setSelectedLeadName(event.lead?.name || null);
       setSelectedPropertyId((event as any).property_id || null);
@@ -145,6 +147,7 @@ export function EventSheet({
       setPrimaryUserId(defaultUserId || "");
       setDate(defaultDate || getBrasiliaTime());
       setTime(defaultDate ? format(defaultDate, "HH:mm") : getCurrentTimeForInput());
+      setIsAllDay(false);
       setSelectedLeadId(leadId || null);
       setSelectedLeadName(leadName || null);
       setSelectedPropertyId(null);
@@ -213,7 +216,7 @@ export function EventSheet({
       event_type: selectedType,
       start_time: start.toISOString(),
       end_time: end.toISOString(),
-      is_all_day: false,
+      is_all_day: isAllDay,
       user_id: primaryUserId,
       lead_id: selectedLeadId,
       property_id: selectedType === "visit" ? selectedPropertyId : null,
@@ -259,162 +262,177 @@ export function EventSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full p-0 flex flex-col bg-card border-l border-border shadow-2xl sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:h-[80vh] sm:max-h-[80vh] sm:w-[min(900px,80vw)] sm:max-w-none sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border"
+        className="flex max-h-[80vh] w-[calc(100vw-24px)] max-w-[470px] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#202124] p-0 text-white shadow-2xl sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{isExisting ? "Detalhes da atividade" : "Nova atividade"}</SheetTitle>
         </SheetHeader>
 
-        <div className="shrink-0 border-b border-white/10 bg-gradient-to-br from-muted/35 via-card to-background px-5 py-4 sm:px-6 sm:py-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider shadow-sm"
-              style={{ background: `${typeConf.color}20`, color: typeConf.color, border: `1px solid ${typeConf.color}40` }}
-            >
-              <TypeIcon size={11} />
-              {typeConf.label}
-            </span>
-            {isExisting && (
-              <span
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider shadow-sm",
-                  isCompleted ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" : "bg-amber-500/15 text-amber-400 border border-amber-500/30",
-                )}
-              >
-                {isCompleted ? "Concluída" : (event?.status === "confirmed" ? "Confirmado" : "Pendente")}
-              </span>
+        <div className="flex h-12 shrink-0 items-center justify-between px-5 text-zinc-400">
+          <Menu size={18} />
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="rounded-full p-1.5 text-muted-foreground transition hover:bg-white/10 hover:text-white"
+            aria-label="Fechar"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 pb-3">
+          <div className="pl-10">
+            {locked ? (
+              <h2 className="border-b border-primary/70 pb-2 text-[22px] font-normal leading-tight">{title || "Sem título"}</h2>
+            ) : (
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Adicionar título"
+                className="h-11 rounded-none border-0 border-b border-primary/70 bg-transparent px-0 text-[22px] font-normal text-white shadow-none focus-visible:ring-0 placeholder:text-zinc-300"
+              />
             )}
           </div>
 
-          {locked ? (
-            <h2 className="text-2xl font-bold leading-tight text-foreground">{title || "Sem título"}</h2>
-          ) : (
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Adicionar título"
-              className="h-auto border-0 border-b border-primary/60 rounded-none bg-transparent px-0 py-2 text-2xl font-bold focus-visible:ring-0 placeholder:text-muted-foreground/50"
-            />
-          )}
-          {locked && (
-            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground font-medium">
-              <Lock size={11} className="text-muted-foreground/70" /> Atividade concluída, somente leitura
-            </div>
-          )}
-        </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2 pl-10">
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => selectedType === "task" && setSelectedType("meeting")}
+              className={cn(
+                "h-9 rounded-lg px-3 text-sm font-semibold transition",
+                selectedType !== "task" ? "bg-sky-700 text-white" : "bg-white/5 text-zinc-300 hover:bg-white/10",
+              )}
+            >
+              Evento
+            </button>
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => setSelectedType("task")}
+              className={cn(
+                "h-9 rounded-lg px-3 text-sm font-semibold transition",
+                selectedType === "task" ? "bg-sky-700 text-white" : "bg-white/5 text-zinc-300 hover:bg-white/10",
+              )}
+            >
+              Tarefa
+            </button>
+            <button
+              type="button"
+              disabled
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-white/5 px-3 text-sm font-semibold text-zinc-300 opacity-80"
+            >
+              Agendamento de horários
+              <span className="rounded-full bg-blue-300/20 px-1.5 py-0.5 text-[10px] font-bold text-blue-200">Novo</span>
+            </button>
 
-        <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5 lg:grid-cols-2">
-          <Field label="Tipo de atividade" icon={TypeIcon}>
-            {locked ? (
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: typeConf.color }} />
-                {typeConf.label}
-              </div>
-            ) : (
-              <Select value={selectedType} onValueChange={(value) => setSelectedType(value as EventType)}>
-                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+            {!locked && (
+              <Select value={selectedType} onValueChange={(value: EventType) => setSelectedType(value)}>
+                <SelectTrigger className="h-9 w-[150px] border-0 bg-white/10 text-sm text-white">
+                  <TypeIcon className="mr-2 h-4 w-4" />
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  {eventTypes.map(({ type, label, icon: Icon, color }) => (
-                    <SelectItem key={type} value={type}>
-                      <span className="inline-flex items-center gap-2">
-                        <Icon size={14} style={{ color }} />
-                        {label}
-                      </span>
-                    </SelectItem>
+                  {eventTypes.map(({ type, label }) => (
+                    <SelectItem key={type} value={type}>{label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             )}
-          </Field>
+          </div>
 
-          <Field label="Local" icon={MapPin}>
+          {locked && (
+            <AgendaRow icon={<Lock size={18} />}>
+              <span className="text-sm text-zinc-400">Atividade concluída, somente leitura</span>
+            </AgendaRow>
+          )}
+
+          <AgendaRow icon={<Clock size={19} />}>
             {locked ? (
-              <p className="text-sm text-muted-foreground">{location || "Sem local"}</p>
+              <div className="text-sm text-zinc-200">
+                {date ? format(date, "EEEE, dd 'de' MMMM", { locale: ptBR }) : "-"} · {time} - {endTimePreview || "-"}
+              </div>
             ) : (
-              <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Adicionar local..." className="h-10 text-sm" />
-            )}
-          </Field>
-
-          <Field label="Data, horário e repetição" icon={Clock} className="lg:col-span-2">
-            <div className="space-y-3">
-              {locked ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
-                  <CalendarIcon size={14} className="text-muted-foreground" />
-                  <span>{date ? format(date, "EEEE, dd 'de' MMMM", { locale: ptBR }) : "-"}</span>
-                  <span className="text-muted-foreground">•</span>
-                  <span>{time} - {endTimePreview || "-"}</span>
-                  <span className="text-muted-foreground">•</span>
-                  <span>{recurrenceOptions.find((opt) => opt.value === recurrenceRule)?.label || "Não se repete"}</span>
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_78px_14px_78px]">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" className="h-10 justify-start rounded-md bg-white/10 px-3 text-sm font-medium text-zinc-100 hover:bg-white/15 hover:text-white">
+                        {date ? format(date, "EEEE, dd 'de' MMMM", { locale: ptBR }) : "Selecionar data"}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar mode="single" selected={date} onSelect={setDate} locale={ptBR} />
+                    </PopoverContent>
+                  </Popover>
+                  <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="h-10 border-0 bg-white/10 text-sm text-white" disabled={isAllDay} />
+                  <span className="hidden text-center text-zinc-400 sm:block">-</span>
+                  <div className="flex h-10 items-center rounded-md bg-white/10 px-3 text-sm text-zinc-100">{endTimePreview || "--:--"}</div>
                 </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-[1.4fr_120px_24px_120px_130px] md:items-center">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-10 justify-start text-sm font-normal">
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {date ? format(date, "EEEE, dd 'de' MMMM", { locale: ptBR }) : "Selecionar data"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={date} onSelect={setDate} locale={ptBR} />
-                      </PopoverContent>
-                    </Popover>
-                    <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="h-10 text-sm" />
-                    <span className="hidden text-center text-muted-foreground md:block">-</span>
-                    <div className="flex h-10 items-center rounded-md border border-input bg-background px-3 text-sm">
-                      {endTimePreview || "--:--"}
-                    </div>
-                    <Select value={String(duration)} onValueChange={(value) => { setDuration(Number(value)); durationTouched.current = true; }}>
-                      <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {durationOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={String(opt.value)}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
 
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-[220px_180px_1fr] md:items-center">
-                    <Select value={recurrenceRule} onValueChange={(value: any) => setRecurrenceRule(value)}>
-                      <SelectTrigger className="h-10 text-sm">
-                        <Repeat2 className="mr-2 h-4 w-4 text-muted-foreground" />
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="inline-flex items-center gap-2 text-sm text-zinc-200">
+                    <input
+                      type="checkbox"
+                      checked={isAllDay}
+                      onChange={(event) => setIsAllDay(event.target.checked)}
+                      className="h-5 w-5 rounded-sm border-2 border-zinc-400 bg-transparent accent-blue-300"
+                    />
+                    Dia inteiro
+                  </label>
+                  <span className="text-sm font-medium text-blue-300">Fuso horário</span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Select value={recurrenceRule} onValueChange={(value: any) => setRecurrenceRule(value)}>
+                    <SelectTrigger className="h-10 w-[172px] border-0 bg-white/10 text-sm text-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {recurrenceOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={String(duration)} onValueChange={(value) => { setDuration(Number(value)); durationTouched.current = true; }}>
+                    <SelectTrigger className="h-10 w-[126px] border-0 bg-white/10 text-sm text-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {durationOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={String(opt.value)}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {recurrenceRule !== "none" && (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Select value={recurrenceMode} onValueChange={(value: any) => setRecurrenceMode(value)}>
+                      <SelectTrigger className="h-10 border-0 bg-white/10 text-sm text-white">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {recurrenceOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
+                        <SelectItem value="count">Por quantidade</SelectItem>
+                        <SelectItem value="until">Até uma data</SelectItem>
                       </SelectContent>
                     </Select>
 
-                    {recurrenceRule !== "none" && (
-                      <Select value={recurrenceMode} onValueChange={(value: any) => setRecurrenceMode(value)}>
-                        <SelectTrigger className="h-10 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="count">Por quantidade</SelectItem>
-                          <SelectItem value="until">Até uma data</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-
-                    {recurrenceRule !== "none" && recurrenceMode === "count" && (
+                    {recurrenceMode === "count" ? (
                       <Input
                         type="number"
                         min={2}
                         max={52}
                         value={recurrenceCount}
                         onChange={(event) => setRecurrenceCount(Math.max(2, Math.min(52, Number(event.target.value) || 2)))}
-                        className="h-10 text-sm"
+                        className="h-10 border-0 bg-white/10 text-sm text-white"
                         aria-label="Quantidade de ocorrências"
                       />
-                    )}
-
-                    {recurrenceRule !== "none" && recurrenceMode === "until" && (
+                    ) : (
                       <Popover>
                         <PopoverTrigger asChild>
-                          <Button variant="outline" size="sm" className="h-10 justify-start text-sm font-normal">
-                            <CalendarIcon className="mr-2 h-4 w-4" />
+                          <Button variant="ghost" className="h-10 justify-start bg-white/10 text-sm text-white hover:bg-white/15">
                             {recurrenceUntil ? format(recurrenceUntil, "dd/MM/yyyy") : "Repetir até"}
                           </Button>
                         </PopoverTrigger>
@@ -424,49 +442,47 @@ export function EventSheet({
                       </Popover>
                     )}
                   </div>
-                </>
-              )}
-            </div>
-          </Field>
+                )}
+              </div>
+            )}
+          </AgendaRow>
 
-          <Field label="Usuários responsáveis" icon={Users}>
-            <div className="flex items-center gap-2 flex-wrap">
-              {allAssignees.map((a) => (
-                <div key={a.id} className="group relative">
-                  <Avatar
-                    className={cn("h-8 w-8 ring-2 ring-background transition-transform hover:scale-105", a.primary ? "ring-primary/20" : "ring-background")}
-                    title={a.name}
-                  >
-                    <AvatarImage src={a.avatar_url || undefined} />
-                    <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-bold">
-                      {a.name.split(" ").slice(0, 2).map((p) => p[0]).join("").toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  {!locked && !a.primary && (
-                    <button
-                      onClick={() => {
-                        if (a.pending) setPendingAssigneeIds((prev) => prev.filter((id) => id !== a.id));
-                        else removeAssignee(a.id);
-                      }}
-                      className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity border border-background"
-                      aria-label="Remover responsável"
-                    >
-                      <X size={8} strokeWidth={3} />
-                    </button>
-                  )}
-                </div>
-              ))}
+          <AgendaRow icon={<Users size={19} />}>
+            <div className="flex min-h-10 items-center gap-2">
+              {allAssignees.length > 0 ? (
+                allAssignees.map((a) => (
+                  <div key={a.id} className="group relative">
+                    <Avatar className="h-8 w-8" title={a.name}>
+                      <AvatarImage src={a.avatar_url || undefined} />
+                      <AvatarFallback className="bg-primary/20 text-[10px] font-bold text-primary">
+                        {a.name.split(" ").slice(0, 2).map((p) => p[0]).join("").toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    {!locked && !a.primary && (
+                      <button
+                        onClick={() => {
+                          if (a.pending) setPendingAssigneeIds((prev) => prev.filter((id) => id !== a.id));
+                          else removeAssignee(a.id);
+                        }}
+                        className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-[#202124] bg-destructive text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                        aria-label="Remover responsável"
+                      >
+                        <X size={8} strokeWidth={3} />
+                      </button>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <span className="text-sm text-zinc-400">Adicionar convidados</span>
+              )}
               {!locked && availableUsers.length > 0 && (
                 <Popover open={showAssigneePicker} onOpenChange={setShowAssigneePicker}>
                   <PopoverTrigger asChild>
-                    <button
-                      className="h-8 w-8 rounded-full border border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary flex items-center justify-center transition-colors bg-muted/20"
-                      type="button"
-                    >
+                    <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-zinc-500 text-zinc-300 hover:border-primary hover:text-primary">
                       <Plus size={14} />
                     </button>
                   </PopoverTrigger>
-                  <PopoverContent className="p-0 w-[260px]" align="start">
+                  <PopoverContent className="w-[260px] p-0" align="start">
                     <Command>
                       <CommandInput placeholder="Adicionar responsável..." />
                       <CommandList>
@@ -482,11 +498,9 @@ export function EventSheet({
                                 setShowAssigneePicker(false);
                               }}
                             >
-                              <Avatar className="h-5 w-5 mr-2">
+                              <Avatar className="mr-2 h-5 w-5">
                                 <AvatarImage src={u.avatar_url || undefined} />
-                                <AvatarFallback className="text-[10px]">
-                                  {u.name.split(" ").slice(0, 2).map((p) => p[0]).join("")}
-                                </AvatarFallback>
+                                <AvatarFallback className="text-[10px]">{u.name.split(" ").slice(0, 2).map((p) => p[0]).join("")}</AvatarFallback>
                               </Avatar>
                               <span className="text-sm">{u.name}</span>
                             </CommandItem>
@@ -500,24 +514,26 @@ export function EventSheet({
             </div>
             {!locked && !primaryUserId && (
               <Select value={primaryUserId} onValueChange={setPrimaryUserId}>
-                <SelectTrigger className="mt-2 h-9 text-xs"><SelectValue placeholder="Selecione o responsável principal..." /></SelectTrigger>
+                <SelectTrigger className="mt-2 h-10 border-0 bg-white/10 text-sm text-white">
+                  <SelectValue placeholder="Responsável principal..." />
+                </SelectTrigger>
                 <SelectContent>{users.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
               </Select>
             )}
-          </Field>
+          </AgendaRow>
 
-          <Field label="Lead / cliente" icon={User}>
+          <AgendaRow icon={<User size={19} />}>
             {selectedLeadId ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10">
+              <div className="flex items-center justify-between gap-2">
                 {isExisting ? (
-                  <Link to={`/crm/pipelines?lead=${selectedLeadId}`} className="text-sm font-medium hover:text-primary transition-colors truncate">
+                  <Link to={`/crm/pipelines?lead=${selectedLeadId}`} className="truncate text-sm font-medium text-blue-300 hover:text-blue-200">
                     {selectedLeadName || "Lead vinculado"}
                   </Link>
                 ) : (
-                  <span className="text-sm font-medium truncate">{selectedLeadName}</span>
+                  <span className="truncate text-sm text-zinc-100">{selectedLeadName}</span>
                 )}
                 {!locked && (
-                  <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { setSelectedLeadId(null); setSelectedLeadName(null); }}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => { setSelectedLeadId(null); setSelectedLeadName(null); }}>
                     <X className="h-3 w-3" />
                   </Button>
                 )}
@@ -525,11 +541,9 @@ export function EventSheet({
             ) : !locked ? (
               <Popover open={showLeadSelector} onOpenChange={setShowLeadSelector}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="w-full justify-start text-muted-foreground border-dashed">
-                    <Search className="mr-2 h-3 w-3" /> Vincular um lead...
-                  </Button>
+                  <button type="button" className="h-10 text-left text-sm text-zinc-300 hover:text-white">Lead/cliente</button>
                 </PopoverTrigger>
-                <PopoverContent className="p-0 w-[360px]" align="start">
+                <PopoverContent className="w-[360px] p-0" align="start">
                   <Command shouldFilter={false}>
                     <CommandInput placeholder="Buscar por nome, telefone ou e-mail..." value={leadSearch} onValueChange={setLeadSearch} />
                     <CommandList>
@@ -546,12 +560,10 @@ export function EventSheet({
                               setLeadSearch("");
                             }}
                           >
-                            <User className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-sm font-medium truncate">{l.name}</span>
-                              <span className="text-[10px] text-muted-foreground truncate">
-                                {[l.phone, l.email].filter(Boolean).join(" · ") || "Sem contato"}
-                              </span>
+                            <User className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <div className="flex min-w-0 flex-col">
+                              <span className="truncate text-sm font-medium">{l.name}</span>
+                              <span className="truncate text-[10px] text-muted-foreground">{[l.phone, l.email].filter(Boolean).join(" · ") || "Sem contato"}</span>
                             </div>
                           </CommandItem>
                         ))}
@@ -561,18 +573,26 @@ export function EventSheet({
                 </PopoverContent>
               </Popover>
             ) : (
-              <span className="text-sm text-muted-foreground">Sem lead</span>
+              <span className="text-sm text-zinc-400">Sem lead</span>
             )}
-          </Field>
+          </AgendaRow>
 
-          <Field label="Imóvel" icon={Building2}>
+          <AgendaRow icon={<MapPin size={19} />}>
+            {locked ? (
+              <span className="text-sm text-zinc-300">{location || "Sem local"}</span>
+            ) : (
+              <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Adicionar local" className="h-10 border-0 bg-transparent px-0 text-sm text-white shadow-none focus-visible:ring-0 placeholder:text-zinc-400" />
+            )}
+          </AgendaRow>
+
+          <AgendaRow icon={<Building2 size={19} />}>
             {selectedPropertyId ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10">
-                <Link to={`/imoveis/${selectedPropertyId}`} className="text-sm font-medium hover:text-primary transition-colors truncate">
+              <div className="flex items-center justify-between gap-2">
+                <Link to={`/imoveis/${selectedPropertyId}`} className="truncate text-sm font-medium text-blue-300 hover:text-blue-200">
                   {selectedPropertyLabel || "Imóvel selecionado"}
                 </Link>
                 {!locked && (
-                  <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { setSelectedPropertyId(null); setSelectedPropertyLabel(null); }}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => { setSelectedPropertyId(null); setSelectedPropertyLabel(null); }}>
                     <X className="h-3 w-3" />
                   </Button>
                 )}
@@ -585,75 +605,88 @@ export function EventSheet({
                   setSelectedPropertyId(p.id);
                   setSelectedPropertyLabel(`${p.code ? `${p.code} · ` : ""}${p.title || "Imóvel"}`);
                 }}
-                trigger={
-                  <Button variant="outline" size="sm" className="w-full justify-start text-muted-foreground border-dashed">
-                    <Search className="mr-2 h-3 w-3" /> Vincular um imóvel...
-                  </Button>
-                }
+                trigger={<button type="button" className="h-10 text-left text-sm text-zinc-300 hover:text-white">Imóvel</button>}
               />
             ) : (
-              <span className="text-sm text-muted-foreground">Sem imóvel</span>
+              <span className="text-sm text-zinc-400">Sem imóvel</span>
             )}
-          </Field>
+          </AgendaRow>
 
-          <Field label="Descrição" className="lg:col-span-2">
+          <AgendaRow icon={<MessageSquare size={19} />}>
             {locked ? (
-              <p className="text-sm text-muted-foreground italic">{description || "Sem descrição"}</p>
+              <p className="text-sm text-zinc-300">{description || "Sem descrição"}</p>
             ) : (
               <Textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Adicionar descrição..."
-                rows={3}
-                className="text-sm resize-none"
+                placeholder="Adicionar uma descrição"
+                rows={2}
+                className="min-h-[40px] resize-none border-0 bg-transparent px-0 text-sm text-white shadow-none focus-visible:ring-0 placeholder:text-zinc-400"
               />
             )}
-          </Field>
+          </AgendaRow>
+
+          <AgendaRow icon={<Paperclip size={19} />}>
+            <span className="text-sm font-medium text-blue-300">Adicionar um anexo</span>
+          </AgendaRow>
+
+          <AgendaRow icon={<Briefcase size={19} />}>
+            <div className="flex flex-wrap gap-2">
+              <Select value={primaryUserId} onValueChange={setPrimaryUserId} disabled={locked}>
+                <SelectTrigger className="h-10 w-[150px] border-0 bg-white/10 text-sm text-white">
+                  <SelectValue placeholder="Responsável" />
+                </SelectTrigger>
+                <SelectContent>{users.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+              </Select>
+              <button
+                type="button"
+                className="flex h-10 items-center gap-2 rounded-md bg-white/10 px-4 text-sm text-white"
+                disabled={locked}
+              >
+                <span className="h-4 w-4 rounded-full" style={{ background: typeConf.color }} />
+              </button>
+            </div>
+          </AgendaRow>
 
           {isExisting && (
-            <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3 lg:col-span-2">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                <MessageSquare size={11} /> Comentários
-              </div>
-              <div className="flex flex-col gap-2.5 mb-2.5">
-                {comments.length === 0 && <p className="text-xs text-muted-foreground/70 text-center py-2">Nenhum comentário</p>}
+            <AgendaRow icon={<MessageSquare size={19} />}>
+              <div className="space-y-3">
+                {comments.length === 0 && <p className="text-sm text-zinc-400">Nenhum comentário</p>}
                 {comments.map((c) => (
                   <div key={c.id} className="flex gap-2">
                     <Avatar className="h-6 w-6 shrink-0">
                       <AvatarImage src={c.user?.avatar_url || undefined} />
-                      <AvatarFallback className="text-[10px]">
-                        {(c.user?.name || "U").split(" ").slice(0, 2).map((p) => p[0]).join("")}
-                      </AvatarFallback>
+                      <AvatarFallback className="text-[10px]">{(c.user?.name || "U").split(" ").slice(0, 2).map((p) => p[0]).join("")}</AvatarFallback>
                     </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[10px] text-muted-foreground mb-0.5">
-                        <span className="font-medium text-foreground">{c.user?.name || "Usuário"}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-0.5 text-[10px] text-zinc-400">
+                        <span className="font-medium text-zinc-100">{c.user?.name || "Usuário"}</span>
                         {" · "}{format(new Date(c.created_at), "dd/MM HH:mm", { locale: ptBR })}
                       </div>
-                      <div className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs break-words">{c.content}</div>
+                      <div className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs text-zinc-100">{c.content}</div>
                     </div>
                   </div>
                 ))}
+                <div className="flex gap-2">
+                  <Input
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSendComment()}
+                    placeholder="Comentário..."
+                    className="h-9 border-0 bg-white/10 text-xs text-white"
+                    disabled={isAdding}
+                  />
+                  <Button size="icon" onClick={handleSendComment} disabled={isAdding || !commentText.trim()} className="h-9 w-9 shrink-0">
+                    <Send size={13} />
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Input
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSendComment()}
-                  placeholder="Comentário..."
-                  className="h-9 text-xs"
-                  disabled={isAdding}
-                />
-                <Button size="icon" onClick={handleSendComment} disabled={isAdding || !commentText.trim()} className="h-9 w-9 shrink-0">
-                  <Send size={13} />
-                </Button>
-              </div>
-            </div>
+            </AgendaRow>
           )}
         </div>
 
-        <div className="border-t border-white/10 px-5 py-3 shrink-0 flex items-center justify-between gap-2">
-          {isExisting && (
+        <div className="flex shrink-0 items-center justify-between border-t border-white/10 px-5 py-3">
+          {isExisting ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
@@ -667,22 +700,25 @@ export function EventSheet({
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                    Excluir
-                  </AlertDialogAction>
+                  <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Excluir</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+          ) : (
+            <span />
           )}
-          <div className="flex gap-2 ml-auto">
-            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={isLoading}>Cancelar</Button>
+
+          <div className="flex items-center gap-2">
             {isExisting && !isCompleted && (
-              <Button variant="outline" size="sm" onClick={handleMarkDone} disabled={isLoading} className="gap-1.5">
+              <Button variant="ghost" size="sm" onClick={handleMarkDone} disabled={isLoading} className="gap-1.5 text-blue-300 hover:bg-white/10 hover:text-blue-200">
                 <CheckCircle size={13} /> Concluir
               </Button>
             )}
+            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isLoading} className="font-semibold text-blue-300 hover:bg-white/10 hover:text-blue-200">
+              Mais opções
+            </Button>
             {!locked && (
-              <Button size="sm" onClick={handleSubmit} disabled={!canSubmit || isLoading}>
+              <Button size="sm" onClick={handleSubmit} disabled={!canSubmit || isLoading} className="rounded-full bg-blue-300 px-7 text-sm font-semibold text-slate-900 hover:bg-blue-200">
                 {isLoading ? "Salvando..." : "Salvar"}
               </Button>
             )}
@@ -693,15 +729,11 @@ export function EventSheet({
   );
 }
 
-function Field({
-  label, children, icon: Icon, className,
-}: { label: string; children: React.ReactNode; icon?: React.ElementType; className?: string }) {
+function AgendaRow({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className={cn("rounded-xl border border-white/10 bg-white/[0.025] p-3", className)}>
-      <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {Icon && <Icon size={11} />} {label}
-      </div>
-      {children}
-    </section>
+    <div className="grid grid-cols-[40px_1fr] gap-2 border-b border-white/10 py-3 last:border-b-0">
+      <div className="flex justify-center pt-2 text-zinc-400">{icon}</div>
+      <div className="min-w-0">{children}</div>
+    </div>
   );
 }
