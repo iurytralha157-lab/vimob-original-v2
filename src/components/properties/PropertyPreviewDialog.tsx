@@ -137,6 +137,13 @@ export function PropertyPreviewDialog({
   const captorContact = captorUser?.whatsapp || captorUser?.phone || captorUser?.email || null;
   const hasOwnerInfo = !!(property?.owner_name || ownerPhone || property?.owner_email);
   const hasCaptorInfo = !!(captorName || captorContact);
+  const formatCurrency = (value?: number | null) => value
+    ? `R$ ${value.toLocaleString('pt-BR')}`
+    : null;
+  const formatBoolean = (value?: boolean | null) => {
+    if (value === null || value === undefined) return null;
+    return value ? 'Sim' : 'Não';
+  };
 
   const handleToggleStatus = () => {
     if (!property) return;
@@ -205,6 +212,44 @@ export function PropertyPreviewDialog({
             </span>
           </div>
         )}
+      </div>
+    </div>
+  ) : null;
+
+  const extraDetailItems = property ? [
+    { icon: Bed, label: 'Quartos', value: property.quartos },
+    { icon: Bath, label: 'Banheiros', value: property.banheiros },
+    { icon: Car, label: 'Vagas', value: property.vagas },
+    { icon: Ruler, label: 'Área útil', value: property.area_util ? `${property.area_util}m²` : null },
+    { icon: Calendar, label: 'Ano reforma', value: property.ano_reforma },
+    { icon: Building2, label: 'Padrão', value: property.padrao },
+    { icon: MapPin, label: 'Posição', value: property.posicao_localizacao },
+    { icon: Home, label: 'Situação', value: property.situacao_imovel },
+    { icon: User, label: 'Ocupação', value: property.ocupacao },
+    { icon: Check, label: 'Financiamento', value: formatBoolean(property.aceita_financiamento) },
+    { icon: Check, label: 'FGTS', value: formatBoolean(property.usou_fgts) },
+    { icon: Check, label: 'Exclusividade', value: formatBoolean(property.exclusividade) },
+    { icon: Check, label: 'Placa no local', value: formatBoolean(property.placa_no_local) },
+    { icon: Calendar, label: 'IPTU', value: formatCurrency(property.iptu) },
+    { icon: Calendar, label: 'Condomínio', value: formatCurrency(property.condominio) },
+    { icon: Calendar, label: 'Seguro fiança', value: formatCurrency(property.valor_seguro_fianca) },
+    { icon: Calendar, label: 'Seguro incêndio', value: formatCurrency(property.seguro_incendio) },
+    { icon: Calendar, label: 'Taxa serviço', value: formatCurrency(property.taxa_de_servico) },
+  ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '') : [];
+
+  const extraDetailsSection = extraDetailItems.length > 0 ? (
+    <div className="mt-4 space-y-3">
+      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+        Características e valores
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+        {extraDetailItems.map(({ icon: Icon, label, value }) => (
+          <div key={label} className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 min-w-0">
+            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground">{label}:</span>
+            <span className="font-medium ml-auto min-w-0 truncate text-right">{value}</span>
+          </div>
+        ))}
       </div>
     </div>
   ) : null;
@@ -302,14 +347,13 @@ export function PropertyPreviewDialog({
 
         {/* Thumbnail Grid */}
         {allImages.length > 1 && (
-          <div className={cn("flex gap-2 mt-3 overflow-x-auto pb-2 scrollbar-hide", isMobile && "px-4")}>
+          <div className={cn("grid grid-cols-5 gap-2 mt-3 sm:grid-cols-8", isMobile && "px-4")}>
             {allImages.slice(0, 8).map((img, index) => (
               <button
                 key={index}
                 type="button"
                 className={cn(
-                  "flex-shrink-0 rounded-lg overflow-hidden border-2 transition-all duration-200",
-                  isMobile ? "w-11 h-11" : "w-14 h-14",
+                  "aspect-square w-full rounded-lg overflow-hidden border-2 transition-all duration-200",
                   index === currentImageIndex 
                     ? 'border-primary ring-2 ring-primary/30 scale-105' 
                     : 'border-transparent hover:border-muted-foreground/40'
@@ -323,7 +367,7 @@ export function PropertyPreviewDialog({
               </button>
             ))}
             {allImages.length > 8 && (
-              <div className="w-14 h-14 flex-shrink-0 rounded-lg bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
+              <div className="aspect-square w-full rounded-lg bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
                 +{allImages.length - 8}
               </div>
             )}
@@ -332,6 +376,7 @@ export function PropertyPreviewDialog({
 
         <div className={cn("mt-5", isMobile && "px-4")}>
           {propertyDetailsSection}
+          {extraDetailsSection}
         </div>
       </div>
 
@@ -655,7 +700,7 @@ export function PropertyPreviewDialog({
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[90vh] p-4 rounded-t-[2rem]">
+        <SheetContent side="bottom" className="left-3 right-3 bottom-3 h-[88vh] w-auto rounded-t-[1.5rem] border p-4">
           <SheetHeader className="pb-4">
             <SheetTitle>Visualizar Imóvel</SheetTitle>
           </SheetHeader>
