@@ -210,8 +210,8 @@ export function PropertyPreviewDialog({
   ) : null;
 
   const content = isLoading ? (
-    <div className="flex flex-col lg:flex-row gap-6">
-      <div className="lg:w-1/2">
+    <div className="flex h-full min-h-0 flex-col lg:flex-row gap-4 lg:gap-5">
+      <div className="lg:w-[52%] min-h-0 lg:overflow-y-auto lg:pr-2">
         <Skeleton className={cn("w-full rounded-xl", isMobile ? "aspect-[16/10] mx-auto w-[95%]" : "aspect-video")} />
         <div className="flex gap-2 mt-3">
           {[1, 2, 3, 4].map(i => (
@@ -219,7 +219,7 @@ export function PropertyPreviewDialog({
           ))}
         </div>
       </div>
-      <div className="lg:w-1/2 space-y-4">
+      <div className="lg:w-[48%] min-h-0 space-y-4">
         <Skeleton className="h-8 w-3/4" />
         <Skeleton className="h-6 w-1/2" />
         <Skeleton className="h-16 w-full" />
@@ -231,9 +231,9 @@ export function PropertyPreviewDialog({
       </div>
     </div>
   ) : property ? (
-    <div className="flex flex-col lg:flex-row gap-6">
+    <div className="flex h-full min-h-0 flex-col lg:flex-row gap-4 lg:gap-5">
       {/* Left Side - Image Gallery */}
-      <div className="lg:w-1/2 flex flex-col">
+      <div className="lg:w-[52%] min-h-0 flex flex-col lg:overflow-y-auto lg:pr-2">
         {/* Main Image with Embla Carousel */}
         <div className={cn(
           "relative rounded-xl overflow-hidden bg-muted group",
@@ -336,8 +336,8 @@ export function PropertyPreviewDialog({
       </div>
 
       {/* Right Side - Property Details */}
-      <div className="lg:w-1/2">
-        <ScrollArea className="h-[60vh] lg:h-[70vh] pr-3">
+      <div className="lg:w-[48%] min-h-0">
+        <ScrollArea className="h-auto lg:h-full pr-3">
           <div className="space-y-5">
             {/* Header with Status Toggle */}
             <div className="flex items-start justify-between gap-3">
@@ -669,11 +669,13 @@ export function PropertyPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden p-6">
-        <DialogHeader>
+      <DialogContent className="w-[80vw] max-w-[80vw] max-h-[80vh] overflow-hidden p-0 gap-0">
+        <DialogHeader className="border-b px-5 py-4">
           <DialogTitle>Visualizar Imóvel</DialogTitle>
         </DialogHeader>
-        {content}
+        <div className="h-[calc(80vh-73px)] min-h-0 overflow-hidden p-5">
+          {content}
+        </div>
       </DialogContent>
     </Dialog>
   );
