@@ -736,6 +736,30 @@ export function useSendWhatsAppMessage() {
         evolutionData: sendResult.data?.key?.id || sendResult.data?.messageId ? "has_id" : "no_id"
       });
 
+      if (conversation.session_id !== session.id) {
+        console.log("[useSendWhatsAppMessage] Rebinding conversation to active session", {
+          conversationId: conversation.id,
+          previousSessionId: conversation.session_id,
+          activeSessionId: session.id,
+        });
+
+        const { error: rebindError } = await supabase
+          .from("whatsapp_conversations")
+          .update({
+            session_id: session.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", conversation.id);
+
+        if (rebindError) {
+          console.error("[useSendWhatsAppMessage] Failed to rebind conversation session:", rebindError);
+          throw new Error("Mensagem enviada no WhatsApp, mas o CRM não conseguiu religar a conversa à sessão ativa.");
+        }
+
+        conversation.session_id = session.id;
+        (conversation as any).session = session;
+      }
+
       // Insert message in database with client_message_id for deduplication
       const messageId = extractProviderMessageId(sendResult.data) || clientMessageId;
       
@@ -760,6 +784,7 @@ export function useSendWhatsAppMessage() {
 
       if (insertError) {
         console.error("[useSendWhatsAppMessage] insert whatsapp_messages Error:", insertError);
+        throw new Error("Mensagem enviada no WhatsApp, mas não foi salva no histórico do CRM.");
       }
 
       if (!insertError && conversation.lead_id) {
@@ -849,7 +874,7 @@ export function useSendWhatsAppMessage() {
       const optimisticMessage: WhatsAppMessage & { client_message_id?: string } = {
         id: optimisticId,
         conversation_id: conversationId,
-        session_id: variables.conversation.session_id,
+        session_id: variables.sendSessionId || variables.conversation.session_id,
         message_id: optimisticId,
         client_message_id: optimisticId, // Important for deduplication with realtime
         from_me: true,
