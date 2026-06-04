@@ -1,0 +1,1 @@
+ALTER TABLE public.lead_meta ADD COLUMN IF NOT EXISTS creative_url TEXT;

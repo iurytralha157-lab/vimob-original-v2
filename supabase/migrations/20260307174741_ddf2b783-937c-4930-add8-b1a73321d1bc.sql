@@ -1,0 +1,1 @@
+ALTER TABLE public.organization_sites ADD COLUMN IF NOT EXISTS show_about_on_home boolean DEFAULT false;

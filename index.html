@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Anti-cache Meta Tags -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <!-- Force Update Script -->
+    <script>
+      (function() {
+        const VERSION_KEY = 'lovable_app_version';
+        
+        async function forceUpdate() {
+          console.log('[VersionCheck] New version detected, clearing cache and reloading...');
+          
+          if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (let r of regs) {
+              try {
+                r.active?.postMessage({ type: 'CLEAR_CACHES' });
+                await r.update();
+              } catch (e) {
+                console.warn('[VersionCheck] Service Worker update failed', e);
+              }
+            }
+          }
+          
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            for (let k of keys) await caches.delete(k);
+          }
+          
+          // Preservar apenas tokens de autenticação essenciais
+          const authKeysToKeep = ['sb-iemalzlfnbouobyjwlwi-auth-token', 'impersonate_session'];
+          const keysToRemove = [];
+          
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && !authKeysToKeep.some(authKey => key.includes(authKey))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(k => localStorage.removeItem(k));
+          
+          const sessionKeysToRemove = [];
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key && !authKeysToKeep.some(authKey => key.includes(authKey))) {
+              sessionKeysToRemove.push(key);
+            }
+          }
+          sessionKeysToRemove.forEach(k => sessionStorage.removeItem(k));
+          
+          // Use a timestamp to bypass any server-side or ISP caching
+          const url = new URL(window.location.href);
+          url.searchParams.set('v_refresh', Date.now());
+          window.location.replace(url.toString());
+        }
+
+        async function checkVersion() {
+          try {
+            const response = await fetch('/version.json?t=' + Date.now(), { cache: 'no-store' });
+            if (!response.ok) return;
+            
+            const data = await response.json();
+            const currentVersion = localStorage.getItem(VERSION_KEY);
+            
+            if (currentVersion && currentVersion !== data.version) {
+              localStorage.setItem(VERSION_KEY, data.version);
+              await forceUpdate();
+            } else if (!currentVersion) {
+              localStorage.setItem(VERSION_KEY, data.version);
+            }
+          } catch (e) {
+            console.warn('[VersionCheck] Failed to check version', e);
+          }
+        }
+
+        checkVersion();
+      })();
+    </script>
+
+    <!-- Primary Meta Tags -->
+    <title>Vimob Crm</title>
+    <meta name="description" content="CRM Imobiliário Inteligente para gestão de leads, vendas e equipe comercial">
+    <meta name="author" content="Vimob Crm" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#ff482a">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Vimob Crm">
+    <meta name="application-name" content="Vimob Crm">
+    <meta name="msapplication-TileColor" content="#ff482a">
+    <meta name="msapplication-tap-highlight" content="no">
+    <meta name="format-detection" content="telephone=no">
+    
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Vimob Crm">
+    <meta property="og:description" content="CRM Imobiliário Inteligente para gestão de leads, vendas e equipe comercial">
+    <meta property="og:image" content="/favicon.png" />
+    
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@Vimob" />
+    <meta name="twitter:title" content="Vimob Crm">
+    <meta name="twitter:description" content="CRM Imobiliário Inteligente para gestão de leads, vendas e equipe comercial">
+    <meta name="twitter:image" content="/favicon.png" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/favicon.png">
+    
+    <!-- Apple Touch Icons -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-152x152.png">
+    
+    <!-- Splash Screens for iOS -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <!-- Preconnect to important origins -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://iemalzlfnbouobyjwlwi.supabase.co">
+    <link rel="dns-prefetch" href="https://images.unsplash.com">
+    <link rel="dns-prefetch" href="https://iemalzlfnbouobyjwlwi.supabase.co">
+    <link rel="preconnect" href="https://iemalzlfnbouobyjwlwi.supabase.co/storage" crossorigin>
+  
+  <style>
+#lovable-badge {
+  display: none !important;
+}
+a[href*="lovable.dev"],
+iframe[src*="lovable.dev"],
+div[style*="Edit with Lovable"],
+.lovable-badge {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: -9999 !important;
+}
+</style>
+</head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

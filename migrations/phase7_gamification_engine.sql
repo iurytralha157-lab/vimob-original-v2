@@ -1,0 +1,456 @@
+-- ========================================================================
+-- ARENA IMOBILIÁRIA — Motor central de gamificação (Fase 7)
+-- Idempotente. Pode ser aplicado várias vezes.
+-- ========================================================================
+
+-- 1) SCHEMA ADDITIONS -----------------------------------------------------
+ALTER TABLE public.gamification_activity_logs
+  ADD COLUMN IF NOT EXISTS quantity int NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS xp_awarded int NOT NULL DEFAULT 0;
+
+UPDATE public.gamification_activity_logs
+  SET xp_awarded = points_earned
+  WHERE xp_awarded = 0 AND points_earned IS NOT NULL;
+
+ALTER TABLE public.user_gamification_stats
+  ADD COLUMN IF NOT EXISTS xp_total int NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS xp_current_level int NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS xp_next_level int NOT NULL DEFAULT 100,
+  ADD COLUMN IF NOT EXISTS rank_tier text NOT NULL DEFAULT 'Bronze I';
+
+ALTER TABLE public.user_mission_progress
+  ADD COLUMN IF NOT EXISTS organization_id uuid,
+  ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+
+-- 2) HELPER FUNCTIONS -----------------------------------------------------
+CREATE OR REPLACE FUNCTION public.gamification_xp_for_level(p_level int)
+RETURNS int LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN p_level <= 1 THEN 0
+    WHEN p_level = 2 THEN 100
+    WHEN p_level = 3 THEN 250
+    WHEN p_level = 4 THEN 500
+    WHEN p_level = 5 THEN 900
+    ELSE (100 * (p_level - 1) * (p_level - 1))::int
+  END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.gamification_level_for_xp(p_xp int)
+RETURNS int LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE v_level int := 1;
+BEGIN
+  IF p_xp IS NULL OR p_xp <= 0 THEN RETURN 1; END IF;
+  WHILE public.gamification_xp_for_level(v_level + 1) <= p_xp LOOP
+    v_level := v_level + 1;
+    IF v_level > 200 THEN EXIT; END IF;
+  END LOOP;
+  RETURN v_level;
+END; $$;
+
+CREATE OR REPLACE FUNCTION public.gamification_rank_tier(p_level int)
+RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN p_level <= 3  THEN 'Bronze I'
+    WHEN p_level <= 6  THEN 'Bronze II'
+    WHEN p_level <= 10 THEN 'Prata I'
+    WHEN p_level <= 15 THEN 'Prata II'
+    WHEN p_level <= 20 THEN 'Ouro I'
+    WHEN p_level <= 30 THEN 'Ouro II'
+    WHEN p_level <= 45 THEN 'Platina'
+    ELSE 'Diamante'
+  END;
+$$;
+
+-- 3) MOTOR CENTRAL --------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.process_gamification_event(
+  p_user_id uuid,
+  p_org_id uuid,
+  p_event_type text,
+  p_quantity int DEFAULT 1,
+  p_reference_id uuid DEFAULT NULL,
+  p_metadata jsonb DEFAULT '{}'::jsonb
+) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  v_unit_points int;
+  v_xp_awarded int;
+  v_qty int := GREATEST(COALESCE(p_quantity,1), 1);
+  v_action text := lower(p_event_type);
+  v_org uuid := p_org_id;
+  v_old_xp int;
+  v_new_xp int;
+  v_old_level int;
+  v_new_level int;
+  v_next_xp int;
+  v_cur_lvl_xp int;
+  v_tier text;
+  v_mission record;
+  v_prog record;
+  v_period_start timestamptz;
+  v_new_count int;
+  v_was_completed boolean;
+  v_idem text;
+  v_inserted boolean;
+BEGIN
+  IF p_user_id IS NULL THEN RETURN; END IF;
+  IF v_org IS NULL THEN
+    SELECT organization_id INTO v_org FROM public.users WHERE id = p_user_id;
+  END IF;
+  IF v_org IS NULL THEN RETURN; END IF;
+
+  -- pontos: regra customizada da org, depois fallback do enum padrão
+  SELECT points INTO v_unit_points
+  FROM public.gamification_rules
+  WHERE organization_id = v_org AND lower(action_type) = v_action AND is_active = true
+  LIMIT 1;
+
+  IF v_unit_points IS NULL THEN
+    v_unit_points := CASE v_action
+      WHEN 'call'                THEN 5
+      WHEN 'call_made'           THEN 5
+      WHEN 'message'             THEN 1
+      WHEN 'message_sent'        THEN 1
+      WHEN 'lead'                THEN 10
+      WHEN 'lead_created'        THEN 10
+      WHEN 'lead_created_manual' THEN 10
+      WHEN 'visit_scheduled'     THEN 10
+      WHEN 'visit_done'          THEN 20
+      WHEN 'visit_confirmed'     THEN 20
+      WHEN 'meeting_scheduled'   THEN 5
+      WHEN 'meeting_done'        THEN 15
+      WHEN 'meeting_held'        THEN 15
+      WHEN 'proposal'            THEN 20
+      WHEN 'proposal_sent'       THEN 20
+      WHEN 'sale'                THEN 500
+      WHEN 'sale_closed'         THEN 500
+      WHEN 'contract_signed'     THEN 500
+      WHEN 'property_captured'   THEN 15
+      WHEN 'property_created'    THEN 15
+      WHEN 'prospecting_report'  THEN 5
+      WHEN 'mission_bonus'       THEN 0
+      WHEN 'streak_bonus'        THEN 0
+      WHEN 'level_up'            THEN 0
+      ELSE 1
+    END;
+  END IF;
+
+  v_xp_awarded := v_unit_points * v_qty + COALESCE((p_metadata->>'bonus')::int, 0);
+  IF v_xp_awarded <= 0 AND v_action NOT IN ('mission_bonus','level_up','streak_bonus') THEN
+    RETURN;
+  END IF;
+
+  v_idem := v_action || '_' || COALESCE(p_reference_id::text, gen_random_uuid()::text) || '_' || v_qty::text;
+
+  INSERT INTO public.gamification_activity_logs (
+    user_id, organization_id, action_type, points_earned, xp_awarded,
+    quantity, reference_id, metadata, idempotency_key
+  ) VALUES (
+    p_user_id, v_org, v_action, v_xp_awarded, v_xp_awarded,
+    v_qty, p_reference_id, COALESCE(p_metadata, '{}'::jsonb), v_idem
+  )
+  ON CONFLICT (idempotency_key) DO NOTHING;
+
+  GET DIAGNOSTICS v_inserted = ROW_COUNT;
+  IF v_inserted = 0 OR v_inserted IS NULL THEN
+    -- Nada inserido (duplicado) → não recomputar XP
+    -- Mas v_inserted é boolean aqui na verdade; checagem alternativa:
+    NULL;
+  END IF;
+
+  -- Lê stats atuais
+  SELECT COALESCE(xp,0), COALESCE(current_level,1)
+    INTO v_old_xp, v_old_level
+  FROM public.user_gamification_stats
+  WHERE user_id = p_user_id;
+
+  IF v_old_xp IS NULL THEN v_old_xp := 0; END IF;
+  IF v_old_level IS NULL THEN v_old_level := 1; END IF;
+
+  v_new_xp := v_old_xp + v_xp_awarded;
+  v_new_level := public.gamification_level_for_xp(v_new_xp);
+  v_cur_lvl_xp := public.gamification_xp_for_level(v_new_level);
+  v_next_xp := public.gamification_xp_for_level(v_new_level + 1);
+  v_tier := public.gamification_rank_tier(v_new_level);
+
+  INSERT INTO public.user_gamification_stats (
+    user_id, organization_id, total_points, xp, xp_total,
+    current_level, xp_current_level, xp_next_level, rank_tier,
+    current_rank, last_activity_at, updated_at
+  ) VALUES (
+    p_user_id, v_org, v_xp_awarded, v_new_xp, v_new_xp,
+    v_new_level, v_cur_lvl_xp, v_next_xp, v_tier,
+    v_tier, now(), now()
+  )
+  ON CONFLICT (user_id) DO UPDATE SET
+    organization_id  = COALESCE(public.user_gamification_stats.organization_id, EXCLUDED.organization_id),
+    total_points     = COALESCE(public.user_gamification_stats.total_points,0) + v_xp_awarded,
+    xp               = v_new_xp,
+    xp_total         = v_new_xp,
+    current_level    = v_new_level,
+    xp_current_level = v_cur_lvl_xp,
+    xp_next_level    = v_next_xp,
+    rank_tier        = v_tier,
+    current_rank     = v_tier,
+    last_activity_at = now(),
+    updated_at       = now();
+
+  -- Notificação de level up
+  IF v_new_level > v_old_level THEN
+    INSERT INTO public.notifications (organization_id, user_id, type, title, content, is_read)
+    VALUES (v_org, p_user_id, 'gamification',
+            '🆙 Você subiu para ' || v_tier || ' (Nível ' || v_new_level || ')',
+            'Continue assim! Próximo nível em ' || GREATEST(v_next_xp - v_new_xp, 0) || ' XP.',
+            false);
+  END IF;
+
+  -- Streak diário
+  INSERT INTO public.gamification_streaks (user_id, organization_id, streak_type, current_streak, highest_streak, last_activity_at)
+  VALUES (p_user_id, v_org, 'daily_activity', 1, 1, now())
+  ON CONFLICT (user_id, streak_type) DO UPDATE SET
+    current_streak = CASE
+      WHEN public.gamification_streaks.last_activity_at::date = CURRENT_DATE THEN public.gamification_streaks.current_streak
+      WHEN public.gamification_streaks.last_activity_at::date = CURRENT_DATE - 1 THEN public.gamification_streaks.current_streak + 1
+      ELSE 1
+    END,
+    highest_streak = GREATEST(
+      public.gamification_streaks.highest_streak,
+      CASE
+        WHEN public.gamification_streaks.last_activity_at::date = CURRENT_DATE THEN public.gamification_streaks.current_streak
+        WHEN public.gamification_streaks.last_activity_at::date = CURRENT_DATE - 1 THEN public.gamification_streaks.current_streak + 1
+        ELSE 1
+      END
+    ),
+    last_activity_at = now();
+
+  -- Atualização de missões
+  FOR v_mission IN
+    SELECT * FROM public.gamification_missions
+    WHERE organization_id = v_org
+      AND is_active = true
+      AND lower(action_type) = v_action
+  LOOP
+    v_period_start := CASE v_mission.period
+      WHEN 'daily'   THEN date_trunc('day', now())
+      WHEN 'weekly'  THEN date_trunc('week', now())
+      WHEN 'monthly' THEN date_trunc('month', now())
+      ELSE date_trunc('day', now())
+    END;
+
+    SELECT * INTO v_prog FROM public.user_mission_progress
+    WHERE user_id = p_user_id AND mission_id = v_mission.id
+    ORDER BY reset_at DESC NULLS LAST LIMIT 1;
+
+    v_was_completed := COALESCE(v_prog.is_completed, false);
+
+    IF v_prog.id IS NULL OR v_prog.reset_at IS NULL OR v_prog.reset_at < v_period_start THEN
+      INSERT INTO public.user_mission_progress (user_id, mission_id, organization_id, current_count, is_completed, reset_at, updated_at, completed_at)
+      VALUES (p_user_id, v_mission.id, v_org, v_qty, v_qty >= v_mission.target_count,
+              v_period_start, now(),
+              CASE WHEN v_qty >= v_mission.target_count THEN now() ELSE NULL END);
+      v_new_count := v_qty;
+      v_was_completed := false;
+    ELSIF NOT v_prog.is_completed THEN
+      v_new_count := v_prog.current_count + v_qty;
+      UPDATE public.user_mission_progress SET
+        current_count    = v_new_count,
+        is_completed     = (v_new_count >= v_mission.target_count),
+        completed_at     = CASE WHEN v_new_count >= v_mission.target_count AND completed_at IS NULL THEN now() ELSE completed_at END,
+        organization_id  = COALESCE(organization_id, v_org),
+        updated_at       = now()
+      WHERE id = v_prog.id;
+    ELSE
+      CONTINUE;
+    END IF;
+
+    IF v_new_count >= v_mission.target_count AND NOT v_was_completed THEN
+      INSERT INTO public.gamification_activity_logs (
+        user_id, organization_id, action_type, points_earned, xp_awarded, quantity, reference_id, metadata, idempotency_key
+      ) VALUES (
+        p_user_id, v_org, 'mission_bonus', v_mission.bonus_points, v_mission.bonus_points,
+        1, v_mission.id,
+        jsonb_build_object('mission_title', v_mission.title, 'period', v_mission.period),
+        'mission_bonus_' || v_mission.id || '_' || extract(epoch from v_period_start)::text
+      ) ON CONFLICT (idempotency_key) DO NOTHING;
+
+      UPDATE public.user_gamification_stats SET
+        xp               = xp + v_mission.bonus_points,
+        xp_total         = xp_total + v_mission.bonus_points,
+        total_points     = total_points + v_mission.bonus_points,
+        current_level    = public.gamification_level_for_xp(xp + v_mission.bonus_points),
+        xp_current_level = public.gamification_xp_for_level(public.gamification_level_for_xp(xp + v_mission.bonus_points)),
+        xp_next_level    = public.gamification_xp_for_level(public.gamification_level_for_xp(xp + v_mission.bonus_points) + 1),
+        rank_tier        = public.gamification_rank_tier(public.gamification_level_for_xp(xp + v_mission.bonus_points)),
+        current_rank     = public.gamification_rank_tier(public.gamification_level_for_xp(xp + v_mission.bonus_points)),
+        updated_at       = now()
+      WHERE user_id = p_user_id;
+
+      INSERT INTO public.notifications (organization_id, user_id, type, title, content, is_read)
+      VALUES (v_org, p_user_id, 'gamification',
+              '🎯 Missão concluída: ' || v_mission.title,
+              '+' || v_mission.bonus_points || ' XP de bônus!',
+              false);
+    END IF;
+  END LOOP;
+
+EXCEPTION WHEN OTHERS THEN
+  RAISE WARNING 'process_gamification_event error: %', SQLERRM;
+END;
+$$;
+
+-- 4) WRAPPERS DE TRIGGER --------------------------------------------------
+CREATE OR REPLACE FUNCTION public.handle_lead_gamification()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF TG_OP = 'INSERT' AND NEW.assigned_user_id IS NOT NULL THEN
+    PERFORM public.process_gamification_event(
+      NEW.assigned_user_id, NEW.organization_id, 'lead_created', 1, NEW.id,
+      jsonb_build_object('lead_name', NEW.name));
+  ELSIF TG_OP = 'UPDATE' AND NEW.deal_status = 'won' AND COALESCE(OLD.deal_status,'') <> 'won' THEN
+    PERFORM public.process_gamification_event(
+      NEW.assigned_user_id, NEW.organization_id, 'sale_closed', 1, NEW.id,
+      jsonb_build_object('lead_name', NEW.name, 'sale_value', NEW.valor_interesse));
+  END IF;
+  RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION public.handle_call_gamification()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NEW.user_id IS NOT NULL THEN
+    PERFORM public.process_gamification_event(NEW.user_id, NEW.organization_id, 'call_made', 1, NEW.id, '{}'::jsonb);
+  END IF;
+  RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION public.handle_prospecting_report_points()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF COALESCE(NEW.calls,0) > 0 THEN
+    PERFORM public.process_gamification_event(NEW.user_id, NEW.organization_id, 'call_made', NEW.calls, NEW.id,
+      jsonb_build_object('source', NEW.source));
+  END IF;
+  IF COALESCE(NEW.scheduled_visits,0) > 0 THEN
+    PERFORM public.process_gamification_event(NEW.user_id, NEW.organization_id, 'visit_scheduled', NEW.scheduled_visits, NEW.id,
+      jsonb_build_object('source', NEW.source));
+  END IF;
+  IF COALESCE(NEW.confirmed_visits,0) > 0 THEN
+    PERFORM public.process_gamification_event(NEW.user_id, NEW.organization_id, 'visit_confirmed', NEW.confirmed_visits, NEW.id, '{}'::jsonb);
+  END IF;
+  IF COALESCE(NEW.meetings,0) > 0 THEN
+    PERFORM public.process_gamification_event(NEW.user_id, NEW.organization_id, 'meeting_held', NEW.meetings, NEW.id, '{}'::jsonb);
+  END IF;
+  IF COALESCE(NEW.proposals_sent,0) > 0 THEN
+    PERFORM public.process_gamification_event(NEW.user_id, NEW.organization_id, 'proposal_sent', NEW.proposals_sent, NEW.id, '{}'::jsonb);
+  END IF;
+  RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION public.handle_activity_gamification()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_action text; v_org uuid;
+BEGIN
+  IF NEW.user_id IS NULL THEN RETURN NEW; END IF;
+  SELECT organization_id INTO v_org FROM public.users WHERE id = NEW.user_id;
+  IF v_org IS NULL THEN RETURN NEW; END IF;
+
+  v_action := CASE NEW.type
+    WHEN 'call'                  THEN 'call_made'
+    WHEN 'call_made'             THEN 'call_made'
+    WHEN 'message'               THEN 'message_sent'
+    WHEN 'message_sent'          THEN 'message_sent'
+    WHEN 'whatsapp_message_sent' THEN 'message_sent'
+    WHEN 'lead_created_manual'   THEN 'lead_created_manual'
+    WHEN 'property_created'      THEN 'property_created'
+    WHEN 'sale_closed'           THEN 'sale_closed'
+    WHEN 'visit_scheduled'       THEN 'visit_scheduled'
+    WHEN 'meeting_scheduled'     THEN 'meeting_scheduled'
+    WHEN 'visit_confirmed'       THEN 'visit_confirmed'
+    WHEN 'visit_realized'        THEN 'visit_confirmed'
+    WHEN 'meeting_held'          THEN 'meeting_held'
+    WHEN 'proposal_sent'         THEN 'proposal_sent'
+    ELSE NULL
+  END;
+
+  IF v_action IS NULL THEN RETURN NEW; END IF;
+  PERFORM public.process_gamification_event(NEW.user_id, v_org, v_action, 1, NEW.id, COALESCE(NEW.metadata, '{}'::jsonb));
+  RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION public.handle_schedule_gamification()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_action text;
+BEGIN
+  IF NEW.user_id IS NULL THEN RETURN NEW; END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    v_action := CASE NEW.event_type
+      WHEN 'visit'   THEN 'visit_scheduled'
+      WHEN 'meeting' THEN 'meeting_scheduled'
+      ELSE NULL
+    END;
+  ELSIF TG_OP = 'UPDATE' AND NEW.status = 'completed' AND COALESCE(OLD.status,'') <> 'completed' THEN
+    v_action := CASE NEW.event_type
+      WHEN 'visit'   THEN 'visit_confirmed'
+      WHEN 'meeting' THEN 'meeting_held'
+      ELSE NULL
+    END;
+  END IF;
+
+  IF v_action IS NULL THEN RETURN NEW; END IF;
+  PERFORM public.process_gamification_event(NEW.user_id, NEW.organization_id, v_action, 1, NEW.id,
+    jsonb_build_object('title', NEW.title, 'event_type', NEW.event_type));
+  RETURN NEW;
+END; $$;
+
+-- 5) (RE)CRIAR TRIGGERS ---------------------------------------------------
+DROP TRIGGER IF EXISTS tr_lead_gamification          ON public.leads;
+DROP TRIGGER IF EXISTS tr_call_gamification          ON public.telephony_calls;
+DROP TRIGGER IF EXISTS tr_prospecting_report_points  ON public.prospecting_reports;
+DROP TRIGGER IF EXISTS tr_activity_gamification      ON public.activities;
+DROP TRIGGER IF EXISTS tr_schedule_gamification      ON public.schedule_events;
+
+CREATE TRIGGER tr_lead_gamification          AFTER INSERT OR UPDATE ON public.leads               FOR EACH ROW EXECUTE FUNCTION public.handle_lead_gamification();
+CREATE TRIGGER tr_call_gamification          AFTER INSERT            ON public.telephony_calls    FOR EACH ROW EXECUTE FUNCTION public.handle_call_gamification();
+CREATE TRIGGER tr_prospecting_report_points  AFTER INSERT            ON public.prospecting_reports FOR EACH ROW EXECUTE FUNCTION public.handle_prospecting_report_points();
+CREATE TRIGGER tr_activity_gamification      AFTER INSERT            ON public.activities         FOR EACH ROW EXECUTE FUNCTION public.handle_activity_gamification();
+CREATE TRIGGER tr_schedule_gamification      AFTER INSERT OR UPDATE  ON public.schedule_events    FOR EACH ROW EXECUTE FUNCTION public.handle_schedule_gamification();
+
+-- 6) BACKFILL -------------------------------------------------------------
+WITH agg AS (
+  SELECT user_id,
+         (SELECT organization_id FROM public.users WHERE id = l.user_id) AS organization_id,
+         SUM(COALESCE(xp_awarded, points_earned, 0))::int AS total_xp,
+         MAX(created_at) AS last_at
+  FROM public.gamification_activity_logs l
+  WHERE user_id IS NOT NULL
+  GROUP BY user_id
+)
+INSERT INTO public.user_gamification_stats AS s
+  (user_id, organization_id, total_points, xp, xp_total,
+   current_level, xp_current_level, xp_next_level, rank_tier, current_rank,
+   last_activity_at, updated_at)
+SELECT
+  a.user_id, a.organization_id, a.total_xp, a.total_xp, a.total_xp,
+  public.gamification_level_for_xp(a.total_xp),
+  public.gamification_xp_for_level(public.gamification_level_for_xp(a.total_xp)),
+  public.gamification_xp_for_level(public.gamification_level_for_xp(a.total_xp) + 1),
+  public.gamification_rank_tier(public.gamification_level_for_xp(a.total_xp)),
+  public.gamification_rank_tier(public.gamification_level_for_xp(a.total_xp)),
+  a.last_at, now()
+FROM agg a
+WHERE a.organization_id IS NOT NULL
+ON CONFLICT (user_id) DO UPDATE SET
+  organization_id  = COALESCE(s.organization_id, EXCLUDED.organization_id),
+  total_points     = EXCLUDED.total_points,
+  xp               = EXCLUDED.xp,
+  xp_total         = EXCLUDED.xp_total,
+  current_level    = EXCLUDED.current_level,
+  xp_current_level = EXCLUDED.xp_current_level,
+  xp_next_level    = EXCLUDED.xp_next_level,
+  rank_tier        = EXCLUDED.rank_tier,
+  current_rank     = EXCLUDED.current_rank,
+  last_activity_at = EXCLUDED.last_activity_at,
+  updated_at       = now();
+
+-- (tabela legada gamification_events permanece intacta; frontend será migrado)

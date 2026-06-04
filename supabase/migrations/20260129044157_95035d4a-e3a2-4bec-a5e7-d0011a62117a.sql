@@ -1,0 +1,74 @@
+-- Update resolve_site_domain function to include logo size fields
+CREATE OR REPLACE FUNCTION public.resolve_site_domain(p_domain text)
+ RETURNS TABLE(organization_id uuid, site_config jsonb)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_site organization_sites%ROWTYPE;
+  v_org organizations%ROWTYPE;
+BEGIN
+  -- Tentar encontrar por custom_domain primeiro
+  SELECT * INTO v_site 
+  FROM organization_sites 
+  WHERE custom_domain = p_domain 
+    AND domain_verified = true 
+    AND is_active = true;
+  
+  -- Se não encontrou, tentar por subdomain
+  IF v_site.id IS NULL THEN
+    SELECT * INTO v_site 
+    FROM organization_sites 
+    WHERE subdomain = split_part(p_domain, '.', 1)
+      AND is_active = true;
+  END IF;
+  
+  IF v_site.id IS NULL THEN
+    RETURN;
+  END IF;
+  
+  -- Buscar dados da organização
+  SELECT * INTO v_org FROM organizations WHERE id = v_site.organization_id;
+  
+  RETURN QUERY SELECT 
+    v_site.organization_id,
+    jsonb_build_object(
+      'id', v_site.id,
+      'is_active', v_site.is_active,
+      'subdomain', v_site.subdomain,
+      'custom_domain', v_site.custom_domain,
+      'site_title', COALESCE(v_site.site_title, v_org.name),
+      'site_description', v_site.site_description,
+      'logo_url', COALESCE(v_site.logo_url, v_org.logo_url),
+      'favicon_url', v_site.favicon_url,
+      'primary_color', v_site.primary_color,
+      'secondary_color', v_site.secondary_color,
+      'accent_color', v_site.accent_color,
+      'whatsapp', v_site.whatsapp,
+      'phone', v_site.phone,
+      'email', v_site.email,
+      'address', v_site.address,
+      'city', v_site.city,
+      'state', v_site.state,
+      'instagram', v_site.instagram,
+      'facebook', v_site.facebook,
+      'youtube', v_site.youtube,
+      'linkedin', v_site.linkedin,
+      'about_title', v_site.about_title,
+      'about_text', v_site.about_text,
+      'about_image_url', v_site.about_image_url,
+      'seo_title', v_site.seo_title,
+      'seo_description', v_site.seo_description,
+      'seo_keywords', v_site.seo_keywords,
+      'google_analytics_id', v_site.google_analytics_id,
+      'hero_image_url', v_site.hero_image_url,
+      'hero_title', v_site.hero_title,
+      'hero_subtitle', v_site.hero_subtitle,
+      'page_banner_url', v_site.page_banner_url,
+      'logo_width', COALESCE(v_site.logo_width, 160),
+      'logo_height', COALESCE(v_site.logo_height, 50),
+      'organization_name', v_org.name
+    );
+END;
+$function$;

@@ -1,0 +1,1 @@
+UPDATE public.properties SET status = 'ativo' WHERE is_demo = true AND status = 'disponivel';

@@ -1,0 +1,5 @@
+ALTER TABLE public.organization_sites 
+ADD COLUMN IF NOT EXISTS about_subtitle text,
+ADD COLUMN IF NOT EXISTS about_stats jsonb DEFAULT '[{"value":"500+","label":"Imóveis Vendidos"},{"value":"98%","label":"Clientes Satisfeitos"},{"value":"15+","label":"Anos de Experiência"},{"value":"50+","label":"Parceiros"}]'::jsonb,
+ADD COLUMN IF NOT EXISTS about_checkmarks jsonb DEFAULT '["Atendimento personalizado","Imóveis verificados","Suporte completo"]'::jsonb,
+ADD COLUMN IF NOT EXISTS about_features jsonb DEFAULT '[{"title":"Imóveis Selecionados","description":"Curadoria dos melhores imóveis da região com critérios rigorosos de qualidade","icon":"building"},{"title":"Atendimento Personalizado","description":"Equipe dedicada e treinada para encontrar o imóvel ideal para você","icon":"users"},{"title":"Experiência no Mercado","description":"Anos de experiência e centenas de clientes satisfeitos no setor imobiliário","icon":"award"},{"title":"Compromisso","description":"Seu sonho é a nossa prioridade e trabalhamos para realizá-lo","icon":"heart"}]'::jsonb;

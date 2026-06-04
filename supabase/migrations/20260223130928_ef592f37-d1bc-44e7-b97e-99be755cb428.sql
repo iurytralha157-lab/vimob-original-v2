@@ -1,0 +1,1 @@
+ALTER TABLE telecom_customers ADD COLUMN is_portability BOOLEAN DEFAULT FALSE;

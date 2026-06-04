@@ -1,0 +1,148 @@
+project_id = "iemalzlfnbouobyjwlwi"
+
+[functions.cleanup-orphan-members]
+verify_jwt = false
+
+[functions.evolution-proxy]
+verify_jwt = false
+
+[functions.evolution-go-proxy]
+verify_jwt = true
+
+[functions.change-password]
+verify_jwt = true
+
+[functions.evolution-go-webhook]
+verify_jwt = false
+
+[functions.sync-whatsapp-contacts]
+verify_jwt = true
+
+[functions.evolution-webhook]
+verify_jwt = false
+
+[functions.google-calendar-auth]
+verify_jwt = false
+
+[functions.google-calendar-sync]
+verify_jwt = false
+
+[functions.automation-runner]
+verify_jwt = false
+
+[functions.create-super-admin]
+verify_jwt = false
+
+[functions.create-organization-admin]
+verify_jwt = false
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.delete-organization]
+verify_jwt = false
+
+[functions.meta-oauth]
+verify_jwt = false
+
+[functions.meta-webhook]
+verify_jwt = false
+
+[functions.generic-webhook]
+verify_jwt = false
+
+[functions.session-health-check]
+verify_jwt = false
+
+[functions.message-sender]
+verify_jwt = false
+
+[functions.automation-trigger]
+verify_jwt = false
+
+[functions.automation-executor]
+verify_jwt = false
+
+[functions.automation-delay-processor]
+verify_jwt = false
+
+[functions.media-worker]
+verify_jwt = false
+
+[functions.calculate-first-response]
+verify_jwt = false
+
+[functions.threecplus-webhook]
+verify_jwt = false
+
+[functions.telephony-recording-proxy]
+verify_jwt = false
+
+[functions.manage-user]
+verify_jwt = false
+
+[functions.delete-user]
+verify_jwt = false
+
+[functions.pool-checker]
+verify_jwt = false
+
+[functions.sla-checker]
+verify_jwt = false
+
+[functions.notification-scheduler]
+verify_jwt = false
+
+[functions.recurring-entries-generator]
+verify_jwt = false
+
+[functions.seed-organization-data]
+verify_jwt = false
+
+[functions.resolve-site-domain]
+verify_jwt = false
+
+[functions.public-site-data]
+verify_jwt = false
+
+[functions.public-site-contact]
+verify_jwt = false
+
+[functions.verify-domain-dns]
+verify_jwt = false
+
+[functions.firecrawl-scrape]
+verify_jwt = false
+
+[functions.send-push-notification]
+verify_jwt = false
+
+[functions.whatsapp-notifier]
+verify_jwt = false
+
+[functions.ai-agent-responder]
+verify_jwt = false
+
+[functions.cleanup-notifications]
+verify_jwt = false
+
+[functions.get-worker-config]
+verify_jwt = false
+
+[functions.import-wordpress-properties]
+verify_jwt = false
+
+[functions.migrate-wp-images]
+verify_jwt = false
+
+[functions.auto-migrate-wp-images]
+verify_jwt = false
+
+[functions.global-whatsapp-status]
+verify_jwt = false
+
+[functions.vista-sync]
+verify_jwt = false
+
+[functions.imoview-sync]
+verify_jwt = false

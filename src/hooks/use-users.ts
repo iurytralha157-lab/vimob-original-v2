@@ -1,0 +1,62 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import { Tables } from '@/integrations/supabase/types';
+import { logAuditAction } from './use-audit-logs';
+export type User = Tables<'users'>;
+
+export function useOrganizationUsers() {
+  return useQuery({
+    queryKey: ['organization-users'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+      
+      if (error) throw error;
+      return data as User[];
+    },
+  });
+}
+
+// Alias for backward compatibility
+export const useUsers = useOrganizationUsers;
+
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async ({ id, ...updates }: Partial<User> & { id: string }) => {
+      const { data, error } = await supabase.functions.invoke('update-organization-user', {
+        body: { userId: id, updates },
+      });
+
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Erro ao atualizar usuário');
+
+      logAuditAction(
+        'update',
+        'user',
+        id,
+        undefined,
+        updates as Record<string, unknown>,
+        data.user?.organization_id || undefined
+      ).catch(console.error);
+
+      return data.user as User;
+    },
+    onSuccess: (updatedUser) => {
+      queryClient.setQueryData(['organization-users'], (current: User[] | undefined) => {
+        if (!Array.isArray(current)) return current;
+        return current.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user);
+      });
+      queryClient.invalidateQueries({ queryKey: ['organization-users'] });
+      toast.success('Usuário atualizado!');
+    },
+    onError: (error) => {
+      toast.error('Erro ao atualizar usuário: ' + error.message);
+    },
+  });
+}
