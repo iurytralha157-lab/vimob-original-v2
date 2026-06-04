@@ -144,12 +144,14 @@ function preloadCoreCrmPages() {
 function getPublicSiteMode(): "custom-domain" | "slug" | null {
   const hostname = window.location.hostname;
   const pathname = window.location.pathname;
+  const isIpv4Host = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname);
 
   if (pathname.startsWith("/sites/")) return "slug";
 
   if (
     hostname === "localhost" ||
     hostname === "127.0.0.1" ||
+    isIpv4Host ||
     hostname.endsWith(".lovable.dev") ||
     hostname.endsWith(".lovableproject.com") ||
     hostname === "vimobe.lovable.app" ||
