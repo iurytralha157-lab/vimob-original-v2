@@ -244,7 +244,7 @@ export function IntegrationsTab({
         <DialogContent
           className={
             activeIntegration === "whatsapp" ?
-            "w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto lg:w-[80vw] lg:max-w-[80vw] lg:h-[80vh] lg:max-h-[80vh]" :
+            "w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto lg:w-[80vw] lg:max-w-[80vw] lg:max-h-[80vh]" :
             "max-w-[96vw] lg:max-w-6xl max-h-[90vh] overflow-y-auto"
           }
         >
