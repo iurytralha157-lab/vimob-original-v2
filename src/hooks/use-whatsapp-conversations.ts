@@ -743,20 +743,21 @@ export function useSendWhatsAppMessage() {
           activeSessionId: session.id,
         });
 
-        const { error: rebindError } = await supabase
-          .from("whatsapp_conversations")
-          .update({
-            session_id: session.id,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", conversation.id);
+        const { data: reboundConversation, error: rebindError } = await (supabase.rpc as any)(
+          "rebind_whatsapp_conversation_session",
+          {
+            p_conversation_id: conversation.id,
+            p_session_id: session.id,
+          },
+        );
 
         if (rebindError) {
           console.error("[useSendWhatsAppMessage] Failed to rebind conversation session:", rebindError);
           throw new Error("Mensagem enviada no WhatsApp, mas o CRM não conseguiu religar a conversa à sessão ativa.");
         }
 
-        conversation.session_id = session.id;
+        conversation.session_id = reboundConversation?.session_id || session.id;
+        conversation.organization_id = reboundConversation?.organization_id || conversation.organization_id;
         (conversation as any).session = session;
       }
 
