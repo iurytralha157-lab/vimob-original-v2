@@ -748,6 +748,7 @@ export function useSendWhatsAppMessage() {
           {
             p_conversation_id: conversation.id,
             p_session_id: session.id,
+            p_remote_jid: conversation.remote_jid,
           },
         );
 
@@ -756,8 +757,10 @@ export function useSendWhatsAppMessage() {
           throw new Error("Mensagem enviada no WhatsApp, mas o CRM não conseguiu religar a conversa à sessão ativa.");
         }
 
+        conversation.id = reboundConversation?.id || conversation.id;
         conversation.session_id = reboundConversation?.session_id || session.id;
         conversation.organization_id = reboundConversation?.organization_id || conversation.organization_id;
+        conversation.lead_id = reboundConversation?.lead_id || conversation.lead_id;
         (conversation as any).session = session;
       }
 
@@ -841,7 +844,7 @@ export function useSendWhatsAppMessage() {
         
         console.log("[useSendWhatsAppMessage] Mutation complete!");
 
-      return { ...sendResult.data, clientMessageId };
+      return { ...sendResult.data, clientMessageId, conversationId: conversation.id };
     },
     // Optimistic update: add message to cache immediately
     onMutate: async (variables) => {
@@ -925,32 +928,37 @@ export function useSendWhatsAppMessage() {
       );
 
       // Return context with snapshot
-      return { previousMessages, optimisticId };
+      return { previousMessages, optimisticId, conversationId };
     },
     onSuccess: (result, variables, context) => {
-      const conversationId = variables.conversation.id;
+      const conversationId = (result as any)?.conversationId || variables.conversation.id;
+      const originalConversationId = context?.conversationId || variables.conversation.id;
+      const messageKeys = new Set([conversationId, originalConversationId]);
       
       // Update optimistic message with real data across all variants of the key
       if (context?.optimisticId) {
-        queryClient.setQueriesData<WhatsAppMessage[]>(
-          {
-            predicate: (q) =>
-              Array.isArray(q.queryKey) &&
-              q.queryKey[0] === "whatsapp-messages" &&
-              q.queryKey[1] === conversationId,
-          },
-          (old) => old?.map(msg =>
-            msg.id === context.optimisticId
-              ? {
-                  ...msg,
-                  id: result?.clientMessageId || msg.id,
-                  status: "sent",
-                  media_url: variables.mediaUrl || msg.media_url,
-                  media_status: variables.mediaUrl || msg.media_url ? "ready" : msg.media_status,
-                }
-              : msg
-          )
-        );
+        for (const cacheConversationId of messageKeys) {
+          queryClient.setQueriesData<WhatsAppMessage[]>(
+            {
+              predicate: (q) =>
+                Array.isArray(q.queryKey) &&
+                q.queryKey[0] === "whatsapp-messages" &&
+                q.queryKey[1] === cacheConversationId,
+            },
+            (old) => old?.map(msg =>
+              msg.id === context.optimisticId
+                ? {
+                    ...msg,
+                    id: result?.clientMessageId || msg.id,
+                    conversation_id: conversationId,
+                    status: "sent",
+                    media_url: variables.mediaUrl || msg.media_url,
+                    media_status: variables.mediaUrl || msg.media_url ? "ready" : msg.media_status,
+                  }
+                : msg
+            )
+          );
+        }
       }
 
       // Invalidate conversations to update last_message
@@ -959,12 +967,33 @@ export function useSendWhatsAppMessage() {
         predicate: (q) =>
           Array.isArray(q.queryKey) &&
           q.queryKey[0] === "whatsapp-messages" &&
-          q.queryKey[1] === conversationId,
+          messageKeys.has(q.queryKey[1] as string),
       });
     },
     onError: (error: Error, variables, context) => {
-      // Rollback optimistic update on error
-      if (context?.previousMessages) {
+      const errorMessage = error.message || "";
+      const sentButNotPersisted =
+        errorMessage.includes("Mensagem enviada no WhatsApp, mas");
+
+      if (sentButNotPersisted && context?.optimisticId) {
+        queryClient.setQueriesData<WhatsAppMessage[]>(
+          {
+            predicate: (q) =>
+              Array.isArray(q.queryKey) &&
+              q.queryKey[0] === "whatsapp-messages" &&
+              q.queryKey[1] === variables.conversation.id,
+          },
+          (old) => old?.map(msg =>
+            msg.id === context.optimisticId
+              ? {
+                  ...msg,
+                  status: "error",
+                  media_error: errorMessage,
+                }
+              : msg
+          )
+        );
+      } else if (context?.previousMessages) {
         queryClient.setQueriesData(
           {
             predicate: (q) =>
@@ -976,7 +1005,6 @@ export function useSendWhatsAppMessage() {
         );
       }
       
-      const errorMessage = error.message || "";
       const isRateLimited = errorMessage.includes("RATE_LIMIT_LOCAL") ||
                             errorMessage.includes("rate_limit_exceeded") ||
                             errorMessage.includes("Muitas requisi");
