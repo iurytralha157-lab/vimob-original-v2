@@ -120,7 +120,7 @@ export function TaskOutcomeDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="w-[90%] sm:max-w-md sm:w-full rounded-lg">
+      <DialogContent className="w-[92vw] max-w-[92vw] max-h-[80vh] overflow-y-auto rounded-lg sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
@@ -138,7 +138,7 @@ export function TaskOutcomeDialog({
           <RadioGroup
             value={selectedOutcome}
             onValueChange={(value) => setSelectedOutcome(value as TaskOutcome)}
-            className="space-y-2"
+            className="grid grid-cols-1 gap-2 md:grid-cols-2"
           >
             {outcomes.map((option) => (
               <label

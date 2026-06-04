@@ -79,12 +79,13 @@ export function MobileBottomNav() {
   const isActive = (path: string) => {
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
+  const isPipelinesPage = location.pathname === '/crm/pipelines' || location.pathname.startsWith('/crm/pipelines/');
 
   const getLabel = (labelKey: string): string => {
     return (t.nav as Record<string, string>)[labelKey] || labelKey;
   };
 
-  const showFab = hasModule('crm');
+  const showFab = hasModule('crm') && !isPipelinesPage;
 
   return (
     <>

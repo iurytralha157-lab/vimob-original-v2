@@ -1112,32 +1112,19 @@ export default function Pipelines() {
                 isLoadingAds={isLoadingAds}
               />
 
-              <Button
-                size="sm"
-                className="h-8 px-4 font-bold text-[11px] uppercase tracking-wider"
-                onClick={() => openNewLeadDialog()}
-              >
-                <Plus className="h-3.5 w-3.5 mr-1.5" />
-                {newButtonLabel}
-              </Button>
+              {!isMobile && (
+                <Button
+                  size="sm"
+                  className="h-8 px-4 font-bold text-[11px] uppercase tracking-wider"
+                  onClick={() => openNewLeadDialog()}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1.5" />
+                  {newButtonLabel}
+                </Button>
+              )}
             </div>
           </div>
         </div>
-
-
-        {/* Floating Action Button (FAB) - Only for Mobile */}
-        {isMobile && (
-          <div className="fixed bottom-8 right-8 z-50">
-            <Button 
-              size="lg" 
-              className="rounded-full shadow-2xl h-14 px-6 gap-2 bg-primary hover:bg-primary/90 text-primary-foreground border-none transition-all hover:scale-105 active:scale-95"
-              onClick={() => openNewLeadDialog()}
-            >
-              <Plus className="h-5 w-5" />
-              <span className="font-bold tracking-tight uppercase text-xs">{newButtonLabel}</span>
-            </Button>
-          </div>
-        )}
 
         {/* Empty State */}
         {stages.length === 0 && (

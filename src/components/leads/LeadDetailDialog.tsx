@@ -1840,7 +1840,7 @@ export function LeadDetailDialog({
 
   // Desktop content - defined as JSX variable (NOT a component function) to prevent re-mounting
   const DesktopContent = () => (
-    <div className="flex flex-col h-full max-h-[90vh]">
+    <div className="flex flex-col h-full max-h-[80vh]">
       {/* Premium Header */}
       <div className="relative p-6 border-b bg-gradient-to-br from-card via-card to-primary/5 overflow-hidden">
         {/* Subtle background pattern */}
@@ -2999,7 +2999,7 @@ export function LeadDetailDialog({
   return (
     <>
       <Dialog open={!!lead} onOpenChange={() => onClose()}>
-        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] p-0 overflow-hidden animate-scale-in">
+        <DialogContent className="w-[80vw] max-w-[80vw] max-h-[80vh] p-0 overflow-hidden animate-scale-in">
           {/* Inline JSX instead of <DesktopContent /> to prevent re-mounting */}
           {DesktopContent()}
         </DialogContent>
