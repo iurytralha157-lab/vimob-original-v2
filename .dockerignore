@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+dist
+tmp
+logs
+*.log
+vite-dev.log
+vite-dev.err.log
+.DS_Store
+.vscode
+.idea
