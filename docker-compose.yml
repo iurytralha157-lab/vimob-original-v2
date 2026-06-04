@@ -1,3 +1,5 @@
+version: "3.7"
+
 services:
   vimob:
     image: ghcr.io/iurytralha157-lab/vimob-original-v2:latest
@@ -14,6 +16,7 @@ services:
         - traefik.http.routers.vimob.rule=Host(`vimob.vettercompany.com.br`)
         - traefik.http.routers.vimob.entrypoints=websecure
         - traefik.http.routers.vimob.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.vimob.priority=1
         - traefik.http.routers.vimob.service=vimob
         - traefik.http.services.vimob.loadbalancer.server.port=80
         - traefik.http.services.vimob.loadbalancer.passHostHeader=true
