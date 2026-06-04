@@ -321,8 +321,8 @@ export function MetaIntegrationSettings({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="relative w-full xl:max-w-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={formSearch}
@@ -331,14 +331,14 @@ export function MetaIntegrationSettings({
             className="pl-9"
           />
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" className="gap-2" onClick={() => setAccountModalOpen(true)}>
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <Button variant="outline" className="gap-2 whitespace-nowrap" onClick={() => setAccountModalOpen(true)}>
             <Settings className="h-4 w-4" />
-            Gerenciar contas do Facebook
+            Gerenciar contas
           </Button>
-          <Button className="gap-2" onClick={() => setWizardOpen(true)}>
+          <Button className="gap-2 whitespace-nowrap" onClick={() => setWizardOpen(true)}>
             <Plus className="h-4 w-4" />
-            Adicionar formulário
+            Adicionar formulários
           </Button>
         </div>
       </div>
@@ -366,7 +366,20 @@ export function MetaIntegrationSettings({
               </TableRow>
             ) : (
               configs
-                .filter((config) => (config.form_name || config.form_id).toLowerCase().includes(formSearch.toLowerCase()))
+                .filter((config) => {
+                  const search = formSearch.trim().toLowerCase();
+                  if (!search) return true;
+                  const integration = integrationById.get(config.integration_id);
+                  return [
+                    config.form_name,
+                    config.form_id,
+                    integration?.facebook_account_name,
+                    integration?.page_name,
+                    userNames[config.created_by || ""],
+                  ]
+                    .filter(Boolean)
+                    .some((value) => String(value).toLowerCase().includes(search));
+                })
                 .map((config) => {
                   const integration = integrationById.get(config.integration_id);
                   return (
