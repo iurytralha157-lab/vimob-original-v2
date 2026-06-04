@@ -1014,9 +1014,9 @@ export function AccountTab() {
             </div>}
 
             {/* Financial Settings */}
-            {isAdmin && <div className="space-y-3 pt-4 border-t">
+            {isAdmin && <div className="pt-4 border-t">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <h4 className="text-xl font-semibold text-foreground flex items-center gap-2">
+                <h4 className="text-sm font-semibold text-foreground flex items-center gap-2 whitespace-nowrap">
                   Configurações Financeiras
                   <TooltipProvider>
                     <Tooltip>
@@ -1029,7 +1029,7 @@ export function AccountTab() {
                     </Tooltip>
                   </TooltipProvider>
                 </h4>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
                   <Label className="flex items-center gap-2 text-xs whitespace-nowrap">
                     <Percent className="h-3 w-3" />
                     Comissão Padrão (%)
