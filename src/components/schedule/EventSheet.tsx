@@ -262,7 +262,7 @@ export function EventSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex max-h-[80vh] w-[calc(100vw-24px)] max-w-[620px] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#202124] p-0 text-white shadow-2xl sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:w-[min(620px,calc(100vw-40px))] sm:-translate-x-1/2 sm:-translate-y-1/2"
+        className="!w-[calc(100vw-24px)] !max-w-[620px] flex max-h-[80vh] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#202124] p-0 text-white shadow-2xl [&>button.absolute.right-4.top-4]:hidden sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:!w-[min(620px,calc(100vw-40px))] sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:!max-w-[620px]"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{isExisting ? "Detalhes da atividade" : "Nova atividade"}</SheetTitle>
@@ -354,7 +354,7 @@ export function EventSheet({
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_92px_14px_92px]">
+                <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_92px_14px_92px]">
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="ghost" className="h-10 justify-start rounded-md bg-white/10 px-3 text-sm font-medium text-zinc-100 hover:bg-white/15 hover:text-white">
