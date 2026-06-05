@@ -1,6 +1,11 @@
 import { useEffect } from 'react';
 import { useSystemSettings } from './use-system-settings';
 
+const DEFAULT_BRAND_ICON = '/favicon.webp?v=20260605';
+const DEFAULT_BRAND_IMAGE = 'https://vimob.vettercompany.com.br/favicon.webp';
+const DEFAULT_APP_NAME = 'Vimob CRM';
+const DEFAULT_APP_DESCRIPTION = 'Inteligência imobiliária para transformar leads em vendas.';
+
 /**
  * Hook to dynamically inject PWA and branding tags into the document head
  * based on system settings from the database.
@@ -11,9 +16,9 @@ export function useSystemBranding() {
   useEffect(() => {
     if (!settings) return;
 
-    const pwaIcon = settings.pwa_icon_url;
-    const favicon = settings.favicon_url_light || settings.logo_url_light;
-    const appName = "Vimob Crm"; // Could also come from settings if available
+    const pwaIcon = DEFAULT_BRAND_ICON;
+    const favicon = DEFAULT_BRAND_ICON;
+    const appName = DEFAULT_APP_NAME; // Could also come from settings if available
 
     // 1. Update Favicon
     if (favicon) {
@@ -24,6 +29,7 @@ export function useSystemBranding() {
         document.head.appendChild(favNode);
       }
       favNode.setAttribute('href', favicon);
+      favNode.setAttribute('type', favicon.endsWith('.webp') ? 'image/webp' : 'image/png');
     }
 
     // 2. Update Apple Touch Icons (Critical for iOS PWA Icon)
@@ -49,9 +55,10 @@ export function useSystemBranding() {
       });
       
       // Also update standard icon link
-      const iconNode = document.querySelector("link[rel='icon'][type='image/png']");
+      const iconNode = document.querySelector("link[rel='icon']");
       if (iconNode) {
         iconNode.setAttribute('href', pwaIcon);
+        iconNode.setAttribute('type', pwaIcon.endsWith('.webp') ? 'image/webp' : 'image/png');
       }
     }
 
@@ -60,7 +67,13 @@ export function useSystemBranding() {
       'apple-mobile-web-app-title': appName,
       'application-name': appName,
       'og:title': appName,
-      'twitter:title': appName
+      'description': DEFAULT_APP_DESCRIPTION,
+      'og:description': DEFAULT_APP_DESCRIPTION,
+      'og:image': DEFAULT_BRAND_IMAGE,
+      'og:image:secure_url': DEFAULT_BRAND_IMAGE,
+      'twitter:title': appName,
+      'twitter:description': DEFAULT_APP_DESCRIPTION,
+      'twitter:image': DEFAULT_BRAND_IMAGE
     };
 
     Object.entries(metaTags).forEach(([name, value]) => {

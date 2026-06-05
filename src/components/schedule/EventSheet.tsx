@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { format, addMinutes, differenceInMinutes } from "date-fns";
+import { format, addMinutes, differenceInMinutes, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
-  Phone, Mail, Calendar as CalendarIcon, MessageSquare, MapPin, X, User,
-  Search, Clock, Plus, Send, Building2, Users, CheckCircle, Trash2, Lock,
-  Video, ClipboardList, Eye, Repeat2, Menu, Briefcase, Paperclip,
+  Phone, Mail, MessageSquare, X, User, Search, Clock, Plus, Send, Building2,
+  Users, CheckCircle, Trash2, Lock, Video, ClipboardList, Home,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -24,15 +23,17 @@ import {
 import { cn, getCurrentTimeForInput, getBrasiliaTime } from "@/lib/utils";
 import {
   useCreateScheduleEvent, useUpdateScheduleEvent, useDeleteScheduleEvent,
-  EventType, ScheduleEvent,
+  EventType, ScheduleEvent, ScheduleEventVisibility,
 } from "@/hooks/use-schedule-events";
 import { useUsers } from "@/hooks/use-users";
 import { useLeads } from "@/hooks/use-leads";
 import { useProperties } from "@/hooks/use-properties";
 import { useScheduleComments } from "@/hooks/use-schedule-comments";
 import { useScheduleEventAssignees } from "@/hooks/use-schedule-event-assignees";
+import { useTeams } from "@/hooks/use-teams";
 import { Link } from "react-router-dom";
 import { PropertyPickerDialog } from "@/components/properties/PropertyPickerDialog";
+import { PropertyPreviewDialog } from "@/components/properties/PropertyPreviewDialog";
 
 const eventTypes: { type: EventType; label: string; icon: React.ElementType; color: string }[] = [
   { type: "call", label: "Ligação", icon: Phone, color: "#6366f1" },
@@ -40,17 +41,14 @@ const eventTypes: { type: EventType; label: string; icon: React.ElementType; col
   { type: "meeting", label: "Reunião", icon: Video, color: "#8b5cf6" },
   { type: "task", label: "Tarefa", icon: ClipboardList, color: "#f59e0b" },
   { type: "message", label: "Mensagem", icon: MessageSquare, color: "#22c55e" },
-  { type: "visit", label: "Visita", icon: Eye, color: "#ec4899" },
+  { type: "visit", label: "Visita ao imóvel", icon: Home, color: "#ec4899" },
 ];
 
-const durationOptions = [
-  { value: 15, label: "15 min" },
-  { value: 30, label: "30 min" },
-  { value: 45, label: "45 min" },
-  { value: 60, label: "1 hora" },
-  { value: 90, label: "1h 30min" },
-  { value: 120, label: "2 horas" },
-];
+const timeOptions = Array.from({ length: 24 * 4 }, (_, index) => {
+  const hours = Math.floor(index / 4);
+  const minutes = (index % 4) * 15;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+});
 
 const recurrenceOptions = [
   { value: "none", label: "Não se repete" },
@@ -58,6 +56,42 @@ const recurrenceOptions = [
   { value: "monthly", label: "Mensal" },
   { value: "yearly", label: "Anual" },
 ] as const;
+
+const visibilityOptions: { value: ScheduleEventVisibility; label: string }[] = [
+  { value: "default", label: "Padrão" },
+  { value: "public", label: "Público" },
+  { value: "private", label: "Particular" },
+];
+
+const formatPropertyPrice = (value: number | null, tipo: string | null) => {
+  if (!value) return "Pre\u00e7o n\u00e3o informado";
+  if (tipo === "Aluguel") {
+    return `R$ ${value.toLocaleString("pt-BR")}/m\u00eas`;
+  }
+  return `R$ ${value.toLocaleString("pt-BR")}`;
+};
+
+function getNextFutureQuarterHour() {
+  const next = getBrasiliaTime();
+  const nextQuarter = Math.floor(next.getMinutes() / 15) * 15 + 15;
+  next.setMinutes(nextQuarter, 0, 0);
+  return next;
+}
+
+function getInitialStartDate(defaultDate?: Date) {
+  const now = getBrasiliaTime();
+  const fallback = getNextFutureQuarterHour();
+  if (!defaultDate) return fallback;
+
+  const selected = new Date(defaultDate);
+  const hasExplicitTime = selected.getHours() !== 0 || selected.getMinutes() !== 0 || selected.getSeconds() !== 0;
+
+  if (isSameDay(selected, now) && (!hasExplicitTime || selected <= now)) {
+    return fallback;
+  }
+
+  return selected;
+}
 
 interface EventSheetProps {
   open: boolean;
@@ -73,19 +107,22 @@ export function EventSheet({
   open, onOpenChange, event, defaultUserId, defaultDate, leadId, leadName,
 }: EventSheetProps) {
   const { data: users = [] } = useUsers();
+  const { data: teams = [] } = useTeams();
   const createEvent = useCreateScheduleEvent();
   const updateEvent = useUpdateScheduleEvent();
   const deleteEvent = useDeleteScheduleEvent();
 
   const isExisting = !!event;
   const isCompleted = event?.status === "completed";
-  const locked = isCompleted;
+  const [isEditing, setIsEditing] = useState(false);
+  const locked = isCompleted || (isExisting && !isEditing);
 
   const [selectedType, setSelectedType] = useState<EventType>("task");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
   const [primaryUserId, setPrimaryUserId] = useState("");
+  const [visibility, setVisibility] = useState<ScheduleEventVisibility>("default");
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [time, setTime] = useState("");
   const [duration, setDuration] = useState(30);
@@ -104,9 +141,15 @@ export function EventSheet({
 
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [selectedPropertyLabel, setSelectedPropertyLabel] = useState<string | null>(null);
+  const [propertyPreviewOpen, setPropertyPreviewOpen] = useState(false);
   const { data: allProperties = [] } = useProperties();
+  const previewProperty = useMemo(
+    () => (selectedPropertyId ? ({ id: selectedPropertyId } as any) : null),
+    [selectedPropertyId],
+  );
 
   const [showAssigneePicker, setShowAssigneePicker] = useState(false);
+  const [selectedTeamId, setSelectedTeamId] = useState("");
   const [pendingAssigneeIds, setPendingAssigneeIds] = useState<string[]>([]);
   const { assignees, addAssignee, removeAssignee } = useScheduleEventAssignees(event?.id);
   const { comments, addComment, isAdding } = useScheduleComments(event?.id);
@@ -115,11 +158,13 @@ export function EventSheet({
   useEffect(() => {
     if (!open) return;
     if (event) {
+      setIsEditing(false);
       setSelectedType((event.event_type as EventType) || "task");
       setTitle(event.title || "");
       setDescription(event.description || "");
       setLocation(event.location || "");
       setPrimaryUserId(event.user_id || defaultUserId || "");
+      setVisibility(((event as any).visibility as ScheduleEventVisibility) || "default");
       setDate(event.start_time ? new Date(event.start_time) : getBrasiliaTime());
       setTime(event.start_time ? format(new Date(event.start_time), "HH:mm") : getCurrentTimeForInput());
       setIsAllDay(Boolean(event.is_all_day));
@@ -132,21 +177,21 @@ export function EventSheet({
           : null
       );
       setRecurrenceRule(((event as any).recurrence_rule as any) || "none");
-      setRecurrenceMode((event as any).recurrence_until ? "until" : "count");
-      setRecurrenceCount((event as any).recurrence_count || 4);
-      setRecurrenceUntil((event as any).recurrence_until ? new Date((event as any).recurrence_until) : undefined);
       if (event.start_time && event.end_time) {
         const d = differenceInMinutes(new Date(event.end_time), new Date(event.start_time));
         setDuration(d > 0 ? d : 30);
       }
     } else {
+      setIsEditing(true);
       setSelectedType("task");
       setTitle("");
       setDescription("");
       setLocation("");
       setPrimaryUserId(defaultUserId || "");
-      setDate(defaultDate || getBrasiliaTime());
-      setTime(defaultDate ? format(defaultDate, "HH:mm") : getCurrentTimeForInput());
+      setVisibility("default");
+      const initialStart = getInitialStartDate(defaultDate);
+      setDate(initialStart);
+      setTime(format(initialStart, "HH:mm"));
       setIsAllDay(false);
       setSelectedLeadId(leadId || null);
       setSelectedLeadName(leadName || null);
@@ -154,11 +199,9 @@ export function EventSheet({
       setSelectedPropertyLabel(null);
       setDuration(30);
       setRecurrenceRule("none");
-      setRecurrenceMode("count");
-      setRecurrenceCount(4);
-      setRecurrenceUntil(undefined);
       durationTouched.current = false;
     }
+    setSelectedTeamId("");
     setPendingAssigneeIds([]);
     setCommentText("");
   }, [open, event, defaultUserId, defaultDate, leadId, leadName]);
@@ -179,6 +222,21 @@ export function EventSheet({
     start.setHours(hh, mm, 0, 0);
     return format(addMinutes(start, duration), "HH:mm");
   }, [date, time, duration]);
+
+  const handleEndTimeChange = (value: string) => {
+    if (!date || !time) return;
+    const [startHour, startMinute] = time.split(":").map(Number);
+    const [endHour, endMinute] = value.split(":").map(Number);
+    if ([startHour, startMinute, endHour, endMinute].some(Number.isNaN)) return;
+
+    const start = new Date(date);
+    start.setHours(startHour, startMinute, 0, 0);
+    const end = new Date(date);
+    end.setHours(endHour, endMinute, 0, 0);
+    const nextDuration = differenceInMinutes(end, start);
+    setDuration(nextDuration > 0 ? nextDuration : nextDuration + 24 * 60);
+    durationTouched.current = true;
+  };
 
   const allAssignees = useMemo(() => {
     const list: { id: string; name: string; avatar_url: string | null; primary: boolean; pending?: boolean }[] = [];
@@ -203,12 +261,40 @@ export function EventSheet({
     (u) => u.id !== primaryUserId && !assignees.some((a) => a.id === u.id) && !pendingAssigneeIds.includes(u.id),
   );
 
+  const handleTeamSelect = (teamId: string) => {
+    setSelectedTeamId(teamId);
+    const team = teams.find((item) => item.id === teamId);
+    if (!team) return;
+
+    const memberIds = (team.members || [])
+      .map((member) => member.user?.id || member.user_id)
+      .filter((id): id is string => Boolean(id));
+
+    const nextPending = memberIds.filter(
+      (id) => id !== primaryUserId && !assignees.some((assignee) => assignee.id === id) && !pendingAssigneeIds.includes(id),
+    );
+
+    if (!primaryUserId && memberIds[0]) {
+      setPrimaryUserId(memberIds[0]);
+    }
+    if (nextPending.length > 0) {
+      setPendingAssigneeIds((prev) => Array.from(new Set([...prev, ...nextPending])));
+    }
+  };
+
   const handleSubmit = async () => {
     if (!title.trim() || !date || !primaryUserId) return;
     const [hh, mm] = time.split(":").map(Number);
     const start = new Date(date);
-    start.setHours(hh, mm, 0, 0);
-    const end = addMinutes(start, duration);
+    if (isAllDay) {
+      start.setHours(0, 0, 0, 0);
+    } else {
+      start.setHours(hh, mm, 0, 0);
+    }
+    const end = isAllDay ? new Date(start) : addMinutes(start, duration);
+    if (isAllDay) {
+      end.setHours(23, 59, 59, 999);
+    }
 
     const payload = {
       title: title.trim(),
@@ -221,18 +307,15 @@ export function EventSheet({
       lead_id: selectedLeadId,
       property_id: selectedType === "visit" ? selectedPropertyId : null,
       location: location.trim() || undefined,
+      visibility,
       recurrence_rule: !event ? recurrenceRule : undefined,
-      recurrence_count: !event && recurrenceRule !== "none" && recurrenceMode === "count" ? recurrenceCount : undefined,
-      recurrence_until: !event && recurrenceRule !== "none" && recurrenceMode === "until" && recurrenceUntil ? recurrenceUntil.toISOString() : undefined,
+      assignee_ids: !event ? pendingAssigneeIds : undefined,
     };
 
     if (event) {
       await updateEvent.mutateAsync({ id: event.id, ...payload } as any);
     } else {
-      const created = await createEvent.mutateAsync(payload);
-      if (created?.id && pendingAssigneeIds.length > 0) {
-        pendingAssigneeIds.forEach((userId) => addAssignee(userId));
-      }
+      await createEvent.mutateAsync(payload);
     }
     onOpenChange(false);
   };
@@ -259,29 +342,67 @@ export function EventSheet({
   const canSubmit = !locked && title.trim() && date && primaryUserId;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <>
+      <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="!w-[calc(100vw-24px)] !max-w-[620px] flex max-h-[80vh] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#202124] p-0 text-white shadow-2xl [&>button.absolute.right-4.top-4]:hidden sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:!w-[min(620px,calc(100vw-40px))] sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:!max-w-[620px]"
+        overlayClassName="bg-black/35"
+        className="!h-auto !w-[calc(100vw-24px)] !max-w-[560px] flex max-h-[78vh] flex-col overflow-hidden rounded-[24px] border-0 bg-[#090909]/78 p-0 text-white shadow-[0_24px_80px_rgba(0,0,0,0.62)] backdrop-blur-2xl [&>button.absolute.right-4.top-4]:hidden sm:inset-y-auto sm:right-auto sm:left-1/2 sm:top-1/2 sm:!w-[min(560px,calc(100vw-40px))] sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:!max-w-[560px]"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{isExisting ? "Detalhes da atividade" : "Nova atividade"}</SheetTitle>
         </SheetHeader>
 
-        <div className="flex h-12 shrink-0 items-center justify-between px-5 text-zinc-400">
-          <Menu size={18} />
+        <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-6 pb-1 pt-4 sm:grid-cols-[minmax(0,1fr)_158px_auto] sm:px-8">
+          {locked ? (
+            <h2 className="min-h-9 rounded-lg bg-[#202020] px-4 py-2 text-sm font-medium leading-tight text-zinc-100">{title || "Sem titulo"}</h2>
+          ) : (
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Adicionar titulo"
+              className="h-9 rounded-lg border-0 bg-[#202020] px-4 text-sm font-medium text-white shadow-none focus-visible:ring-0 placeholder:text-zinc-500"
+            />
+          )}
+          <div className="col-span-2 min-w-0 sm:col-span-1">
+            {locked ? (
+              <FieldPill className="h-9 w-full justify-center px-3 text-xs">
+                <TypeIcon className="h-3.5 w-3.5" />
+                {typeConf.label}
+              </FieldPill>
+            ) : (
+              <Select value={selectedType} onValueChange={(value: EventType) => setSelectedType(value)}>
+                <SelectTrigger className="h-9 w-full border-0 bg-[#202020] px-3 text-xs font-semibold leading-none text-zinc-100 shadow-none focus:ring-0 [&>span]:!flex [&>span]:items-center [&>span]:gap-2 [&>svg]:h-3.5 [&>svg]:w-3.5 [&>svg]:text-zinc-400">
+                  <span className="min-w-0">
+                    <TypeIcon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+                    <span className="truncate">{typeConf.label}</span>
+                  </span>
+                </SelectTrigger>
+                <SelectContent className="border-white/10 bg-[#202020] text-zinc-100">
+                  {eventTypes.map(({ type, label, icon: Icon }) => (
+                    <SelectItem key={type} value={type}>
+                      <span className="inline-flex items-center gap-2">
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="rounded-full p-1.5 text-muted-foreground transition hover:bg-white/10 hover:text-white"
+            className="row-start-1 shrink-0 rounded-full p-1.5 text-zinc-400 transition hover:bg-white/10 hover:text-white sm:col-start-3"
             aria-label="Fechar"
           >
-            <X size={18} />
+            <X size={22} strokeWidth={1.7} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-3">
-          <div className="pl-10">
+        <div className="flex-1 overflow-y-auto px-6 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-8">
+          <div className="hidden">
             {locked ? (
               <h2 className="border-b border-primary/70 pb-2 text-[22px] font-normal leading-tight">{title || "Sem título"}</h2>
             ) : (
@@ -289,12 +410,12 @@ export function EventSheet({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Adicionar título"
-                className="h-11 rounded-none border-0 border-b border-primary/70 bg-transparent px-0 text-[22px] font-normal text-white shadow-none focus-visible:ring-0 placeholder:text-zinc-300"
+                className="h-10 rounded-lg border-0 bg-[#202020] px-4 text-base font-medium text-white shadow-none focus-visible:ring-1 focus-visible:ring-primary/70 placeholder:text-zinc-500"
               />
             )}
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2 pl-10">
+          <div className="hidden">
             <button
               type="button"
               disabled={locked}
@@ -341,51 +462,47 @@ export function EventSheet({
             )}
           </div>
 
-          {locked && (
-            <AgendaRow icon={<Lock size={18} />}>
-              <span className="text-sm text-zinc-400">Atividade concluída, somente leitura</span>
+          {isCompleted && (
+            <AgendaRow icon={<Lock size={18} />} align="center">
+              <span className="inline-flex h-8 items-center rounded-lg bg-emerald-500/15 px-3 text-sm font-semibold text-emerald-300">Atividade concluída, somente leitura</span>
             </AgendaRow>
           )}
 
-          <AgendaRow icon={<Clock size={19} />}>
+          <AgendaRow icon={<Clock size={19} />} align={locked ? "center" : "start"}>
             {locked ? (
-              <div className="text-sm text-zinc-200">
+              <div className="text-sm font-semibold text-zinc-100">
                 {date ? format(date, "EEEE, dd 'de' MMMM", { locale: ptBR }) : "-"} · {time} - {endTimePreview || "-"}
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_92px_14px_92px]">
+              <div className="space-y-1">
+                <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_76px_12px_76px]">
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="ghost" className="h-10 justify-start rounded-md bg-white/10 px-3 text-sm font-medium text-zinc-100 hover:bg-white/15 hover:text-white">
+                      <button type="button" className="min-h-10 rounded-none bg-transparent px-0 text-left text-base font-medium leading-tight text-zinc-200 transition hover:text-white">
                         {date ? format(date, "EEEE, dd 'de' MMMM", { locale: ptBR }) : "Selecionar data"}
-                      </Button>
+                      </button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
                       <Calendar mode="single" selected={date} onSelect={setDate} locale={ptBR} />
                     </PopoverContent>
                   </Popover>
-                  <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="h-10 border-0 bg-white/10 text-sm text-white" disabled={isAllDay} />
+                  <TimePicker value={time} onChange={setTime} disabled={isAllDay} />
                   <span className="hidden text-center text-zinc-400 sm:block">-</span>
-                  <div className="flex h-10 items-center rounded-md bg-white/10 px-3 text-sm text-zinc-100">{endTimePreview || "--:--"}</div>
+                  <TimePicker value={endTimePreview || time} onChange={handleEndTimeChange} disabled={isAllDay} />
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="inline-flex items-center gap-2 text-sm text-zinc-200">
+                <div className="flex flex-wrap items-center gap-3 pl-0.5 text-xs text-zinc-500">
+                  <label className="inline-flex items-center gap-1.5">
                     <input
                       type="checkbox"
                       checked={isAllDay}
                       onChange={(event) => setIsAllDay(event.target.checked)}
-                      className="h-5 w-5 rounded-sm border-2 border-zinc-400 bg-transparent accent-blue-300"
+                      className="h-4 w-4 rounded-sm bg-transparent accent-primary"
                     />
                     Dia inteiro
                   </label>
-                  <span className="text-sm font-medium text-blue-300">Fuso horário</span>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
                   <Select value={recurrenceRule} onValueChange={(value: any) => setRecurrenceRule(value)}>
-                    <SelectTrigger className="h-10 w-[172px] border-0 bg-white/10 text-sm text-white">
+                    <SelectTrigger className="h-6 w-[126px] border-0 bg-transparent px-0 text-xs text-zinc-500 shadow-none hover:text-zinc-300 focus:ring-0">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -394,20 +511,9 @@ export function EventSheet({
                       ))}
                     </SelectContent>
                   </Select>
-
-                  <Select value={String(duration)} onValueChange={(value) => { setDuration(Number(value)); durationTouched.current = true; }}>
-                    <SelectTrigger className="h-10 w-[126px] border-0 bg-white/10 text-sm text-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {durationOptions.map((opt) => (
-                        <SelectItem key={opt.value} value={String(opt.value)}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
 
-                {recurrenceRule !== "none" && (
+                {false && recurrenceRule !== "none" && (
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <Select value={recurrenceMode} onValueChange={(value: any) => setRecurrenceMode(value)}>
                       <SelectTrigger className="h-10 border-0 bg-white/10 text-sm text-white">
@@ -447,8 +553,8 @@ export function EventSheet({
             )}
           </AgendaRow>
 
-          <AgendaRow icon={<Users size={19} />}>
-            <div className="flex min-h-10 items-center gap-2">
+          <AgendaRow icon={<Users size={18} />} label="Responsáveis" inline>
+            <div className="flex min-h-10 flex-wrap items-center gap-2">
               {allAssignees.length > 0 ? (
                 allAssignees.map((a) => (
                   <div key={a.id} className="group relative">
@@ -464,7 +570,7 @@ export function EventSheet({
                           if (a.pending) setPendingAssigneeIds((prev) => prev.filter((id) => id !== a.id));
                           else removeAssignee(a.id);
                         }}
-                        className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-[#202124] bg-destructive text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                        className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
                         aria-label="Remover responsável"
                       >
                         <X size={8} strokeWidth={3} />
@@ -478,7 +584,7 @@ export function EventSheet({
               {!locked && availableUsers.length > 0 && (
                 <Popover open={showAssigneePicker} onOpenChange={setShowAssigneePicker}>
                   <PopoverTrigger asChild>
-                    <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-zinc-500 text-zinc-300 hover:border-primary hover:text-primary">
+                      <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full bg-[#202020] text-zinc-300 transition hover:bg-[#2a2a2a] hover:text-primary">
                       <Plus size={14} />
                     </button>
                   </PopoverTrigger>
@@ -511,22 +617,60 @@ export function EventSheet({
                   </PopoverContent>
                 </Popover>
               )}
+              {!locked && teams.length > 0 && (
+                <Select value={selectedTeamId} onValueChange={handleTeamSelect}>
+                  <SelectTrigger className="h-8 w-[132px] border-0 bg-[#202020] px-3 text-xs text-zinc-300 shadow-none focus:ring-0">
+                    <SelectValue placeholder="Equipe" />
+                  </SelectTrigger>
+                  <SelectContent className="border-white/10 bg-[#202020] text-zinc-100">
+                    {teams.map((team) => (
+                      <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             {!locked && !primaryUserId && (
               <Select value={primaryUserId} onValueChange={setPrimaryUserId}>
-                <SelectTrigger className="mt-2 h-10 border-0 bg-white/10 text-sm text-white">
+                <SelectTrigger className="mt-2 h-10 border-0 bg-[#202020] text-sm text-white">
                   <SelectValue placeholder="Responsável principal..." />
                 </SelectTrigger>
-                <SelectContent>{users.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
-              </Select>
+              <SelectContent>{users.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+            </Select>
+          )}
+        </AgendaRow>
+
+          <AgendaRow icon={<Lock size={18} />} label="Visibilidade" inline>
+            {locked ? (
+              <FieldPill className="h-9 px-3 text-xs">
+                {visibilityOptions.find((option) => option.value === visibility)?.label || "Padrão"}
+              </FieldPill>
+            ) : (
+              <div className="inline-flex h-9 rounded-lg bg-[#202020] p-1">
+                {visibilityOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setVisibility(option.value)}
+                    className={cn(
+                      "rounded-md px-3 text-xs font-semibold transition",
+                      visibility === option.value
+                        ? "bg-primary text-primary-foreground"
+                        : "text-zinc-400 hover:bg-white/5 hover:text-zinc-100",
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             )}
           </AgendaRow>
 
-          <AgendaRow icon={<User size={19} />}>
+          <AgendaRow icon={<User size={18} />} label="Lead/cliente" inline>
             {selectedLeadId ? (
               <div className="flex items-center justify-between gap-2">
                 {isExisting ? (
-                  <Link to={`/crm/pipelines?lead=${selectedLeadId}`} className="truncate text-sm font-medium text-blue-300 hover:text-blue-200">
+                  <Link to={`/crm/pipelines?lead=${selectedLeadId}`} className="truncate text-sm font-medium text-primary hover:text-primary/80">
                     {selectedLeadName || "Lead vinculado"}
                   </Link>
                 ) : (
@@ -541,7 +685,10 @@ export function EventSheet({
             ) : !locked ? (
               <Popover open={showLeadSelector} onOpenChange={setShowLeadSelector}>
                 <PopoverTrigger asChild>
-                  <button type="button" className="h-10 text-left text-sm text-zinc-300 hover:text-white">Lead/cliente</button>
+                  <button type="button" className="inline-flex h-10 w-full items-center gap-2 rounded-lg bg-[#202020] px-4 text-left text-sm text-zinc-400 hover:text-white">
+                    <Search className="h-4 w-4" />
+                    Buscar por nome, tel...
+                  </button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[360px] p-0" align="start">
                   <Command shouldFilter={false}>
@@ -577,20 +724,12 @@ export function EventSheet({
             )}
           </AgendaRow>
 
-          <AgendaRow icon={<MapPin size={19} />}>
-            {locked ? (
-              <span className="text-sm text-zinc-300">{location || "Sem local"}</span>
-            ) : (
-              <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Adicionar local" className="h-10 border-0 bg-transparent px-0 text-sm text-white shadow-none focus-visible:ring-0 placeholder:text-zinc-400" />
-            )}
-          </AgendaRow>
-
-          <AgendaRow icon={<Building2 size={19} />}>
+          <AgendaRow icon={<Building2 size={18} />} label="Imóvel vinculado" inline>
             {selectedPropertyId ? (
               <div className="flex items-center justify-between gap-2">
-                <Link to={`/imoveis/${selectedPropertyId}`} className="truncate text-sm font-medium text-blue-300 hover:text-blue-200">
+                <button type="button" onClick={() => setPropertyPreviewOpen(true)} className="truncate text-left text-sm font-medium text-primary hover:text-primary/80">
                   {selectedPropertyLabel || "Imóvel selecionado"}
-                </Link>
+                </button>
                 {!locked && (
                   <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => { setSelectedPropertyId(null); setSelectedPropertyLabel(null); }}>
                     <X className="h-3 w-3" />
@@ -605,7 +744,12 @@ export function EventSheet({
                   setSelectedPropertyId(p.id);
                   setSelectedPropertyLabel(`${p.code ? `${p.code} · ` : ""}${p.title || "Imóvel"}`);
                 }}
-                trigger={<button type="button" className="h-10 text-left text-sm text-zinc-300 hover:text-white">Imóvel</button>}
+                trigger={(
+                  <button type="button" className="inline-flex h-10 w-full items-center gap-2 rounded-lg bg-[#202020] px-4 text-left text-sm text-zinc-400 hover:text-white">
+                    <Search className="h-4 w-4" />
+                    Buscar imóvel
+                  </button>
+                )}
               />
             ) : (
               <span className="text-sm text-zinc-400">Sem imóvel</span>
@@ -619,18 +763,18 @@ export function EventSheet({
               <Textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Adicionar uma descrição"
-                rows={2}
-                className="min-h-[40px] resize-none border-0 bg-transparent px-0 text-sm text-white shadow-none focus-visible:ring-0 placeholder:text-zinc-400"
+                placeholder="Adicione observações"
+                rows={4}
+                className="min-h-[132px] resize-none rounded-lg border-0 bg-[#202020] px-4 py-3 text-sm text-white shadow-none focus-visible:ring-0 placeholder:text-zinc-500"
               />
             )}
           </AgendaRow>
 
-          <AgendaRow icon={<Paperclip size={19} />}>
+          <div className="hidden">
             <span className="text-sm font-medium text-blue-300">Adicionar um anexo</span>
-          </AgendaRow>
+          </div>
 
-          <AgendaRow icon={<Briefcase size={19} />}>
+          <div className="hidden">
             <div className="flex flex-wrap gap-2">
               <Select value={primaryUserId} onValueChange={setPrimaryUserId} disabled={locked}>
                 <SelectTrigger className="h-10 w-[150px] border-0 bg-white/10 text-sm text-white">
@@ -646,7 +790,7 @@ export function EventSheet({
                 <span className="h-4 w-4 rounded-full" style={{ background: typeConf.color }} />
               </button>
             </div>
-          </AgendaRow>
+          </div>
 
           {isExisting && (
             <AgendaRow icon={<MessageSquare size={19} />}>
@@ -685,11 +829,11 @@ export function EventSheet({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between border-t border-white/10 px-5 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-4">
           {isExisting ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+                <Button variant="ghost" size="sm" className="gap-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 hover:text-white">
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </AlertDialogTrigger>
@@ -708,32 +852,124 @@ export function EventSheet({
             <span />
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="ml-auto flex flex-1 flex-wrap items-center justify-end gap-2">
             {isExisting && !isCompleted && (
-              <Button variant="ghost" size="sm" onClick={handleMarkDone} disabled={isLoading} className="gap-1.5 text-blue-300 hover:bg-white/10 hover:text-blue-200">
+              <Button variant="ghost" size="sm" onClick={handleMarkDone} disabled={isLoading} className="gap-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white">
                 <CheckCircle size={13} /> Concluir
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isLoading} className="font-semibold text-blue-300 hover:bg-white/10 hover:text-blue-200">
+            <Button variant="ghost" size="sm" onClick={() => (isExisting ? setIsEditing((value) => !value) : onOpenChange(false))} disabled={isLoading || isCompleted} className={cn("rounded-lg font-semibold", !locked ? "order-1 h-11 flex-[3] bg-[#202020] text-zinc-100 hover:bg-[#2a2a2a] hover:text-white" : "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground")}>
+              {isExisting && !isEditing ? "Editar" : "Cancelar"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => (isExisting ? setIsEditing(true) : onOpenChange(false))} disabled={isLoading || isCompleted} className="hidden">
               Mais opções
             </Button>
             {!locked && (
-              <Button size="sm" onClick={handleSubmit} disabled={!canSubmit || isLoading} className="rounded-full bg-blue-300 px-7 text-sm font-semibold text-slate-900 hover:bg-blue-200">
-                {isLoading ? "Salvando..." : "Salvar"}
+              <Button size="sm" onClick={handleSubmit} disabled={!canSubmit || isLoading} className="order-2 h-11 flex-[7] rounded-lg bg-primary px-7 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+                {isLoading ? "Salvando..." : isExisting ? "Salvar" : "Adicionar"}
               </Button>
             )}
           </div>
         </div>
       </SheetContent>
-    </Sheet>
+      </Sheet>
+      <PropertyPreviewDialog
+        property={previewProperty}
+        open={propertyPreviewOpen}
+        onOpenChange={setPropertyPreviewOpen}
+        formatPrice={formatPropertyPrice}
+      />
+    </>
   );
 }
 
-function AgendaRow({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+function AgendaRow({
+  icon,
+  label,
+  children,
+  className,
+  inline = false,
+  align = "start",
+}: {
+  icon: React.ReactNode;
+  label?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  inline?: boolean;
+  align?: "start" | "center";
+}) {
+  if (inline) {
+    return (
+      <div className={cn("grid grid-cols-[28px_104px_minmax(0,1fr)] items-center gap-2 py-1.5 sm:grid-cols-[30px_124px_minmax(0,1fr)]", className)}>
+        <div className="flex justify-center text-zinc-400">{icon}</div>
+        <div className="min-w-0 text-sm font-medium text-zinc-400">{label}</div>
+        <div className="min-w-0">{children}</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-[40px_1fr] gap-2 border-b border-white/10 py-3 last:border-b-0">
-      <div className="flex justify-center pt-2 text-zinc-400">{icon}</div>
-      <div className="min-w-0">{children}</div>
+    <div className={cn("grid grid-cols-[30px_1fr] gap-3", align === "center" ? "items-center py-1.5" : "items-start py-2", className)}>
+      <div className={cn("flex justify-center text-zinc-400", align === "start" && "pt-2")}>{icon}</div>
+      <div className="min-w-0">
+        {label && <div className="mb-1.5 text-sm font-medium text-zinc-400">{label}</div>}
+        {children}
+      </div>
     </div>
+  );
+}
+
+function FieldPill({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cn("inline-flex h-10 items-center gap-2 rounded-lg bg-[#202020] px-4 text-sm text-zinc-200", className)}>
+      {children}
+    </div>
+  );
+}
+
+function TimePicker({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="inline-flex h-10 min-w-[76px] items-center justify-center rounded-lg bg-[#202020] px-3 text-sm font-semibold text-zinc-100 transition hover:bg-[#2a2a2a] disabled:opacity-50"
+        >
+          {value || "--:--"}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[190px] border-0 bg-[#202020] p-2 text-zinc-100 shadow-2xl" align="center">
+        <Input
+          type="time"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="mb-2 h-9 border-0 bg-[#303030] text-sm text-white focus-visible:ring-0"
+        />
+        <div className="grid max-h-[190px] grid-cols-2 gap-1 overflow-y-auto pr-1">
+          {timeOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onChange(option)}
+              className={cn(
+                "rounded-md px-2 py-1.5 text-sm transition hover:bg-primary/80 hover:text-primary-foreground",
+                option === value ? "bg-primary text-primary-foreground" : "bg-white/5 text-zinc-200",
+              )}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

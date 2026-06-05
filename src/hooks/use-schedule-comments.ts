@@ -28,6 +28,23 @@ const eventLabels: Record<string, string> = {
   visit: "Visita",
 };
 
+async function attachUsersToComments(comments: ScheduleComment[]) {
+  const userIds = Array.from(new Set(comments.map((comment) => comment.user_id).filter(Boolean)));
+  if (userIds.length === 0) return comments;
+
+  const { data: users } = await (supabase as any)
+    .from("users")
+    .select("id, name, avatar_url")
+    .in("id", userIds);
+
+  const usersById = new Map((users || []).map((item: any) => [item.id, item]));
+
+  return comments.map((comment) => ({
+    ...comment,
+    user: comment.user || usersById.get(comment.user_id),
+  }));
+}
+
 export function useScheduleComments(eventId: string | undefined) {
   const { user, profile } = useAuth();
   const { toast } = useToast();
@@ -50,9 +67,9 @@ export function useScheduleComments(eventId: string | undefined) {
           .select("id, event_id, user_id, organization_id, content, created_at")
           .eq("event_id", eventId)
           .order("created_at", { ascending: true });
-        return (bare || []) as ScheduleComment[];
+        return attachUsersToComments((bare || []) as ScheduleComment[]);
       }
-      return (data || []) as ScheduleComment[];
+      return attachUsersToComments((data || []) as ScheduleComment[]);
     },
     enabled: !!eventId,
   });

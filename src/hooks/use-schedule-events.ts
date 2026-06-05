@@ -7,6 +7,7 @@ import { ptBR } from "date-fns/locale";
 import { getFriendlyErrorMessage } from "@/lib/error-handler";
 
 export type EventType = 'call' | 'email' | 'meeting' | 'task' | 'message' | 'visit';
+export type ScheduleEventVisibility = 'default' | 'public' | 'private';
 
 export interface ScheduleEvent {
   id: string;
@@ -22,6 +23,7 @@ export interface ScheduleEvent {
   is_all_day: boolean | null;
   location: string | null;
   status: string | null;
+  visibility?: ScheduleEventVisibility | null;
   reminder_minutes: number | null;
   recurrence_parent_id?: string | null;
   recurrence_rule?: string | null;
@@ -51,6 +53,7 @@ export interface ScheduleEvent {
     id: string;
     name: string;
   } | null;
+  assignee_user_ids?: string[];
 }
 
 export type ScheduleRecurrenceFrequency = 'none' | 'weekly' | 'monthly' | 'yearly';
@@ -75,25 +78,23 @@ function buildRecurringOccurrences(params: {
     end_time: string;
     is_all_day: boolean | null;
     location: string | null;
+    visibility?: ScheduleEventVisibility | null;
   };
   parentId: string;
   frequency: ScheduleRecurrenceFrequency;
-  until?: string | null;
-  count?: number | null;
 }) {
   if (params.frequency === 'none') return [];
 
   const start = new Date(params.baseEvent.start_time);
   const end = new Date(params.baseEvent.end_time);
-  const until = params.until ? new Date(params.until) : null;
-  const requestedCount = params.count && params.count > 1 ? params.count : until ? 52 : 1;
-  const maxOccurrences = Math.min(requestedCount, 52);
+  const maxOccurrences =
+    params.frequency === 'weekly' ? 260 :
+    params.frequency === 'monthly' ? 120 :
+    20;
   const rows = [];
 
   for (let index = 1; index < maxOccurrences; index += 1) {
     const nextStart = addRecurrenceInterval(start, params.frequency, index);
-    if (until && nextStart > until) break;
-
     const nextEnd = addRecurrenceInterval(end, params.frequency, index);
     rows.push({
       organization_id: params.baseEvent.organization_id,
@@ -107,9 +108,10 @@ function buildRecurringOccurrences(params: {
       end_time: nextEnd.toISOString(),
       is_all_day: params.baseEvent.is_all_day || false,
       location: params.baseEvent.location,
+      visibility: params.baseEvent.visibility || 'default',
       recurrence_parent_id: params.parentId,
       recurrence_rule: params.frequency,
-      recurrence_until: params.until || null,
+      recurrence_until: null,
       recurrence_count: maxOccurrences,
     });
   }
@@ -126,6 +128,32 @@ function invalidateScheduleCaches(queryClient: ReturnType<typeof useQueryClient>
     queryClient.invalidateQueries({ queryKey: ['lead-history-v2', leadId] });
     queryClient.invalidateQueries({ queryKey: ['lead-timeline', leadId] });
   }
+}
+
+function isEventParticipant(event: ScheduleEvent, currentUserId?: string) {
+  if (!currentUserId) return false;
+  return event.user_id === currentUserId || Boolean(event.assignee_user_ids?.includes(currentUserId));
+}
+
+function applyScheduleVisibility(events: ScheduleEvent[], currentUserId?: string, currentUserRole?: string | null) {
+  return events
+    .filter((event) => event.visibility !== 'private' || isEventParticipant(event, currentUserId))
+    .map((event) => {
+      if (event.visibility !== 'public') return event;
+      if (isEventParticipant(event, currentUserId) || currentUserRole === 'admin') return event;
+
+      return {
+        ...event,
+        title: 'Ocupado',
+        description: null,
+        event_type: 'task',
+        lead_id: null,
+        property_id: null,
+        location: null,
+        lead: null,
+        property: null,
+      };
+    });
 }
 
 async function logScheduleEventToTimeline(params: {
@@ -224,7 +252,7 @@ export function useScheduleEvents(options: UseScheduleEventsOptions = {}) {
         .from('schedule_events')
         .select(`
           id, organization_id, user_id, lead_id, property_id, title, 
-          description, event_type, start_time, end_time, is_all_day, location, status,
+          description, event_type, start_time, end_time, is_all_day, location, status, visibility,
           completed_by, completed_at, recurrence_parent_id, recurrence_rule, recurrence_until, recurrence_count,
           user:users!schedule_events_user_id_fkey(id, name, avatar_url),
           lead:leads(id, name, phone),
@@ -257,7 +285,32 @@ export function useScheduleEvents(options: UseScheduleEventsOptions = {}) {
       const { data, error } = await query;
 
       if (error) throw error;
-      return (data || []) as ScheduleEvent[];
+
+      const eventRows = (data || []) as ScheduleEvent[];
+      if (eventRows.length === 0) {
+        return [];
+      }
+
+      const { data: assignmentRows } = await (supabase as any)
+        .from('schedule_event_assignees')
+        .select('event_id, user_id')
+        .in('event_id', eventRows.map((event) => event.id));
+
+      const assigneesByEvent = new Map<string, string[]>();
+      (assignmentRows || []).forEach((assignment: any) => {
+        if (!assignment?.event_id || !assignment?.user_id) return;
+        assigneesByEvent.set(assignment.event_id, [
+          ...(assigneesByEvent.get(assignment.event_id) || []),
+          assignment.user_id,
+        ]);
+      });
+
+      const eventsWithAssignees = eventRows.map((event) => ({
+        ...event,
+        assignee_user_ids: assigneesByEvent.get(event.id) || [],
+      }));
+
+      return applyScheduleVisibility(eventsWithAssignees, profile?.id, profile?.role);
     },
     enabled: !!profile?.organization_id,
     staleTime: 1000 * 60 * 5, // Cache por 5 minutos
@@ -280,9 +333,9 @@ export function useCreateScheduleEvent() {
       lead_id?: string;
       property_id?: string | null;
       location?: string;
+      visibility?: ScheduleEventVisibility;
       recurrence_rule?: ScheduleRecurrenceFrequency;
-      recurrence_until?: string | null;
-      recurrence_count?: number | null;
+      assignee_ids?: string[];
     }) => {
       if (!profile?.organization_id) throw new Error('Organização não encontrada');
 
@@ -300,14 +353,17 @@ export function useCreateScheduleEvent() {
           end_time: event.end_time,
           is_all_day: event.is_all_day || false,
           location: event.location || null,
+          visibility: event.visibility || 'default',
           recurrence_rule: event.recurrence_rule && event.recurrence_rule !== 'none' ? event.recurrence_rule : null,
-          recurrence_until: event.recurrence_rule && event.recurrence_rule !== 'none' ? event.recurrence_until || null : null,
-          recurrence_count: event.recurrence_rule && event.recurrence_rule !== 'none' ? event.recurrence_count || null : null,
+          recurrence_until: null,
+          recurrence_count: event.recurrence_rule && event.recurrence_rule !== 'none' ? 1 : null,
         })
         .select()
         .single();
 
       if (error) throw error;
+
+      const assigneeIds = Array.from(new Set((event.assignee_ids || []).filter((id) => id && id !== data.user_id)));
 
       const recurringRows = buildRecurringOccurrences({
         baseEvent: {
@@ -322,19 +378,39 @@ export function useCreateScheduleEvent() {
           end_time: data.end_time,
           is_all_day: data.is_all_day,
           location: data.location,
+          visibility: data.visibility,
         },
         parentId: data.id,
         frequency: event.recurrence_rule || 'none',
-        until: event.recurrence_until,
-        count: event.recurrence_count,
       });
 
+      let recurringData: { id: string }[] = [];
       if (recurringRows.length > 0) {
-        const { error: recurrenceError } = await supabase
+        const { data: insertedRecurring, error: recurrenceError } = await supabase
           .from('schedule_events')
-          .insert(recurringRows as any);
+          .insert(recurringRows as any)
+          .select('id');
 
         if (recurrenceError) throw recurrenceError;
+        recurringData = insertedRecurring || [];
+      }
+
+      if (assigneeIds.length > 0) {
+        const assigneeRows = [data.id, ...recurringData.map((item) => item.id)].flatMap((eventId) =>
+          assigneeIds.map((userId) => ({
+            event_id: eventId,
+            user_id: userId,
+            organization_id: profile.organization_id,
+          }))
+        );
+
+        const { error: assigneeError } = await (supabase as any)
+          .from('schedule_event_assignees')
+          .insert(assigneeRows);
+
+        if (assigneeError && !assigneeError.message?.includes('duplicate')) {
+          throw assigneeError;
+        }
       }
       
       // Log to timeline if lead is present - non-blocking fire-and-forget
@@ -396,8 +472,7 @@ export function useCreateScheduleEvent() {
     },
     onSuccess: (data) => {
       invalidateScheduleCaches(queryClient, data?.lead_id);
-      const extra = data?.recurrence_count && data.recurrence_count > 1 ? ` (${data.recurrence_count} repetições)` : '';
-      toast.success(`Atividade criada com sucesso!${extra}`);
+      toast.success('Atividade criada com sucesso!');
     },
     onError: (error: Error) => {
       console.error('Error creating schedule event:', error);

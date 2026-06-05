@@ -19,8 +19,6 @@ import { useSystemBranding } from "@/hooks/use-system-branding";
 import { SetupGuideDialog } from "@/components/setup-guide/SetupGuideDialog";
 import { MetricsPanel } from "@/components/MetricsPanel";
 import { ModuleGuard } from "@/components/guards/ModuleGuard";
-import { useSystemSettings } from "@/hooks/use-system-settings";
-import { useTheme } from "next-themes";
 
 // Public site root â€” separate bundle, no CRM providers
 const PublicAppRoot = lazy(() => import("./PublicAppRoot"));
@@ -176,34 +174,23 @@ const queryClient = new QueryClient({
   },
 });
 
+const DEFAULT_BRAND_ICON = "/favicon.webp?v=20260605";
+
 const PageLoader = () => {
-  const { data: systemSettings } = useSystemSettings();
-  const { resolvedTheme } = useTheme();
-  const logoUrl =
-    resolvedTheme === "dark"
-      ? systemSettings?.favicon_url_dark ||
-        systemSettings?.favicon_url_light ||
-        systemSettings?.logo_url_dark ||
-        systemSettings?.logo_url_light
-      : systemSettings?.favicon_url_light ||
-        systemSettings?.favicon_url_dark ||
-        systemSettings?.logo_url_light ||
-        systemSettings?.logo_url_dark;
+  const logoUrl = DEFAULT_BRAND_ICON;
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background/75 backdrop-blur-[1px]">
       <div className="flex flex-col items-center gap-4">
         <div className="flex h-20 w-20 items-center justify-center">
           <div className="flex h-16 w-16 items-center justify-center">
-            {logoUrl && (
-              <img
-                src={logoUrl}
-                alt="Vimob"
-                className="h-14 w-14 object-contain drop-shadow-[0_10px_22px_hsl(var(--primary)/0.22)]"
-                decoding="async"
-                loading="eager"
-              />
-            )}
+            <img
+              src={logoUrl}
+              alt="Vimob"
+              className="h-14 w-14 object-contain drop-shadow-[0_10px_22px_hsl(var(--primary)/0.22)]"
+              decoding="async"
+              loading="eager"
+            />
           </div>
         </div>
         <div className="text-center text-xs font-light uppercase tracking-[0.28em] text-muted-foreground">

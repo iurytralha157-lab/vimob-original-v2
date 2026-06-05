@@ -40,8 +40,8 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "Vimob";
   const options = {
     body: payload.body || payload.message || "Nova notificacao",
-    icon: "/icons/icon-192x192.png",
-    badge: "/icons/icon-72x72.png",
+    icon: "/favicon.webp",
+    badge: "/favicon.webp",
     data: payload.data || {},
     tag: payload.tag || `vimob-${Date.now()}`,
     renotify: true,

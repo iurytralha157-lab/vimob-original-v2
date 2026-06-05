@@ -24,7 +24,7 @@ import {
   Mail,
   Video,
   ClipboardList,
-  Eye,
+  Home,
   MessageSquare,
   SlidersHorizontal,
   Trash2,
@@ -54,7 +54,7 @@ const EVENT_TYPE_CONFIG: Record<string, { label: string; color: string; bg: stri
   meeting: { label: "Reunião", color: "#8b5cf6", bg: "rgba(139,92,246,0.18)", icon: Video },
   task: { label: "Tarefa", color: "#f59e0b", bg: "rgba(245,158,11,0.18)", icon: ClipboardList },
   message: { label: "Mensagem", color: "#22c55e", bg: "rgba(34,197,94,0.18)", icon: MessageSquare },
-  visit: { label: "Visita", color: "#ec4899", bg: "rgba(236,72,153,0.18)", icon: Eye },
+  visit: { label: "Visita ao imóvel", color: "#ec4899", bg: "rgba(236,72,153,0.18)", icon: Home },
 };
 
 // ─── Componente principal ────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ export default function Agenda() {
     { key: "meeting", label: "Reunião" },
     { key: "task", label: "Tarefa" },
     { key: "message", label: "Mensagem" },
-    { key: "visit", label: "Visita" },
+    { key: "visit", label: "Visita ao imóvel" },
   ];
 
   const activeFiltersCount = (selectedUserId ? 1 : 0);
@@ -394,7 +394,7 @@ export default function Agenda() {
           {/* Legenda de tipos no rodapé */}
           <div
             style={{
-              display: "flex",
+              display: "none",
               gap: 16,
               justifyContent: "center",
               padding: "8px 0",

@@ -29,7 +29,7 @@ import {
   setMinutes
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Phone, Mail, Calendar as CalendarIcon, CheckSquare, MessageSquare, MapPin, Clock, User } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Phone, Mail, Calendar as CalendarIcon, CheckSquare, MessageSquare, Home, Clock, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -52,17 +52,30 @@ const eventTypeIcons: Record<EventType, React.ElementType> = {
   meeting: CalendarIcon,
   task: CheckSquare,
   message: MessageSquare,
-  visit: MapPin,
+  visit: Home,
 };
 
-const eventTypeColors: Record<EventType, string> = {
-  call: 'bg-blue-600 border-blue-700/50 text-white shadow-sm',
-  email: 'bg-orange-500 border-orange-600/50 text-white shadow-sm',
-  meeting: 'bg-purple-600 border-purple-700/50 text-white shadow-sm',
-  task: 'bg-amber-500 border-amber-600/50 text-white shadow-sm',
-  message: 'bg-emerald-600 border-emerald-700/50 text-white shadow-sm',
-  visit: 'bg-pink-600 border-pink-700/50 text-white shadow-sm',
-};
+const userEventColors = [
+  { background: '#ff4e1a', border: '#ff7a45' },
+  { background: '#2563eb', border: '#60a5fa' },
+  { background: '#16a34a', border: '#4ade80' },
+  { background: '#9333ea', border: '#c084fc' },
+  { background: '#db2777', border: '#f472b6' },
+  { background: '#0891b2', border: '#22d3ee' },
+  { background: '#ca8a04', border: '#facc15' },
+  { background: '#dc2626', border: '#f87171' },
+  { background: '#4f46e5', border: '#818cf8' },
+  { background: '#0d9488', border: '#2dd4bf' },
+];
+
+function getUserEventColor(userId?: string | null) {
+  if (!userId) return userEventColors[0];
+  let hash = 0;
+  for (let index = 0; index < userId.length; index += 1) {
+    hash = (hash * 31 + userId.charCodeAt(index)) >>> 0;
+  }
+  return userEventColors[hash % userEventColors.length];
+}
 
 interface ActivityCardProps {
   event: ScheduleEvent;
@@ -84,8 +97,9 @@ function ActivityCard({ event, onEditEvent, onEventUpdate, isDragging, style, cl
 
   const start = parseISO(event.start_time);
   const end = parseISO(event.end_time);
-  const duration = differenceInMinutes(end, start);
+  const duration = event.is_all_day ? 24 * 60 : differenceInMinutes(end, start);
   const Icon = eventTypeIcons[event.event_type as EventType] || CalendarIcon;
+  const userColor = getUserEventColor(event.user_id);
   
   // Granular density modes
   const isTiny = duration <= 20;          // 15-20 min slot
@@ -144,15 +158,14 @@ function ActivityCard({ event, onEditEvent, onEventUpdate, isDragging, style, cl
         onClick={(e) => { e.stopPropagation(); onEditEvent?.(event); }}
         title={`${format(start, 'HH:mm')} - ${format(end, 'HH:mm')} · ${event.title}`}
         className={cn(
-          "absolute left-0.5 right-0.5 rounded-[4px] border overflow-hidden shadow-sm hover:shadow-md z-10 cursor-grab active:cursor-grabbing group flex items-center px-1.5 gap-1",
-          eventTypeColors[event.event_type as EventType],
+          "absolute left-0.5 right-0.5 rounded-[4px] border text-white overflow-hidden shadow-sm hover:shadow-md z-10 cursor-grab active:cursor-grabbing group flex items-center px-1.5 gap-1",
           isDragging && "opacity-50 grayscale",
           className
         )}
-        style={{ ...style, ...dragStyle, height: `${currentHeight}px` }}
+        style={{ ...style, ...dragStyle, backgroundColor: userColor.background, borderColor: userColor.border, height: `${currentHeight}px` }}
       >
         <span className="text-[9px] font-bold tabular-nums opacity-80 shrink-0">
-          {format(start, 'HH:mm')}
+          {event.is_all_day ? 'Dia inteiro' : format(start, 'HH:mm')}
         </span>
         <span className="text-[10px] font-black truncate tracking-tight leading-none">
           {event.title}
@@ -172,8 +185,7 @@ function ActivityCard({ event, onEditEvent, onEventUpdate, isDragging, style, cl
       }}
       title={`${format(start, 'HH:mm')} - ${format(end, 'HH:mm')} · ${event.title}`}
       className={cn(
-        "absolute left-0.5 right-0.5 rounded-[4px] border overflow-hidden shadow-sm transition-shadow hover:shadow-md z-10 cursor-grab active:cursor-grabbing group",
-        eventTypeColors[event.event_type as EventType],
+        "absolute left-0.5 right-0.5 rounded-[4px] border text-white overflow-hidden shadow-sm transition-shadow hover:shadow-md z-10 cursor-grab active:cursor-grabbing group",
         isDragging && "opacity-50 grayscale",
         resizing && "z-50 ring-2 ring-primary ring-offset-1",
         className
@@ -181,6 +193,8 @@ function ActivityCard({ event, onEditEvent, onEventUpdate, isDragging, style, cl
       style={{ 
         ...style, 
         ...dragStyle,
+        backgroundColor: userColor.background,
+        borderColor: userColor.border,
         height: `${currentHeight}px`
       }}
     >
@@ -202,8 +216,8 @@ function ActivityCard({ event, onEditEvent, onEventUpdate, isDragging, style, cl
           <div className="flex items-center gap-1 min-w-0">
             {!isNarrow && !isCompact && <Clock className="h-2.5 w-2.5 shrink-0" />}
             <span className="truncate">
-              {format(start, 'HH:mm')}
-              {!isCompact && ` - ${format(tempHeight !== null ? addMinutes(start, Math.round(tempHeight / (56/60))) : end, 'HH:mm')}`}
+              {event.is_all_day ? 'Dia inteiro' : format(start, 'HH:mm')}
+              {!event.is_all_day && !isCompact && ` - ${format(tempHeight !== null ? addMinutes(start, Math.round(tempHeight / (56/60))) : end, 'HH:mm')}`}
             </span>
           </div>
           {!isCompact && !isNarrow && event.lead && (
@@ -426,9 +440,7 @@ export function CalendarView({
                 key={dateKey} 
                 onClick={() => {
                   onDateSelect(day);
-                  if (dayEvents.length === 0) {
-                    onQuickCreate?.(day);
-                  }
+                  onQuickCreate?.(day);
                 }}
                 className={cn(
                   "bg-card min-h-[120px] p-2 transition-all cursor-pointer hover:bg-muted/5 group relative flex flex-col",
@@ -448,6 +460,7 @@ export function CalendarView({
                 <div className="space-y-1 flex-1">
                   {visibleEvents.map(event => {
                     const Icon = eventTypeIcons[event.event_type as EventType] || CalendarIcon;
+                    const userColor = getUserEventColor(event.user_id);
                     return (
                       <div 
                         key={event.id} 
@@ -456,9 +469,9 @@ export function CalendarView({
                           onEditEvent?.(event);
                         }}
                         className={cn(
-                          "px-2 py-1 rounded-lg text-[9px] font-bold border truncate flex items-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] active:scale-95",
-                          eventTypeColors[event.event_type as EventType] || "bg-muted border-muted"
+                          "px-2 py-1 rounded-lg text-[9px] font-bold border truncate flex items-center gap-1.5 text-white shadow-sm transition-all hover:scale-[1.02] active:scale-95",
                         )}
+                        style={{ backgroundColor: userColor.background, borderColor: userColor.border }}
                       >
                         <Icon className="h-2.5 w-2.5 flex-shrink-0 opacity-80" />
                         <span className="truncate tracking-tight">{event.title}</span>
@@ -483,6 +496,7 @@ export function CalendarView({
                         <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1">
                           {dayEvents.map(event => {
                             const Icon = eventTypeIcons[event.event_type as EventType] || CalendarIcon;
+                            const userColor = getUserEventColor(event.user_id);
                             return (
                               <div 
                                 key={event.id} 
@@ -491,15 +505,15 @@ export function CalendarView({
                                   onEditEvent?.(event);
                                 }}
                                 className={cn(
-                                  "px-2 py-1.5 rounded-xl text-[10px] font-bold border truncate flex items-center gap-2 shadow-sm cursor-pointer transition-all hover:translate-x-1",
-                                  eventTypeColors[event.event_type as EventType] || "bg-muted border-muted"
+                                  "px-2 py-1.5 rounded-xl text-[10px] font-bold border truncate flex items-center gap-2 text-white shadow-sm cursor-pointer transition-all hover:translate-x-1",
                                 )}
+                                style={{ backgroundColor: userColor.background, borderColor: userColor.border }}
                               >
                                 <Icon className="h-3 w-3 flex-shrink-0 opacity-80" />
                                 <div className="flex flex-col truncate">
                                   <span className="truncate tracking-tight leading-tight">{event.title}</span>
                                   <span className="text-[8px] opacity-70">
-                                    {format(new Date(event.start_time), 'HH:mm')}
+                                    {event.is_all_day ? 'Dia inteiro' : format(new Date(event.start_time), 'HH:mm')}
                                   </span>
                                 </div>
                               </div>
@@ -576,8 +590,8 @@ export function CalendarView({
               {calculateEventLayouts(dayEvents).map(({ event, column, totalColumns }) => {
                 const start = parseISO(event.start_time);
                 const end = parseISO(event.end_time);
-                const top = (start.getHours() * 60 + start.getMinutes()) * (56 / 60);
-                const duration = Math.max((end.getTime() - start.getTime()) / (1000 * 60), 15);
+                const top = event.is_all_day ? 0 : (start.getHours() * 60 + start.getMinutes()) * (56 / 60);
+                const duration = event.is_all_day ? 24 * 60 : Math.max((end.getTime() - start.getTime()) / (1000 * 60), 15);
                 const height = duration * (56 / 60);
                 
                 const width = 100 / totalColumns;
@@ -694,8 +708,8 @@ export function CalendarView({
                   {calculateEventLayouts(eventsByDate[format(day, 'yyyy-MM-dd')] || []).map(({ event, column, totalColumns }) => {
                     const start = parseISO(event.start_time);
                     const end = parseISO(event.end_time);
-                    const top = (start.getHours() * 60 + start.getMinutes()) * (56 / 60);
-                    const duration = Math.max((end.getTime() - start.getTime()) / (1000 * 60), 15);
+                    const top = event.is_all_day ? 0 : (start.getHours() * 60 + start.getMinutes()) * (56 / 60);
+                    const duration = event.is_all_day ? 24 * 60 : Math.max((end.getTime() - start.getTime()) / (1000 * 60), 15);
                     const height = duration * (56 / 60);
 
                     const width = 100 / totalColumns;

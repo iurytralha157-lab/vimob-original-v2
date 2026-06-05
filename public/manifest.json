@@ -1,7 +1,7 @@
 {
   "name": "Vimob CRM",
   "short_name": "Vimob",
-  "description": "CRM imobiliario para gestao de leads, vendas e equipe comercial.",
+  "description": "Inteligencia imobiliaria para transformar leads em vendas.",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
@@ -11,57 +11,57 @@
   "categories": ["business", "productivity"],
   "icons": [
     {
-      "src": "/icons/icon-72x72.png",
+      "src": "/favicon.webp",
       "sizes": "72x72",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-96x96.png",
+      "src": "/favicon.webp",
       "sizes": "96x96",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-128x128.png",
+      "src": "/favicon.webp",
       "sizes": "128x128",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-144x144.png",
+      "src": "/favicon.webp",
       "sizes": "144x144",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-152x152.png",
+      "src": "/favicon.webp",
       "sizes": "152x152",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-192x192.png",
+      "src": "/favicon.webp",
       "sizes": "192x192",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/icon-384x384.png",
+      "src": "/favicon.webp",
       "sizes": "384x384",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512x512.png",
+      "src": "/favicon.webp",
       "sizes": "512x512",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512x512-maskable.png",
+      "src": "/favicon.webp",
       "sizes": "512x512",
-      "type": "image/png",
+      "type": "image/webp",
       "purpose": "maskable"
     }
   ]

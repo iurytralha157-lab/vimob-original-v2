@@ -19,6 +19,9 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import { useSystemSettings } from '@/hooks/use-system-settings';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
+
+const DEFAULT_BRAND_ICON = "/favicon.webp?v=20260605";
+
 interface NavItem {
   icon: React.ElementType;
   labelKey: string;
@@ -258,9 +261,8 @@ export const AppSidebar = React.memo(function AppSidebar() {
     return resolvedTheme === 'dark' ? systemSettings.logo_url_dark || systemSettings.logo_url_light : systemSettings.logo_url_light || systemSettings.logo_url_dark;
   }, [systemSettings, resolvedTheme]);
   const faviconUrl = useMemo(() => {
-    if (!systemSettings) return null;
-    return resolvedTheme === 'dark' ? systemSettings.favicon_url_dark || systemSettings.favicon_url_light : systemSettings.favicon_url_light || systemSettings.favicon_url_dark;
-  }, [systemSettings, resolvedTheme]);
+    return DEFAULT_BRAND_ICON;
+  }, []);
   const logoWidth = systemSettings?.logo_width || 140;
   const logoHeight = systemSettings?.logo_height || 40;
 

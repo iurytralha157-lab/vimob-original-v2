@@ -25,6 +25,8 @@ import { useState, useMemo } from 'react';
 import { useSystemSettings } from '@/hooks/use-system-settings';
 import { useTheme } from 'next-themes';
 
+const DEFAULT_BRAND_ICON = "/favicon.webp?v=20260605";
+
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
   { icon: Building2, label: 'Organizações', path: '/admin/organizations' },
@@ -56,12 +58,8 @@ export function AdminSidebar() {
   }, [systemSettings, resolvedTheme]);
 
   const faviconUrl = useMemo(() => {
-    if (!systemSettings) return null;
-    const preferredUrl = resolvedTheme === 'dark'
-      ? systemSettings.favicon_url_dark
-      : systemSettings.favicon_url_light;
-    return preferredUrl || systemSettings.favicon_url_light || systemSettings.favicon_url_dark;
-  }, [systemSettings, resolvedTheme]);
+    return DEFAULT_BRAND_ICON;
+  }, []);
 
   const logoWidth = systemSettings?.logo_width || 140;
   const logoHeight = systemSettings?.logo_height || 40;
