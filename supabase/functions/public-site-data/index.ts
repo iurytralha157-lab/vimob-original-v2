@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
     switch (endpoint) {
       case 'properties': {
         // Optimized: only list-relevant fields + estimated count for speed
-        const LIST_FIELDS = 'id, code, title, bairro, cidade, uf, endereco, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, imagem_principal';
+        const LIST_FIELDS = 'id, code, title, bairro, cidade, uf, endereco, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal';
         let query = supabase
           .from('properties')
           .select(LIST_FIELDS, { count: 'estimated' })
@@ -340,7 +340,7 @@ Deno.serve(async (req) => {
         // Build query for related properties
         let relatedQuery = supabase
           .from('properties')
-          .select('id, code, title, preco, tipo_de_imovel, quartos, suites, banheiros, vagas, area_util, bairro, cidade, imagem_principal')
+          .select('id, code, title, preco, valor_locacao, tipo_de_negocio, tipo_de_imovel, quartos, suites, banheiros, vagas, area_util, bairro, cidade, imagem_principal')
           .eq('organization_id', organizationId)
           .eq('status', 'ativo')
           .neq('code', propertyCode) // Exclude current property
@@ -371,7 +371,7 @@ Deno.serve(async (req) => {
         // Return only properties with valid coordinates
         const { data, error } = await supabase
           .from('properties')
-          .select('id, code, title, preco, tipo_de_negocio, tipo_de_imovel, quartos, banheiros, vagas, area_util, imagem_principal, latitude, longitude, bairro, cidade')
+          .select('id, code, title, preco, valor_locacao, tipo_de_negocio, tipo_de_imovel, quartos, banheiros, vagas, area_util, imagem_principal, latitude, longitude, bairro, cidade')
           .eq('organization_id', organizationId)
           .eq('status', 'ativo')
           .not('latitude', 'is', null)
@@ -422,9 +422,9 @@ Deno.serve(async (req) => {
           { data: typesData },
           { data: citiesData }
         ] = await Promise.all([
-          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').eq('destaque', true).order('created_at', { ascending: false }).limit(6),
-          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').eq('exclusividade', true).order('created_at', { ascending: false }).limit(6),
-          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').order('created_at', { ascending: false }).limit(6),
+          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').eq('destaque', true).order('created_at', { ascending: false }).limit(6),
+          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').eq('exclusividade', true).order('created_at', { ascending: false }).limit(6),
+          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').order('created_at', { ascending: false }).limit(6),
           supabase.from('properties').select('tipo_de_imovel').eq('organization_id', organizationId).eq('status', 'ativo').not('tipo_de_imovel', 'is', null),
           supabase.from('properties').select('cidade').eq('organization_id', organizationId).eq('status', 'ativo').not('cidade', 'is', null)
         ]);

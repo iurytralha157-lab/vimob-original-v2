@@ -434,6 +434,7 @@ export default function PublicProperties() {
                         textColor={siteConfig?.text_color}
                         isFavorited={isFavorite(property.id)}
                         onToggleFavorite={toggleFavorite}
+                        displayPurpose={filters.finalidade}
                         watermarkConfig={siteConfig?.watermark_enabled ? {
                           enabled: true,
                           logoUrl: siteConfig?.watermark_logo_url || siteConfig?.logo_url || undefined,

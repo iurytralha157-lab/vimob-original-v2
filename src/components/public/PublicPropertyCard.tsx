@@ -16,6 +16,7 @@ interface PublicPropertyCardProps {
     area_total?: number | null;
     valor_venda?: number | null;
     valor_aluguel?: number | null;
+    valor_locacao?: number | null;
     preco?: number | null;
     tipo_imovel?: string | null;
     tipo_de_negocio?: string | null;
@@ -29,6 +30,7 @@ interface PublicPropertyCardProps {
   textColor?: string;
   isFavorited?: boolean;
   onToggleFavorite?: (id: string) => void;
+  displayPurpose?: string;
   watermarkConfig?: {
     enabled: boolean;
     logoUrl?: string;
@@ -38,7 +40,7 @@ interface PublicPropertyCardProps {
   } | null;
 }
 
-export function PublicPropertyCard({ property, primaryColor = '#C4A052', cardColor, textColor, isFavorited = false, onToggleFavorite, watermarkConfig }: PublicPropertyCardProps) {
+export function PublicPropertyCard({ property, primaryColor = '#C4A052', cardColor, textColor, isFavorited = false, onToggleFavorite, displayPurpose, watermarkConfig }: PublicPropertyCardProps) {
   const formatPrice = (value: number | null | undefined) => {
     if (!value) return null;
     return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -46,10 +48,25 @@ export function PublicPropertyCard({ property, primaryColor = '#C4A052', cardCol
 
   // Support both field naming conventions (DB fields vs mapped fields)
   const title = property.titulo || property.title || '';
-  const price = property.valor_venda || property.valor_aluguel || property.preco || null;
-  const tipoNegocio = property.tipo_de_negocio || '';
-  const isRent = tipoNegocio.toLowerCase().includes('aluguel') || (!property.valor_venda && !!property.valor_aluguel);
-  const badgeLabel = isRent ? 'Aluguel' : 'Venda';
+  const tipoNegocio = (property.tipo_de_negocio || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const normalizedDisplayPurpose = (displayPurpose || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const hasRent = tipoNegocio.includes('aluguel') || tipoNegocio.includes('locacao') || (!property.valor_venda && (!!property.valor_aluguel || !!property.valor_locacao));
+  const hasSale = tipoNegocio.includes('venda') || (!!property.preco && !hasRent);
+  const rentalPrice = property.valor_aluguel || property.valor_locacao || (hasRent && !hasSale ? property.preco : null);
+  const salePrice = property.valor_venda || (hasSale ? property.preco : null);
+  const shouldShowRent = normalizedDisplayPurpose === 'aluguel' || normalizedDisplayPurpose === 'locacao' || (hasRent && !hasSale);
+  const price = shouldShowRent
+    ? rentalPrice || salePrice || property.preco || null
+    : salePrice || rentalPrice || property.preco || null;
+  const badgeLabel = normalizedDisplayPurpose === 'aluguel' || normalizedDisplayPurpose === 'locacao'
+    ? 'Aluguel'
+    : normalizedDisplayPurpose === 'venda'
+      ? 'Venda'
+      : hasRent && hasSale
+        ? 'Venda e Aluguel'
+        : hasRent
+          ? 'Aluguel'
+          : 'Venda';
   const location = [property.bairro, property.cidade].filter(Boolean).join(', ');
   const suites = property.suites;
 
@@ -184,7 +201,7 @@ export function PublicPropertyCard({ property, primaryColor = '#C4A052', cardCol
               style={{ color: primaryColor }}
             >
               {formatPrice(price)}
-              {isRent && <span className="text-xs font-normal" style={{ color: textColor ? `${textColor}99` : '#9ca3af' }}>/mês</span>}
+              {shouldShowRent && <span className="text-xs font-normal" style={{ color: textColor ? `${textColor}99` : '#9ca3af' }}>/mês</span>}
             </p>
           </div>
         )}
