@@ -41,6 +41,16 @@ const LEAD_PIPELINE_FIELDS = `
   stage:stages(id, name, color, stage_key)
 `;
 
+const LEAD_PIPELINE_BASIC_FIELDS = `
+  id, name, phone, email, source, created_at,
+  stage_id, assigned_user_id, pipeline_id, message,
+  stage_entered_at, organization_id,
+  whatsapp_avatar_url,
+  deal_status, valor_interesse, property_id, lost_reason, won_at, lost_at,
+  interest_property_id, interest_plan_id,
+  first_response_at, first_response_seconds, first_response_is_automation
+`;
+
 // Helper para buscar IDs de leads filtrados por tags ou Meta Ads (joins complexos)
 // Retorna:
 //   null  → não há filtro de tag/meta ativo (não aplicar .in('id', ...))
@@ -329,10 +339,36 @@ export function useStagesWithLeads(
           totalLeads += count;
         });
 
+        const stageLeadRowsById: Record<string, any[]> = {};
+
+        await Promise.all(stages.map(async (stage, index) => {
+          const result = stageLeadsResults[index];
+          let stageLeads = result?.data || [];
+          const totalForStage = totalCountsByStage[stage.id] || 0;
+
+          if ((result?.error || stageLeads.length === 0) && totalForStage > 0) {
+            if (result?.error) {
+              console.warn('[Pipeline] rich lead query failed, using basic fields fallback:', result.error);
+            }
+
+            const fallbackQuery = (supabase as any)
+              .from('leads')
+              .select(LEAD_PIPELINE_BASIC_FIELDS)
+              .eq('pipeline_id', targetPipelineId)
+              .eq('stage_id', stage.id)
+              .order('stage_entered_at', { ascending: false })
+              .limit(LEADS_PER_STAGE);
+
+            const fallbackResult = await apply(fallbackQuery);
+            stageLeads = fallbackResult?.data || [];
+          }
+
+          stageLeadRowsById[stage.id] = stageLeads;
+        }));
+
         const leads: any[] = [];
-        stages.forEach((stage, index) => {
-          const stageLeads = stageLeadsResults[index]?.data || [];
-          leads.push(...stageLeads);
+        stages.forEach((stage) => {
+          leads.push(...(stageLeadRowsById[stage.id] || []));
         });
 
         const enrichedLeads = await getEnrichedLeadsBatch(leads);
@@ -365,9 +401,23 @@ async function getEnrichedLeadsBatch(leads: any[]) {
   const leadIds = leads.map(l => l.id);
   if (leadIds.length === 0) return [];
 
-  const [tagsResult, taskCountsResult] = await Promise.all([
+  const userIds = Array.from(new Set(leads.map(l => l.assigned_user_id).filter(Boolean)));
+  const propertyIds = Array.from(new Set(leads.map(l => l.interest_property_id).filter(Boolean)));
+  const planIds = Array.from(new Set(leads.map(l => l.interest_plan_id).filter(Boolean)));
+
+  const [tagsResult, taskCountsResult, usersResult, propertiesResult, plansResult, metaResult] = await Promise.all([
     supabase.from('lead_tags').select('lead_id, tag:tags(id, name, color)').in('lead_id', leadIds),
-    supabase.from('lead_tasks').select('lead_id, is_done').in('lead_id', leadIds)
+    supabase.from('lead_tasks').select('lead_id, is_done').in('lead_id', leadIds),
+    userIds.length > 0
+      ? supabase.from('users').select('id, name, avatar_url').in('id', userIds)
+      : Promise.resolve({ data: [] } as any),
+    propertyIds.length > 0
+      ? supabase.from('properties').select('id, code, title, preco').in('id', propertyIds)
+      : Promise.resolve({ data: [] } as any),
+    planIds.length > 0
+      ? supabase.from('service_plans').select('id, code, name, price').in('id', planIds)
+      : Promise.resolve({ data: [] } as any),
+    supabase.from('lead_meta').select('lead_id, campaign_name, campaign_id, adset_name, adset_id, ad_name, ad_id, platform').in('lead_id', leadIds),
   ]);
 
   const tagsByLead = (tagsResult.data || []).reduce((acc: any, lt: any) => {
@@ -383,8 +433,21 @@ async function getEnrichedLeadsBatch(leads: any[]) {
     return acc;
   }, {});
 
+  const usersById = new Map((usersResult.data || []).map((user: any) => [user.id, user]));
+  const propertiesById = new Map((propertiesResult.data || []).map((property: any) => [property.id, property]));
+  const plansById = new Map((plansResult.data || []).map((plan: any) => [plan.id, plan]));
+  const metaByLead = (metaResult.data || []).reduce((acc: any, meta: any) => {
+    if (!acc[meta.lead_id]) acc[meta.lead_id] = [];
+    acc[meta.lead_id].push(meta);
+    return acc;
+  }, {});
+
   return leads.map(l => ({
     ...l,
+    assignee: l.assignee || usersById.get(l.assigned_user_id) || null,
+    interest_property: l.interest_property || propertiesById.get(l.interest_property_id) || null,
+    interest_plan: l.interest_plan || plansById.get(l.interest_plan_id) || null,
+    lead_meta: l.lead_meta || metaByLead[l.id] || [],
     tags: tagsByLead[l.id] || [],
     tasks_count: tasksByLead[l.id] || { pending: 0, completed: 0 }
   }));
@@ -750,7 +813,22 @@ export function useLoadMoreLeads() {
             .range(offset, offset + LEADS_PER_STAGE - 1)
         );
 
-        const { data, error } = await query;
+        let { data, error } = await query;
+        if (error) {
+          console.warn('[Pipeline] rich load-more query failed, using basic fields fallback:', error);
+          const fallbackQuery = apply(
+            (supabase as any)
+              .from('leads')
+              .select(LEAD_PIPELINE_BASIC_FIELDS)
+              .eq('pipeline_id', pipelineId)
+              .eq('stage_id', stageId)
+              .order('stage_entered_at', { ascending: false })
+              .range(offset, offset + LEADS_PER_STAGE - 1)
+          );
+          const fallbackResult = await fallbackQuery;
+          data = fallbackResult?.data || [];
+          error = fallbackResult?.error || null;
+        }
         if (error) throw error;
         const enrichedLeads = await getEnrichedLeadsBatch(data || []);
         return { stageId, leads: enrichedLeads };
