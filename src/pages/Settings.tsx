@@ -21,6 +21,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { AnimatedTabNav, AnimatedTabItem } from '@/components/ui/animated-tab-nav';
 import { SubscriptionTab } from '@/components/settings/SubscriptionTab';
 import { IntegrationsTab } from '@/components/settings/IntegrationsTab';
+import { isBillingBlockedStatus } from '@/lib/billing-access';
 
 export default function Settings() {
   const { profile, isSuperAdmin, organization } = useAuth();
@@ -34,9 +35,20 @@ export default function Settings() {
   const initialIntegration = legacyIntegrationTabs.includes(normalizedRequestedTab) ? normalizedRequestedTab : undefined;
   const initialTab = initialIntegration ? 'integrations' : requestedTab;
   const [activeTab, setActiveTab] = useState(initialTab);
+  const isBillingBlocked = !isSuperAdmin && isBillingBlockedStatus(organization?.subscription_status);
 
   // Sync tab when URL query param changes (e.g. external navigation)
   useEffect(() => {
+    if (isBillingBlocked) {
+      if (activeTab !== 'subscription') setActiveTab('subscription');
+      if (searchParams.get('tab') !== 'subscription') {
+        const next = new URLSearchParams(searchParams);
+        next.set('tab', 'subscription');
+        setSearchParams(next, { replace: true });
+      }
+      return;
+    }
+
     const rawTab = searchParams.get('tab');
     const t = rawTab === 'webhook' ? 'webhooks' : rawTab;
     const normalizedTab = t && legacyIntegrationTabs.includes(t) ? 'integrations' : t;
@@ -44,9 +56,10 @@ export default function Settings() {
       setActiveTab(normalizedTab);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, isBillingBlocked, activeTab, setSearchParams]);
 
   const handleTabChange = (value: string) => {
+    if (isBillingBlocked && value !== 'subscription') return;
     setActiveTab(value);
     const next = new URLSearchParams(searchParams);
     next.set('tab', value);
@@ -59,6 +72,10 @@ export default function Settings() {
   const hasAPIModule = hasModule('api');
 
   const settingsTabs: AnimatedTabItem[] = useMemo(() => {
+    if (isBillingBlocked) {
+      return [{ value: 'subscription', label: 'Faturamento', icon: CreditCard }];
+    }
+
     const tabs: AnimatedTabItem[] = [
       { value: 'account', label: 'Conta', icon: User,
         renderIcon: () => <AnimatedIcon icon={AVATAR_JSON} size={18} trigger="hover" /> },
@@ -77,7 +94,7 @@ export default function Settings() {
     tabs.push({ value: 'integrations', label: 'Integrações', icon: Plug });
 
     return tabs;
-  }, [t, profile?.role, isSuperAdmin, organization?.subscription_status]);
+  }, [t, profile?.role, isSuperAdmin, organization?.subscription_status, isBillingBlocked]);
 
   const currentTab = settingsTabs.find((tab) => tab.value === activeTab);
   const CurrentIcon = currentTab?.icon;

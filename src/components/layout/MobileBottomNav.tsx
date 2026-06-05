@@ -9,7 +9,8 @@ import {
   Users,
   Calendar,
   Building2,
-  DollarSign } from
+  DollarSign,
+  CreditCard } from
 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,6 +25,7 @@ import CALENDAR_JSON from '@/components/icons/calendar-icon.json';
 import AVATAR_JSON from '@/components/icons/avatar-icon.json';
 import FINANCE_JSON from '@/components/icons/finance-icon.json';
 import DASHBOARD_JSON from '@/components/icons/dashboard-icon.json';
+import { isBillingBlockedStatus } from '@/lib/billing-access';
 
 interface TabItem {
   icon: any;
@@ -39,9 +41,14 @@ export function MobileBottomNav() {
   const { t } = useLanguage();
   const { hasModule } = useOrganizationModules();
   const { hasPermission } = useUserPermissions();
+  const isBillingBlocked = !isSuperAdmin && isBillingBlockedStatus(organization?.subscription_status);
 
   // Build the 4 visible tabs dynamically based on modules
   const tabs = useMemo(() => {
+    if (isBillingBlocked) {
+      return [{ icon: CreditCard, labelKey: 'Faturamento', path: '/settings?tab=subscription' }] as TabItem[];
+    }
+
     const result: (TabItem | 'fab' | 'more')[] = [];
 
     // Slot 1: Dashboard (always)
@@ -74,7 +81,7 @@ export function MobileBottomNav() {
     result.push('more');
 
     return result;
-  }, [hasModule, profile?.role, isSuperAdmin, organization?.segment]);
+  }, [hasModule, profile?.role, isSuperAdmin, organization?.segment, organization?.subscription_status, isBillingBlocked]);
 
   const isActive = (path: string) => {
     return location.pathname === path || location.pathname.startsWith(path + '/');
@@ -85,7 +92,7 @@ export function MobileBottomNav() {
     return (t.nav as Record<string, string>)[labelKey] || labelKey;
   };
 
-  const showFab = hasModule('crm') && !isPipelinesPage;
+  const showFab = hasModule('crm') && !isPipelinesPage && !isBillingBlocked;
 
   return (
     <>

@@ -5,6 +5,8 @@ import { PublicSiteConfig } from '@/hooks/use-public-site';
 import { PublicContext, PublicContextType } from './usePublicContext';
 import { ScrollToTop } from '@/components/ScrollToTop';
 import { lazy, Suspense } from 'react';
+import { PublicSiteUnavailable } from '@/components/public/PublicSiteUnavailable';
+import { isBillingBlockedStatus } from '@/lib/billing-access';
 
 const PublicSiteLayout = lazy(() => import('./PublicSiteLayout'));
 const PublicHome = lazy(() => import('./PublicHome'));
@@ -15,12 +17,6 @@ const PublicContact = lazy(() => import('./PublicContact'));
 const PublicFavorites = lazy(() => import('./PublicFavorites'));
 
 const PageLoader = () => null;
-
-const BILLING_BLOCKED_STATUSES = ['suspended', 'pending_payment', 'overdue', 'past_due', 'blocked', 'cancelled'];
-
-function isBillingBlockedStatus(status: unknown) {
-  return BILLING_BLOCKED_STATUSES.includes(String(status || '').toLowerCase());
-}
 
 function PublishedSiteProvider({ children, slug }: { children: ReactNode; slug: string }) {
   const [siteConfig, setSiteConfig] = useState<PublicSiteConfig | null>(null);
@@ -135,14 +131,7 @@ function PublishedSiteProvider({ children, slug }: { children: ReactNode; slug: 
   };
 
   if (isBlocked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0D0D0D] px-6 text-white">
-        <div className="max-w-md text-center">
-          <h1 className="text-3xl font-bold mb-3">Acesso bloqueado</h1>
-          <p className="text-base text-white/70">Entre em contato com o administrador.</p>
-        </div>
-      </div>
-    );
+    return <PublicSiteUnavailable />;
   }
 
   return (

@@ -19,6 +19,7 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import { useSystemSettings } from '@/hooks/use-system-settings';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
+import { isBillingBlockedStatus } from '@/lib/billing-access';
 
 const DEFAULT_BRAND_ICON = "/favicon.webp?v=20260605";
 
@@ -265,6 +266,7 @@ export const AppSidebar = React.memo(function AppSidebar() {
   }, []);
   const logoWidth = systemSettings?.logo_width || 140;
   const logoHeight = systemSettings?.logo_height || 40;
+  const isBillingBlocked = !isSuperAdmin && isBillingBlockedStatus(organization?.subscription_status);
 
   // Preload both images so swap is instant
   useMemo(() => {
@@ -279,6 +281,14 @@ export const AppSidebar = React.memo(function AppSidebar() {
   // Filter nav items based on enabled modules, user role, permissions, and organization segment
   // While modules are loading, only show items without module requirement to prevent flash
   const navItems = useMemo(() => {
+    if (isBillingBlocked) {
+      return [{
+        icon: CreditCard,
+        labelKey: 'Faturamento',
+        path: '/settings?tab=subscription'
+      }];
+    }
+
     const filterItems = (items: NavItem[]): NavItem[] => {
       return items.filter(item => {
         // Module check
@@ -309,12 +319,14 @@ export const AppSidebar = React.memo(function AppSidebar() {
     };
 
     return filterItems(allNavItems);
-  }, [allNavItems, hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, modulesLoading]);
+  }, [allNavItems, hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, organization?.subscription_status, modulesLoading, isBillingBlocked]);
 
 
   // Filter bottom items based on user role and modules
   // While modules are loading, hide module-dependent items to prevent flash
   const computedBottomItems = useMemo(() => {
+    if (isBillingBlocked) return [];
+
     const items = bottomItems.filter(item => {
       if (item.adminOnly && profile?.role !== 'admin' && !isSuperAdmin) return false;
       // If modules are still loading and this item requires a module, hide it
@@ -323,7 +335,7 @@ export const AppSidebar = React.memo(function AppSidebar() {
       return true;
     });
     return items;
-  }, [isSuperAdmin, profile?.role, hasModule, modulesLoading]);
+  }, [isSuperAdmin, profile?.role, hasModule, modulesLoading, isBillingBlocked]);
   const getLabel = (labelKey: string): string => {
     return (t.nav as Record<string, string>)[labelKey] || labelKey;
   };
@@ -335,7 +347,7 @@ export const AppSidebar = React.memo(function AppSidebar() {
     if (item.children) {
       return item.children.some(child => location.pathname === child.path);
     }
-    return location.pathname.startsWith(item.path);
+    return location.pathname.startsWith(item.path.split('?')[0]);
   };
   return <aside className={cn("h-[calc(100%-24px)] bg-card rounded-xl shadow-sm relative flex flex-col transition-all duration-300 m-3 flex-shrink-0 border-0", collapsed ? "w-16" : "w-56")}>
     {/* Header with Logo and Toggle */}
@@ -386,7 +398,7 @@ export const AppSidebar = React.memo(function AppSidebar() {
                 <span>{getLabel(child.labelKey)}</span>
               </NavLink>)}
             </CollapsibleContent>
-          </Collapsible> : <NavLink to={item.children ? item.children[0].path : item.path} className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors", "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-orange-100 dark:hover:bg-orange-900/30", (item.children ? isActiveParent(item) : location.pathname.startsWith(item.path)) && "text-sidebar-foreground bg-orange-100 dark:bg-orange-900/30", collapsed && "justify-center")}>
+          </Collapsible> : <NavLink to={item.children ? item.children[0].path : item.path} className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors", "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-orange-100 dark:hover:bg-orange-900/30", (item.children ? isActiveParent(item) : location.pathname.startsWith(item.path.split('?')[0])) && "text-sidebar-foreground bg-orange-100 dark:bg-orange-900/30", collapsed && "justify-center")}>
             <SidebarIcon item={item} size={20} />
             {!collapsed && <span>{getLabel(item.labelKey)}</span>}
           </NavLink>}

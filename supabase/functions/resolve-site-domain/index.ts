@@ -10,6 +10,26 @@ const cacheHeaders = {
   'Cache-Control': 'public, max-age=300, s-maxage=600, stale-while-revalidate=3600',
 };
 
+const BILLING_BLOCKED_STATUSES = new Set([
+  'suspended',
+  'suspenso',
+  'pending_payment',
+  'overdue',
+  'past_due',
+  'blocked',
+  'cancelled',
+  'canceled',
+  'cancelado',
+  'cancelada',
+]);
+
+function isBlockedOrganization(organization: any) {
+  return (
+    organization?.is_active === false ||
+    BILLING_BLOCKED_STATUSES.has(String(organization?.subscription_status || '').toLowerCase())
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -38,7 +58,7 @@ Deno.serve(async (req) => {
     // Direct lookup by custom_domain — try all variants (with/without www)
     const { data: directMatch, error: directError } = await supabase
       .from('organization_sites')
-      .select('*, organizations(name)')
+      .select('*, organizations(name, subscription_status, is_active)')
       .or(`custom_domain.eq.${cleanDomain},custom_domain.eq.${bareDomain},custom_domain.eq.${wwwDomain}`)
       .eq('is_active', true)
       .limit(1)
@@ -49,6 +69,18 @@ Deno.serve(async (req) => {
     }
 
     if (directMatch) {
+      const directOrganization = (directMatch as any).organizations;
+      if (isBlockedOrganization(directOrganization)) {
+        return new Response(
+          JSON.stringify({
+            error: 'site_blocked',
+            found: false,
+            message: 'Este site esta temporariamente fora do ar.',
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       console.log(`Domain resolved via direct lookup: ${domain} -> org: ${directMatch.organization_id}`);
       
       const { organization_id, subdomain, organizations, id, is_active, domain_verified, domain_verified_at, created_at, updated_at, ...siteFields } = directMatch;
@@ -91,6 +123,23 @@ Deno.serve(async (req) => {
 
     const siteData = data[0];
     console.log(`Domain resolved via RPC: ${domain} -> org: ${siteData.organization_id}`);
+
+    const { data: organizationAccess, error: organizationAccessError } = await supabase
+      .from('organizations')
+      .select('is_active, subscription_status')
+      .eq('id', siteData.organization_id)
+      .maybeSingle();
+
+    if (organizationAccessError || !organizationAccess || isBlockedOrganization(organizationAccess)) {
+      return new Response(
+        JSON.stringify({
+          error: 'site_blocked',
+          found: false,
+          message: 'Este site esta temporariamente fora do ar.',
+        }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     return new Response(
       JSON.stringify({

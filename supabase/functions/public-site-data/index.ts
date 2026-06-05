@@ -6,7 +6,18 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const BILLING_BLOCKED_STATUSES = new Set(['suspended', 'pending_payment', 'overdue', 'past_due', 'blocked', 'cancelled']);
+const BILLING_BLOCKED_STATUSES = new Set([
+  'suspended',
+  'suspenso',
+  'pending_payment',
+  'overdue',
+  'past_due',
+  'blocked',
+  'cancelled',
+  'canceled',
+  'cancelado',
+  'cancelada',
+]);
 
 Deno.serve(async (req) => {
   // Handle CORS preflight requests

@@ -10,15 +10,16 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Clock, CreditCard } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { isBillingAccessRoute, isBillingBlockedStatus } from '@/lib/billing-access';
 
 const ACTIVE_SUBSCRIPTION_STATUSES = ['active', 'paid', 'confirmed'];
 const ACTIVE_SUBSCRIPTION_TYPES = ['paid', 'free'];
-const BILLING_BLOCKED_STATUSES = ['suspended', 'pending_payment', 'overdue', 'past_due', 'blocked', 'cancelled'];
-
 type AccessBlockReason = 'trial' | 'billing';
 
 export function TrialExpiredModal() {
   const { organization, isSuperAdmin, impersonating } = useAuth();
+  const location = useLocation();
   const [isExpired, setIsExpired] = useState(false);
   const [blockReason, setBlockReason] = useState<AccessBlockReason>('trial');
   const [checkoutUrl, setCheckoutUrl] = useState('/settings?tab=subscription');
@@ -45,7 +46,7 @@ export function TrialExpiredModal() {
           ACTIVE_SUBSCRIPTION_TYPES.includes(subscriptionType);
         const isTrial = subscriptionType === 'trial';
         const trialEnded = orgData.trial_ends_at && new Date(orgData.trial_ends_at) < new Date();
-        const isBillingBlocked = BILLING_BLOCKED_STATUSES.includes(subscriptionStatus);
+        const isBillingBlocked = isBillingBlockedStatus(subscriptionStatus);
 
         setBlockReason(isBillingBlocked ? 'billing' : 'trial');
         setIsExpired(isBillingBlocked || (!hasActiveSubscription && isTrial && !!trialEnded));
@@ -58,7 +59,7 @@ export function TrialExpiredModal() {
     checkTrialStatus();
   }, [organization?.id, isSuperAdmin, impersonating]);
 
-  if (loading || isSuperAdmin || !isExpired) {
+  if (loading || isSuperAdmin || !isExpired || isBillingAccessRoute(location.pathname, location.search)) {
     return null;
   }
 

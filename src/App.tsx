@@ -19,6 +19,7 @@ import { useSystemBranding } from "@/hooks/use-system-branding";
 import { SetupGuideDialog } from "@/components/setup-guide/SetupGuideDialog";
 import { MetricsPanel } from "@/components/MetricsPanel";
 import { ModuleGuard } from "@/components/guards/ModuleGuard";
+import { isBillingAccessRoute, isBillingBlockedStatus } from "@/lib/billing-access";
 
 // Public site root â€” separate bundle, no CRM providers
 const PublicAppRoot = lazy(() => import("./PublicAppRoot"));
@@ -212,6 +213,7 @@ const PageLoader = () => {
 // condition onde o usuÃ¡rio Ã© mandado para /onboarding ou /auth enquanto
 // as orgs ainda estÃ£o carregando.
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
   const {
     user,
     loading,
@@ -244,6 +246,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   // Onboarding fica disponÃ­vel apenas por link direto ou pelo CTA de cadastro.
   if (orgCount === 0 && !isSuperAdmin) {
     return <Navigate to="/select-organization" replace />;
+  }
+
+  const isBillingBlocked =
+    !!organization &&
+    !isSuperAdmin &&
+    !impersonating &&
+    isBillingBlockedStatus(organization.subscription_status);
+
+  if (isBillingBlocked && !isBillingAccessRoute(location.pathname, location.search)) {
+    return <Navigate to="/settings?tab=subscription" replace />;
   }
 
   return <>{children}</>;

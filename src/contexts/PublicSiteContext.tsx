@@ -2,6 +2,8 @@ import React, { useState, useEffect, ReactNode } from 'react';
 import { PublicSiteConfig } from '@/hooks/use-public-site';
 import { PublicContext, PublicContextType } from '@/pages/public/usePublicContext';
 import { supabase } from '@/integrations/supabase/client';
+import { PublicSiteUnavailable } from '@/components/public/PublicSiteUnavailable';
+import { isBillingBlockedStatus } from '@/lib/billing-access';
 
 function mapSiteDataToConfig(data: any, orgName: string): PublicSiteConfig {
   return {
@@ -67,26 +69,13 @@ export function PublicSiteProvider({ children }: { children: ReactNode }) {
   const [siteConfig, setSiteConfig] = useState<PublicSiteConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isBlocked, setIsBlocked] = useState(false);
 
   useEffect(() => {
     const resolveSite = async () => {
       try {
         const hostname = window.location.hostname;
         
-        // Check session cache first
-        const cachedConfig = sessionStorage.getItem(`site_config_${hostname}`);
-        if (cachedConfig) {
-          try {
-            const parsed = JSON.parse(cachedConfig);
-            setOrganizationId(parsed.organization_id);
-            setSiteConfig(parsed.site_config);
-            setIsLoading(false);
-            return;
-          } catch (e) {
-            sessionStorage.removeItem(`site_config_${hostname}`);
-          }
-        }
-
         // Skip for localhost and main app domains
         if (
           hostname === 'localhost' ||
@@ -108,6 +97,12 @@ export function PublicSiteProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ domain: hostname }),
           }
         );
+
+        if (response.status === 403) {
+          sessionStorage.removeItem(`site_config_${hostname}`);
+          setIsBlocked(true);
+          return;
+        }
 
         if (response.ok) {
           const data = await response.json();
@@ -136,12 +131,19 @@ export function PublicSiteProvider({ children }: { children: ReactNode }) {
         // Fallback for subdomains if resolve-site-domain fails
         const { data: siteData, error: siteError } = await supabase
           .from('organization_sites')
-          .select('*, organizations(name)')
+          .select('*, organizations(name, subscription_status, is_active)')
           .or(`subdomain.eq.${hostname.split('.')[0]},custom_domain.eq.${hostname}`)
           .eq('is_active', true)
           .maybeSingle();
 
         if (siteData) {
+          const organization = siteData.organizations as any;
+          if (organization?.is_active === false || isBillingBlockedStatus(organization?.subscription_status)) {
+            sessionStorage.removeItem(`site_config_${hostname}`);
+            setIsBlocked(true);
+            return;
+          }
+
           const orgName = (siteData.organizations as any)?.name || 'Imobiliária';
           const config = mapSiteDataToConfig(siteData, orgName);
           setOrganizationId(siteData.organization_id);
@@ -172,7 +174,9 @@ export function PublicSiteProvider({ children }: { children: ReactNode }) {
     error,
   };
 
-  return (
+  return isBlocked ? (
+    <PublicSiteUnavailable />
+  ) : (
     <PublicContext.Provider value={contextValue}>
       {children}
     </PublicContext.Provider>
