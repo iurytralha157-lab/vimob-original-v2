@@ -24,7 +24,6 @@ import {
   useActiveSubscriptionPlans,
   OnboardingRequest,
 } from '@/hooks/use-onboarding-requests';
-import { useSuperAdmin } from '@/hooks/use-super-admin';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { OnboardingRequestCard } from '@/components/admin/onboarding/OnboardingRequestCard';
@@ -35,7 +34,6 @@ export default function AdminOnboarding() {
   const { data: requests = [], isLoading } = useAllOnboardingRequests();
   const { data: plans = [] } = useActiveSubscriptionPlans();
   const updateMutation = useUpdateOnboardingRequest();
-  const { createOrganization } = useSuperAdmin();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -101,7 +99,20 @@ export default function AdminOnboarding() {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const response = (error as any).context;
+        if (response && typeof response.json === 'function') {
+          try {
+            const body = await response.json();
+            throw new Error(body?.error || body?.message || error.message);
+          } catch (parseError: any) {
+            if (parseError?.message && parseError.message !== error.message) {
+              throw parseError;
+            }
+          }
+        }
+        throw error;
+      }
       if (data.error) throw new Error(data.error);
 
       toast.success('Organização aprovada e link de pagamento enviado!');

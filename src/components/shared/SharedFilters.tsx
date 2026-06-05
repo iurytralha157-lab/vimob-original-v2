@@ -56,6 +56,8 @@ interface SharedFiltersProps {
   onClear: () => void;
   hasActiveFilters: boolean;
   hideSearch?: boolean;
+  datePosition?: "start" | "end";
+  onFiltersOpenChange?: (open: boolean) => void;
 }
 
 export function SharedFilters({
@@ -93,6 +95,8 @@ export function SharedFilters({
   isLoadingAdSets = false,
   isLoadingAds = false,
   hideSearch = false,
+  datePosition = "start",
+  onFiltersOpenChange,
 }: SharedFiltersProps) {
   const { user, profile } = useAuth();
   const { data: teams = [] } = useTeams();
@@ -373,72 +377,87 @@ export function SharedFilters({
     </div>
   );
 
+  const DateControl = () => (
+    <div className="flex items-center">
+      <DateFilterPopover
+        datePreset={datePreset}
+        onDatePresetChange={onDatePresetChange}
+        customDateRange={customDateRange}
+        onCustomDateRangeChange={onCustomDateRangeChange}
+        triggerClassName={cn(
+          "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
+          isMobile ? "px-2 text-xs font-medium normal-case tracking-normal" : "",
+          (datePreset !== "last30days" || customDateRange) && "border-primary/50 bg-primary/5 text-primary",
+        )}
+        align="end"
+      />
+    </div>
+  );
+
+  const FiltersControl = () => (
+    <div className="flex items-center gap-1">
+      <Popover
+        open={filtersOpen}
+        onOpenChange={(open) => {
+          setFiltersOpen(open);
+          onFiltersOpenChange?.(open);
+        }}
+        modal={true}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
+              isMobile ? "px-2.5 text-xs font-medium normal-case tracking-normal" : "",
+              hasExtraFilters && "border-primary/50 bg-primary/5 text-primary",
+            )}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span className={isMobile ? "hidden xs:inline" : ""}>Filtros</span>
+            {hasExtraFilters && (
+              <Badge
+                variant="default"
+                className={cn(
+                  "ml-1 h-4 min-w-[16px] px-1 text-[9px] bg-primary flex items-center justify-center",
+                  isMobile && "h-4 w-4 p-0 text-[10px] ml-0.5",
+                )}
+              >
+              </Badge>
+            )}
+          </Button>
+        </PopoverTrigger>
+
+        <PopoverContent
+          align="end"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          className={cn("w-72 p-3 border-border/40 shadow-2xl", isMobile && "w-[280px] max-h-[80vh] overflow-y-auto")}
+        >
+          {FilterContent()}
+        </PopoverContent>
+      </Popover>
+
+      {hasActiveFilters && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 px-2 text-muted-foreground hover:text-destructive transition-colors"
+          onClick={onClear}
+          title="Limpar todos os filtros"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
+  );
+
   return (
     <div className="flex items-center justify-end gap-2 w-full">
-      <div className="flex items-center">
-        <DateFilterPopover
-          datePreset={datePreset}
-          onDatePresetChange={onDatePresetChange}
-          customDateRange={customDateRange}
-          onCustomDateRangeChange={onCustomDateRangeChange}
-          triggerClassName={cn(
-            "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
-            isMobile ? "px-2 text-xs font-medium normal-case tracking-normal" : "",
-            (datePreset !== "last30days" || customDateRange) && "border-primary/50 bg-primary/5 text-primary",
-          )}
-          align="end"
-        />
-      </div>
-
-      <div className="flex items-center gap-1">
-        <Popover open={filtersOpen} onOpenChange={setFiltersOpen} modal={true}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(
-                "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
-                isMobile ? "px-2.5 text-xs font-medium normal-case tracking-normal" : "",
-                hasExtraFilters && "border-primary/50 bg-primary/5 text-primary",
-              )}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              <span className={isMobile ? "hidden xs:inline" : ""}>Filtros</span>
-              {hasExtraFilters && (
-                <Badge
-                  variant="default"
-                  className={cn(
-                    "ml-1 h-4 min-w-[16px] px-1 text-[9px] bg-primary flex items-center justify-center",
-                    isMobile && "h-4 w-4 p-0 text-[10px] ml-0.5",
-                  )}
-                >
-                  {isMobile ? "•" : "!"}
-                </Badge>
-              )}
-            </Button>
-          </PopoverTrigger>
-
-          <PopoverContent
-            align="end"
-            onOpenAutoFocus={(event) => event.preventDefault()}
-            className={cn("w-72 p-3 border-border/40 shadow-2xl", isMobile && "w-[280px] max-h-[80vh] overflow-y-auto")}
-          >
-            {FilterContent()}
-          </PopoverContent>
-        </Popover>
-
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-muted-foreground hover:text-destructive transition-colors"
-            onClick={onClear}
-            title="Limpar todos os filtros"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        )}
-      </div>
+      {datePosition === "start" && <DateControl />}
+      <FiltersControl />
+      {datePosition === "end" && <DateControl />}
     </div>
   );
 }
+

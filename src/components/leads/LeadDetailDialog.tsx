@@ -65,7 +65,7 @@ import { SdrDistributionButton } from '@/components/leads/SdrDistributionButton'
 import { TaskOutcomeDialog, TaskOutcome, getOutcomeLabel } from '@/components/leads/TaskOutcomeDialog';
 import { formatResponseTime } from '@/hooks/use-lead-timeline';
 import { EventsList } from '@/components/schedule/EventsList';
-import { EventForm } from '@/components/schedule/EventForm';
+import { EventSheet } from '@/components/schedule/EventSheet';
 import { toast } from 'sonner';
 import { formatPhoneForDisplay } from '@/lib/phone-utils';
 import { TagSelectorPopoverContent } from '@/components/ui/tag-selector';
@@ -3066,7 +3066,7 @@ export function LeadDetailDialog({
       </Dialog>
 
       {/* Formulário de agendamento (global para o card) */}
-      <EventForm 
+      <EventSheet
         open={scheduleFormOpen} 
         onOpenChange={open => !open && handleCloseScheduleForm()} 
         leadId={lead.id} 

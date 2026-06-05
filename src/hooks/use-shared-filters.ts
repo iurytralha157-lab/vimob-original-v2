@@ -23,7 +23,7 @@ export interface SharedFilters {
 }
 
 
-export function useSharedFilters() {
+export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
   const { user, organization } = useAuth();
   const { data: visibility } = useLeadVisibility(user?.id);
   
@@ -44,11 +44,12 @@ export function useSharedFilters() {
   const [tagId, setTagId] = useState<string | null>(null);
   const [dealStatus, setDealStatus] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const shouldLoadDynamicOptions = options?.loadDynamicOptions ?? true;
 
   // Dynamic Sources
   const { data: dynamicSources = [], isLoading: isLoadingSources } = useQuery({
     queryKey: ['shared-source-options', organization?.id, dateRange, visibility, userId, teamId],
-    enabled: !!organization?.id && !!visibility,
+    enabled: shouldLoadDynamicOptions && !!organization?.id && !!visibility,
     queryFn: async () => {
       let query = supabase
         .from('leads')
@@ -75,7 +76,7 @@ export function useSharedFilters() {
   // Dynamic Campaigns
   const { data: campaigns = [], isLoading: isLoadingCampaigns } = useQuery({
     queryKey: ['shared-campaigns', organization?.id, dateRange, visibility, userId, teamId],
-    enabled: !!organization?.id && !!visibility,
+    enabled: shouldLoadDynamicOptions && !!organization?.id && !!visibility,
     queryFn: async () => {
       let query = supabase
         .from('leads')
@@ -106,7 +107,7 @@ export function useSharedFilters() {
   // Dynamic AdSets
   const { data: adSets = [], isLoading: isLoadingAdSets } = useQuery({
     queryKey: ['shared-adsets', organization?.id, dateRange, campaignId, visibility, userId, teamId],
-    enabled: !!campaignId && !!organization?.id && !!visibility,
+    enabled: shouldLoadDynamicOptions && !!campaignId && !!organization?.id && !!visibility,
     queryFn: async () => {
       let query = supabase
         .from('leads')
@@ -138,7 +139,7 @@ export function useSharedFilters() {
   // Dynamic Ads
   const { data: ads = [], isLoading: isLoadingAds } = useQuery({
     queryKey: ['shared-ads', organization?.id, dateRange, adSetId, visibility, userId, teamId],
-    enabled: !!adSetId && !!organization?.id && !!visibility,
+    enabled: shouldLoadDynamicOptions && !!adSetId && !!organization?.id && !!visibility,
     queryFn: async () => {
       let query = supabase
         .from('leads')
@@ -168,7 +169,7 @@ export function useSharedFilters() {
   });
 
   // Tags
-  const { data: tags = [] } = useTags();
+  const { data: tags = [] } = useTags({ enabled: shouldLoadDynamicOptions });
 
   // Cascading resets
   useEffect(() => {

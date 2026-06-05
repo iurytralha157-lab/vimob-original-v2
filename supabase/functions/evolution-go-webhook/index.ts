@@ -1222,9 +1222,8 @@ async function handleSingleMessageUpsert(session: any, m: any) {
         .from("whatsapp-media")
         .upload(path, bytes, { contentType: mediaMimeType?.split(";")[0] || "application/octet-stream", upsert: true });
       if (!upErr) {
-        const { data: pub } = supabase.storage.from("whatsapp-media").getPublicUrl(path);
         await supabase.from("whatsapp_messages").update({
-          media_url: pub.publicUrl,
+          media_url: null,
           media_storage_path: path,
           media_status: "ready",
           media_size: bytes.length,

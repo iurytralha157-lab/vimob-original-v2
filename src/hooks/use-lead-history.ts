@@ -24,6 +24,21 @@ export interface UnifiedHistoryEvent {
   firstResponseSeconds?: number | null;
 }
 
+function sourceLabel(source?: string | null): string | null {
+  if (!source) return null;
+  const labels: Record<string, string> = {
+    meta: 'Meta Ads',
+    meta_ads: 'Meta Ads',
+    whatsapp: 'WhatsApp',
+    webhook: 'Webhook',
+    website: 'Site',
+    site: 'Site',
+    wordpress: 'WordPress',
+    manual: 'Manual',
+  };
+  return labels[source] || source;
+}
+
 // Types that only exist in activities (never in timeline) â€” no deduplication needed
 const ACTIVITY_ONLY_TYPES = new Set([
   'call',
@@ -236,8 +251,8 @@ export function useLeadHistory(leadId: string | null) {
     queryFn: async (): Promise<UnifiedHistoryEvent[]> => {
       if (!leadId) return [];
 
-      // Fetch timeline, activities and entry events in parallel
-      const [timelineResult, activitiesResult, entriesResult] = await Promise.all([
+      // Fetch the timeline plus source/distribution evidence in parallel.
+      const [timelineResult, activitiesResult, entriesResult, leadResult, distributionLogsResult] = await Promise.all([
         supabase
           .from('lead_timeline_events')
           .select('*')
@@ -253,15 +268,29 @@ export function useLeadHistory(leadId: string | null) {
           .select('*')
           .eq('lead_id', leadId)
           .order('created_at', { ascending: true }),
+        supabase
+          .from('leads')
+          .select('id, source, utm_source, assigned_user_id, assigned_at, created_at, assigned_user:users!leads_assigned_user_id_fkey(id, name, avatar_url)')
+          .eq('id', leadId)
+          .maybeSingle(),
+        supabase
+          .from('round_robin_logs')
+          .select('*, queue:round_robins(id, name), assigned_user:users!round_robin_logs_assigned_user_id_fkey(id, name, avatar_url)')
+          .eq('lead_id', leadId)
+          .order('created_at', { ascending: true }),
       ]);
 
       if (timelineResult.error) throw timelineResult.error;
       if (activitiesResult.error) throw activitiesResult.error;
       if (entriesResult.error) throw entriesResult.error;
+      if (leadResult.error) throw leadResult.error;
+      if (distributionLogsResult.error) throw distributionLogsResult.error;
 
       const timelineEvents = timelineResult.data || [];
       const activityEvents = activitiesResult.data || [];
       const entryEvents = entriesResult.data || [];
+      const lead = leadResult.data as any;
+      const distributionLogs = distributionLogsResult.data || [];
 
       // Collect all user IDs that need resolution from metadata
       const userIdsToResolve = new Set<string>();
@@ -273,6 +302,10 @@ export function useLeadHistory(leadId: string | null) {
         if (e.user_id && typeof e.user_id === 'string') userIdsToResolve.add(e.user_id);
         if (e.actor_user_id && typeof e.actor_user_id === 'string') userIdsToResolve.add(e.actor_user_id);
       });
+      distributionLogs.forEach((log: any) => {
+        if (log.assigned_user_id && typeof log.assigned_user_id === 'string') userIdsToResolve.add(log.assigned_user_id);
+      });
+      if (lead?.assigned_user_id) userIdsToResolve.add(lead.assigned_user_id);
 
       // Resolve users
       const userMap = new Map<string, { id: string; name: string; avatar_url: string | null }>();
@@ -323,6 +356,7 @@ export function useLeadHistory(leadId: string | null) {
 
       // Track which timeline types exist for deduplication
       const timelineTypesPresent = new Set(timelineEvents.map((e: any) => e.event_type));
+      const activityTypesPresent = new Set(dedupedActivityEvents.map((a: any) => a.type));
 
       // Enrich timeline lead_created with webhook_name from activity if missing
       const activityLeadCreated = dedupedActivityEvents.find((a: any) => a.type === 'lead_created');
@@ -385,8 +419,103 @@ export function useLeadHistory(leadId: string | null) {
           isAutomation: false,
         }));
 
+      const distributionMapped: UnifiedHistoryEvent[] = distributionLogs
+        .filter((log: any) => {
+          if (!log.round_robin_id && !log.assigned_user_id && !log.reason) return false;
+          const hasTimelineQueue = timelineEvents.some((event: any) => {
+            const meta = (event.metadata as Record<string, any>) || {};
+            return event.event_type === 'lead_assigned'
+              && (meta.distribution_queue_id === log.round_robin_id || meta.queue_id === log.round_robin_id);
+          });
+          return !hasTimelineQueue;
+        })
+        .map((log: any) => {
+          const queueName = log.queue?.name || null;
+          const assignedUser = log.assigned_user || (log.assigned_user_id ? userMap.get(log.assigned_user_id) : null);
+          const assignedName = assignedUser?.name || null;
+          const success = !!log.assigned_user_id;
+          const reason = log.reason || null;
+          const metadata = {
+            queue_id: log.round_robin_id,
+            distribution_queue_id: log.round_robin_id,
+            queue_name: queueName,
+            distribution_queue_name: queueName,
+            assigned_user_id: log.assigned_user_id,
+            assigned_user_name: assignedName,
+            to_user_id: log.assigned_user_id,
+            to_user_name: assignedName,
+            reason,
+            is_initial_distribution: true,
+          };
+
+          return {
+            id: `distribution-${log.id}`,
+            type: 'lead_assigned',
+            label: success
+              ? buildLabel('lead_assigned', metadata, 'timeline')
+              : queueName
+                ? `Fila "${queueName}" sem distribuição`
+                : 'Sem fila de distribuição compatível',
+            content: success ? undefined : reason || undefined,
+            timestamp: log.created_at,
+            actor: assignedUser ? { id: assignedUser.id, name: assignedUser.name, avatar_url: assignedUser.avatar_url || null } : null,
+            source: 'timeline' as const,
+            metadata,
+            channel: null,
+            isAutomation: true,
+          };
+        });
+
+      const fallbackEvents: UnifiedHistoryEvent[] = [];
+      const hasLeadCreated = timelineTypesPresent.has('lead_created') || activityTypesPresent.has('lead_created');
+      if (lead && !hasLeadCreated) {
+        const label = sourceLabel(lead.source);
+        fallbackEvents.push({
+          id: `lead-fallback-created-${lead.id}`,
+          type: 'lead_created',
+          label: buildLabel('lead_created', { source: lead.source, source_label: label }, 'timeline'),
+          content: label ? `Origem: ${label}` : undefined,
+          timestamp: lead.created_at,
+          actor: null,
+          source: 'timeline' as const,
+          metadata: { source: lead.source, source_label: label, utm_source: lead.utm_source },
+          channel: lead.source || null,
+          isAutomation: false,
+          sourceOrigin: lead.source || null,
+        });
+      }
+
+      const hasAssignmentEvent =
+        timelineTypesPresent.has('lead_assigned') ||
+        timelineTypesPresent.has('assignee_changed') ||
+        activityTypesPresent.has('assignee_changed') ||
+        distributionMapped.length > 0;
+      if (lead?.assigned_user_id && !hasAssignmentEvent) {
+        const assignedUser = lead.assigned_user || userMap.get(lead.assigned_user_id);
+        const assignedName = assignedUser?.name || 'Responsável atual';
+        fallbackEvents.push({
+          id: `lead-fallback-assigned-${lead.id}`,
+          type: 'lead_assigned',
+          label: `Atribuído a ${assignedName}`,
+          content: 'Registro sem fila de distribuição vinculada',
+          timestamp: lead.assigned_at || lead.created_at,
+          actor: assignedUser ? { id: assignedUser.id, name: assignedUser.name, avatar_url: assignedUser.avatar_url || null } : null,
+          source: 'timeline' as const,
+          metadata: {
+            assigned_user_id: lead.assigned_user_id,
+            assigned_user_name: assignedName,
+            to_user_id: lead.assigned_user_id,
+            to_user_name: assignedName,
+            source: lead.source,
+            source_label: sourceLabel(lead.source),
+          },
+          channel: null,
+          isAutomation: false,
+        });
+      }
+
       // Merge and sort chronologically (oldest first)
-      return [...timelineMapped, ...activityMapped, ...entriesMapped].sort(
+      return [...fallbackEvents, ...timelineMapped, ...activityMapped, ...entriesMapped, ...distributionMapped].sort(
         (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
       );
     },

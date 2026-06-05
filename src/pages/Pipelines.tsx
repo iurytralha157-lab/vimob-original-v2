@@ -77,7 +77,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { DragDropContext, Droppable, DropResult } from '@hello-pangea/dnd';
-import { useStages, useStagesWithLeads, usePipelines, useCreatePipeline, useUpdatePipeline, useDeletePipeline, useCreateStage, useLeadMetaFilters } from '@/hooks/use-stages';
+import { useStages, useStagesWithLeads, usePipelines, useCreatePipeline, useUpdatePipeline, useDeletePipeline, useCreateStage } from '@/hooks/use-stages';
 import { useLoadMoreLeads } from '@/hooks/use-stages';
 import { CreateLeadDialog } from '@/components/leads/CreateLeadDialog';
 import { useOrganizationUsers } from '@/hooks/use-users';
@@ -167,6 +167,7 @@ export default function Pipelines() {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, organization } = useAuth();
+  const [shouldLoadFilterOptions, setShouldLoadFilterOptions] = useState(false);
   const isAdmin = profile.role === 'admin' || profile.role === 'super_admin';
   const isTelecom = organization.segment === 'telecom';
   const newButtonLabel = isTelecom ? 'Novo Cliente' : 'Novo Lead';
@@ -209,7 +210,7 @@ export default function Pipelines() {
     isLoadingCampaigns,
     isLoadingAdSets,
     isLoadingAds,
-  } = useSharedFilters();
+  } = useSharedFilters({ loadDynamicOptions: shouldLoadFilterOptions });
 
   const [searchInput, setSearchInput] = useState('');
 
@@ -240,7 +241,6 @@ export default function Pipelines() {
   const deletePipeline = useDeletePipeline();
   const createStage = useCreateStage();
   const loadMoreLeads = useLoadMoreLeads();
-  const { data: metaFilters } = useLeadMetaFilters();
   
   // Set initial pipeline when pipelines load
   useEffect(() => {
@@ -281,6 +281,8 @@ export default function Pipelines() {
 
   const { data: baseStages = [], isLoading: baseStagesLoading } = useStages(selectedPipelineId || undefined);
 
+  const shouldLoadPipelineLeads = !!selectedPipelineId && filterUser !== null && !permissionLoading;
+
   const { data: stagesWithLeads = [], isLoading: leadsLoading, refetch } = useStagesWithLeads(
     selectedPipelineId || undefined, 
     filterUser === 'all' ? undefined : (filterUser || undefined),
@@ -293,7 +295,8 @@ export default function Pipelines() {
       filterAdSet: filterAdSet && filterAdSet !== 'all' ? filterAdSet : undefined,
       filterAd: filterAd && filterAd !== 'all' ? filterAd : undefined,
       filterSource: filterSource && filterSource !== 'all' ? filterSource : undefined,
-    }
+    },
+    { enabled: shouldLoadPipelineLeads }
   );
 
   // Combine base stages with leads data when available
@@ -310,16 +313,6 @@ export default function Pipelines() {
   const isMobile = useIsMobile();
   const [activeMobileStageId, setActiveMobileStageId] = useState<string | null>(null);
   
-  const allSources = useMemo(() => {
-    const sources = new Set<string>();
-    stages.forEach(stage => {
-      stage.leads.forEach((lead: any) => {
-        if (lead.source) sources.add(lead.source);
-      });
-    });
-    return Array.from(sources).sort();
-  }, [stages]);
-
   const currentPipeline = pipelines.find(p => p.id === selectedPipelineId);
   const isLoading = pipelinesLoading || baseStagesLoading;
   const isInitialLeadsLoading = leadsLoading && stagesWithLeads.length === 0;
@@ -1110,6 +1103,9 @@ export default function Pipelines() {
                 isLoadingCampaigns={isLoadingCampaigns}
                 isLoadingAdSets={isLoadingAdSets}
                 isLoadingAds={isLoadingAds}
+                onFiltersOpenChange={(open) => {
+                  if (open) setShouldLoadFilterOptions(true);
+                }}
               />
 
               {!isMobile && (

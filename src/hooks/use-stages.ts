@@ -25,22 +25,6 @@ interface FilteredStageCountsParams {
 // Limite de leads por estágio para paginação inicial (otimizado para performance)
 const LEADS_PER_STAGE = 12;
 
-// Campos otimizados para leads no pipeline - only columns that exist in the database
-const LEAD_PIPELINE_FIELDS = `
-  id, name, phone, email, source, created_at, 
-  stage_id, assigned_user_id, pipeline_id, message,
-  stage_entered_at, organization_id,
-  whatsapp_avatar_url,
-  deal_status, valor_interesse, property_id, lost_reason, won_at, lost_at,
-  interest_property_id, interest_plan_id,
-  first_response_at, first_response_seconds, first_response_is_automation,
-  assignee:users!leads_assigned_user_id_fkey(id, name, avatar_url),
-  interest_property:properties!leads_interest_property_id_fkey(id, code, title, preco),
-  interest_plan:service_plans!leads_interest_plan_id_fkey(id, code, name, price),
-  lead_meta(campaign_name, campaign_id, adset_name, adset_id, ad_name, ad_id, platform),
-  stage:stages(id, name, color, stage_key)
-`;
-
 const LEAD_PIPELINE_BASIC_FIELDS = `
   id, name, phone, email, source, created_at,
   stage_id, assigned_user_id, pipeline_id, message,
@@ -245,6 +229,9 @@ export function useStagesWithLeads(
     filterAdSet?: string;
     filterAd?: string;
     filterSource?: string;
+  },
+  options?: {
+    enabled?: boolean;
   }
 ) {
   const dateFromISO = filters?.dateRange?.from?.toISOString();
@@ -267,6 +254,7 @@ export function useStagesWithLeads(
     ],
     staleTime: 30000,
     gcTime: 1000 * 60 * 15,
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       try {
         let targetPipelineId = pipelineId;
@@ -309,7 +297,7 @@ export function useStagesWithLeads(
         const stageLeadsPromises = stages.map((stage) => {
           const query = (supabase as any)
             .from('leads')
-            .select(LEAD_PIPELINE_FIELDS)
+            .select(LEAD_PIPELINE_BASIC_FIELDS, { count: 'exact' })
             .eq('pipeline_id', targetPipelineId)
             .eq('stage_id', stage.id)
             .order('stage_entered_at', { ascending: false })
@@ -317,54 +305,24 @@ export function useStagesWithLeads(
           return apply(query);
         });
 
-        const stageCountPromises = stages.map((stage) => {
-          const query = supabase
-            .from('leads')
-            .select('id', { count: 'exact', head: true })
-            .eq('pipeline_id', targetPipelineId)
-            .eq('stage_id', stage.id);
-          return apply(query);
-        });
-
-        const [stageLeadsResults, stageCountResults] = await Promise.all([
-          Promise.all(stageLeadsPromises),
-          Promise.all(stageCountPromises),
-        ]);
+        const stageLeadsResults = await Promise.all(stageLeadsPromises);
 
         const totalCountsByStage: Record<string, number> = {};
-        let totalLeads = 0;
         stages.forEach((stage, index) => {
-          const count = stageCountResults[index]?.count || 0;
+          const count = stageLeadsResults[index]?.count || 0;
           totalCountsByStage[stage.id] = count;
-          totalLeads += count;
         });
 
         const stageLeadRowsById: Record<string, any[]> = {};
 
-        await Promise.all(stages.map(async (stage, index) => {
+        stages.forEach((stage, index) => {
           const result = stageLeadsResults[index];
-          let stageLeads = result?.data || [];
-          const totalForStage = totalCountsByStage[stage.id] || 0;
-
-          if ((result?.error || stageLeads.length === 0) && totalForStage > 0) {
-            if (result?.error) {
-              console.warn('[Pipeline] rich lead query failed, using basic fields fallback:', result.error);
-            }
-
-            const fallbackQuery = (supabase as any)
-              .from('leads')
-              .select(LEAD_PIPELINE_BASIC_FIELDS)
-              .eq('pipeline_id', targetPipelineId)
-              .eq('stage_id', stage.id)
-              .order('stage_entered_at', { ascending: false })
-              .limit(LEADS_PER_STAGE);
-
-            const fallbackResult = await apply(fallbackQuery);
-            stageLeads = fallbackResult?.data || [];
+          if (result?.error) {
+            console.warn('[Pipeline] stage lead query failed:', result.error);
           }
 
-          stageLeadRowsById[stage.id] = stageLeads;
-        }));
+          stageLeadRowsById[stage.id] = result?.data || [];
+        });
 
         const leads: any[] = [];
         stages.forEach((stage) => {
@@ -806,29 +764,14 @@ export function useLoadMoreLeads() {
         const query = apply(
           (supabase as any)
             .from('leads')
-            .select(LEAD_PIPELINE_FIELDS)
+            .select(LEAD_PIPELINE_BASIC_FIELDS)
             .eq('pipeline_id', pipelineId)
             .eq('stage_id', stageId)
             .order('stage_entered_at', { ascending: false })
             .range(offset, offset + LEADS_PER_STAGE - 1)
         );
 
-        let { data, error } = await query;
-        if (error) {
-          console.warn('[Pipeline] rich load-more query failed, using basic fields fallback:', error);
-          const fallbackQuery = apply(
-            (supabase as any)
-              .from('leads')
-              .select(LEAD_PIPELINE_BASIC_FIELDS)
-              .eq('pipeline_id', pipelineId)
-              .eq('stage_id', stageId)
-              .order('stage_entered_at', { ascending: false })
-              .range(offset, offset + LEADS_PER_STAGE - 1)
-          );
-          const fallbackResult = await fallbackQuery;
-          data = fallbackResult?.data || [];
-          error = fallbackResult?.error || null;
-        }
+        const { data, error } = await query;
         if (error) throw error;
         const enrichedLeads = await getEnrichedLeadsBatch(data || []);
         return { stageId, leads: enrichedLeads };

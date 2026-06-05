@@ -381,17 +381,11 @@ Deno.serve(async (req) => {
             throw new Error(`Upload failed: ${uploadError.message}`);
           }
 
-          const { data: urlData } = supabase.storage
-            .from("whatsapp-media")
-            .getPublicUrl(filePath);
-
-          const mediaUrl = urlData.publicUrl;
-
           // Success - update message
           await supabase
             .from("whatsapp_messages")
             .update({
-              media_url: mediaUrl,
+              media_url: null,
               media_storage_path: filePath,
               media_status: "ready",
               media_error: null,
@@ -407,8 +401,8 @@ Deno.serve(async (req) => {
             })
             .eq("id", job.id);
 
-          console.log(`Job ${job.id} completed: ${mediaUrl}`);
-          results.push({ job_id: job.id, status: "completed", media_url: mediaUrl });
+          console.log(`Job ${job.id} completed: ${filePath}`);
+          results.push({ job_id: job.id, status: "completed", media_storage_path: filePath });
         } else {
           const reason = mediaContent ? `Media too small: ${mediaContent.length} bytes` : failureReasons.join(" | ");
           const isValidationError = reason.includes("Magic bytes validation failed");

@@ -110,6 +110,7 @@ export default function Contacts() {
   const [pageInputValue, setPageInputValue] = useState("1");
   const [isExporting, setIsExporting] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [lostLeadsView, setLostLeadsView] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
@@ -123,6 +124,7 @@ export default function Contacts() {
 
   const deferredSearch = useDeferredValue(search);
   const dateRange = sharedFilters.dateRange;
+  const effectiveDealStatus = lostLeadsView ? "lost" : selectedDealStatus;
 
   const filters: ContactListFilters = {
     search: deferredSearch || undefined,
@@ -134,7 +136,9 @@ export default function Contacts() {
     tagId: !deferredSearch && selectedTag !== "all" ? selectedTag : undefined,
     source: !deferredSearch && selectedSource !== "all" ? selectedSource : undefined,
     dealStatus:
-      !deferredSearch && selectedDealStatus !== "all" ? (selectedDealStatus as "open" | "won" | "lost") : undefined,
+      !deferredSearch && effectiveDealStatus !== "all"
+        ? (effectiveDealStatus as "open" | "won" | "lost")
+        : undefined,
     createdFrom: !deferredSearch && dateRange ? dateRange.from.toISOString() : undefined,
     createdTo: !deferredSearch && dateRange ? dateRange.to.toISOString() : undefined,
     sortBy,
@@ -178,6 +182,7 @@ export default function Contacts() {
     clearFilters();
     setSelectedPipeline("all");
     setSelectedStage("all");
+    setLostLeadsView(false);
     setPage(1);
   };
 
@@ -194,7 +199,7 @@ export default function Contacts() {
           unassigned: selectedAssignee === "unassigned",
           tagId: selectedTag !== "all" ? selectedTag : undefined,
           source: selectedSource !== "all" ? selectedSource : undefined,
-          dealStatus: selectedDealStatus !== "all" ? selectedDealStatus : undefined,
+          dealStatus: effectiveDealStatus !== "all" ? effectiveDealStatus : undefined,
           createdFrom: dateRange ? dateRange.from.toISOString() : undefined,
           createdTo: dateRange ? dateRange.to.toISOString() : undefined,
         },
@@ -255,6 +260,7 @@ export default function Contacts() {
     selectedTag !== "all" ||
     selectedSource !== "all" ||
     selectedDealStatus !== "all" ||
+    lostLeadsView ||
     datePreset ||
     customDateRange;
 
@@ -278,6 +284,11 @@ export default function Contacts() {
     setPage(1);
   };
 
+  const handleToggleLostLeadsView = () => {
+    setLostLeadsView((current) => !current);
+    setPage(1);
+  };
+
   const SortIcon = ({ column }: { column: ContactListFilters["sortBy"] }) => {
     if (sortBy !== column) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />;
 
@@ -296,6 +307,14 @@ export default function Contacts() {
       <div className="space-y-6 animate-in relative">
         {isMobile ? (
           <div className="flex gap-2 items-center w-full">
+            <Button
+              size="icon"
+              onClick={() => setIsCreateDialogOpen(true)}
+              className="shrink-0"
+              title="Novo Lead"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
             <SharedFilters
               datePreset={datePreset}
               onDatePresetChange={setDatePreset}
@@ -315,12 +334,15 @@ export default function Contacts() {
               onAdChange={() => {}}
               tagId={selectedTag}
               onTagChange={setSelectedTag}
-              dealStatus={selectedDealStatus}
-              onDealStatusChange={setSelectedDealStatus}
+              dealStatus={effectiveDealStatus}
+              onDealStatusChange={(value) => {
+                setLostLeadsView(false);
+                setSelectedDealStatus(value);
+              }}
               searchQuery={search}
               onSearchChange={setSearch}
               onClear={handleClearFilters}
-              hasActiveFilters={hasSharedActiveFilters || selectedPipeline !== "all" || selectedStage !== "all"}
+              hasActiveFilters={hasSharedActiveFilters || selectedPipeline !== "all" || selectedStage !== "all" || lostLeadsView}
               dynamicSources={dynamicSources}
               campaigns={campaigns}
               adSets={adSets}
@@ -330,7 +352,18 @@ export default function Contacts() {
               isLoadingCampaigns={isLoadingCampaigns}
               isLoadingAdSets={isLoadingAdSets}
               isLoadingAds={isLoadingAds}
+              datePosition="end"
             />
+
+            <Button
+              variant={lostLeadsView ? "destructive" : "outline"}
+              size="icon"
+              className="shrink-0"
+              onClick={handleToggleLostLeadsView}
+              title={lostLeadsView ? "Voltar para todos os leads" : "Leads perdidos"}
+            >
+              <XCircle className="h-4 w-4" />
+            </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -352,80 +385,117 @@ export default function Contacts() {
           </div>
         ) : (
           <div className="bg-card rounded-xl p-1.5 px-3 shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2 w-full justify-end">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-9 gap-2 font-medium border-none hover:bg-muted">
-                    <Upload className="h-4 w-4" />
-                    <span className="hidden xl:inline">Importar / Exportar</span>
-                    <ChevronDown className="h-4 w-4 opacity-50" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem onClick={() => setImportDialogOpen(true)} className="py-2.5">
-                    <Upload className="h-4 w-4 mr-2 text-primary" />
-                    Importar CSV/Excel
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={handleExport}
-                    disabled={isExporting || totalCount === 0}
-                    className="py-2.5"
-                  >
-                    <Download className="h-4 w-4 mr-2 text-primary" />
-                    {isExporting ? "Exportando..." : "Exportar Lista"}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+            <div className="flex items-center justify-between gap-3 w-full">
+              <div className="flex items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9 gap-2 font-medium border-none hover:bg-muted">
+                      <Upload className="h-4 w-4" />
+                      <span className="hidden xl:inline">Importar / Exportar</span>
+                      <ChevronDown className="h-4 w-4 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem onClick={() => setImportDialogOpen(true)} className="py-2.5">
+                      <Upload className="h-4 w-4 mr-2 text-primary" />
+                      Importar CSV/Excel
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={handleExport}
+                      disabled={isExporting || totalCount === 0}
+                      className="py-2.5"
+                    >
+                      <Download className="h-4 w-4 mr-2 text-primary" />
+                      {isExporting ? "Exportando..." : "Exportar Lista"}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
-              <Button
-                size="sm"
-                onClick={() => setIsCreateDialogOpen(true)}
-                className="h-9 gap-2 shadow-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">Novo Contato</span>
+                <Button
+                  variant={lostLeadsView ? "destructive" : "outline"}
+                  size="sm"
+                  onClick={handleToggleLostLeadsView}
+                  className="h-9 gap-2 font-medium"
+                >
+                  <XCircle className="h-4 w-4" />
+                  <span>Leads perdidos</span>
+                </Button>
+              </div>
+
+              <div className="flex min-w-0 items-center justify-end gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => setIsCreateDialogOpen(true)}
+                  className="h-9 gap-2 shadow-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Novo Lead</span>
+                </Button>
+
+                <SharedFilters
+                  datePreset={datePreset || "last30days"}
+                  onDatePresetChange={handleFilterChange(setDatePreset)}
+                  customDateRange={customDateRange}
+                  onCustomDateRangeChange={handleFilterChange(setCustomDateRange)}
+                  teamId={sharedFilters.teamId}
+                  onTeamChange={() => {}}
+                  userId={selectedAssignee}
+                  onUserChange={handleFilterChange(setSelectedAssignee)}
+                  source={selectedSource}
+                  onSourceChange={handleFilterChange(setSelectedSource)}
+                  campaignId={sharedFilters.campaignId}
+                  onCampaignChange={() => {}}
+                  adSetId={sharedFilters.adSetId}
+                  onAdSetChange={() => {}}
+                  adId={sharedFilters.adId}
+                  onAdChange={() => {}}
+                  tagId={selectedTag}
+                  onTagChange={handleFilterChange(setSelectedTag)}
+                  dealStatus={effectiveDealStatus}
+                  onDealStatusChange={(value) => {
+                    setLostLeadsView(false);
+                    handleFilterChange(setSelectedDealStatus)(value);
+                  }}
+                  searchQuery={search}
+                  onSearchChange={(value) => {
+                    setSearch(value);
+                    setPage(1);
+                  }}
+                  onClear={handleClearFilters}
+                  hasActiveFilters={hasSharedActiveFilters || selectedPipeline !== "all" || selectedStage !== "all" || lostLeadsView}
+                  dynamicSources={dynamicSources}
+                  campaigns={campaigns}
+                  adSets={adSets}
+                  ads={ads}
+                  tags={allTagsFromHook}
+                  isLoadingSources={isLoadingSources}
+                  isLoadingCampaigns={isLoadingCampaigns}
+                  isLoadingAdSets={isLoadingAdSets}
+                  isLoadingAds={isLoadingAds}
+                  datePosition="end"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {lostLeadsView && (
+          <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-500 text-white">
+                  <XCircle className="h-4 w-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-red-700 dark:text-red-300">Leads perdidos</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Listando leads marcados como perdidos e o motivo informado na perda.
+                  </p>
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={handleToggleLostLeadsView} className="h-8 text-xs">
+                Ver todos os leads
               </Button>
-
-              <div className="h-6 w-[1px] bg-border mx-1" />
-
-              <SharedFilters
-                datePreset={datePreset || "last30days"}
-                onDatePresetChange={handleFilterChange(setDatePreset)}
-                customDateRange={customDateRange}
-                onCustomDateRangeChange={handleFilterChange(setCustomDateRange)}
-                teamId={sharedFilters.teamId}
-                onTeamChange={() => {}}
-                userId={selectedAssignee}
-                onUserChange={handleFilterChange(setSelectedAssignee)}
-                source={selectedSource}
-                onSourceChange={handleFilterChange(setSelectedSource)}
-                campaignId={sharedFilters.campaignId}
-                onCampaignChange={() => {}}
-                adSetId={sharedFilters.adSetId}
-                onAdSetChange={() => {}}
-                adId={sharedFilters.adId}
-                onAdChange={() => {}}
-                tagId={selectedTag}
-                onTagChange={handleFilterChange(setSelectedTag)}
-                dealStatus={selectedDealStatus}
-                onDealStatusChange={handleFilterChange(setSelectedDealStatus)}
-                searchQuery={search}
-                onSearchChange={(value) => {
-                  setSearch(value);
-                  setPage(1);
-                }}
-                onClear={handleClearFilters}
-                hasActiveFilters={hasSharedActiveFilters || selectedPipeline !== "all" || selectedStage !== "all"}
-                dynamicSources={dynamicSources}
-                campaigns={campaigns}
-                adSets={adSets}
-                ads={ads}
-                tags={allTagsFromHook}
-                isLoadingSources={isLoadingSources}
-                isLoadingCampaigns={isLoadingCampaigns}
-                isLoadingAdSets={isLoadingAdSets}
-                isLoadingAds={isLoadingAds}
-              />
             </div>
           </div>
         )}
@@ -499,7 +569,7 @@ export default function Contacts() {
                         </div>
                       </TableHead>
                       <TableHead>Contato</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>{lostLeadsView ? "Motivo da perda" : "Status"}</TableHead>
                       <TableHead>Pipeline / Estágio</TableHead>
                       <TableHead>Responsável</TableHead>
                       <TableHead>Tags</TableHead>
@@ -577,23 +647,32 @@ export default function Contacts() {
                           </TableCell>
 
                           <TableCell onClick={() => setSelectedContactId(contact.id)}>
-                            <div className="space-y-1">
-                              <Badge
-                                variant="secondary"
-                                className={cn("text-xs gap-1 px-2", dealStatusConfig[status]?.className)}
+                            {lostLeadsView ? (
+                              <p
+                                className="max-w-[260px] text-sm font-medium text-red-700 dark:text-red-300"
+                                title={contact.lost_reason || undefined}
                               >
-                                <StatusIcon className="h-3 w-3" />
-                                {dealStatusConfig[status]?.label}
-                              </Badge>
-                              {isLost && contact.lost_reason && (
-                                <p
-                                  className="text-xs text-red-600 dark:text-red-400 max-w-[150px] truncate"
-                                  title={contact.lost_reason}
+                                {contact.lost_reason || "Motivo não informado"}
+                              </p>
+                            ) : (
+                              <div className="space-y-1">
+                                <Badge
+                                  variant="secondary"
+                                  className={cn("text-xs gap-1 px-2", dealStatusConfig[status]?.className)}
                                 >
-                                  {contact.lost_reason}
-                                </p>
-                              )}
-                            </div>
+                                  <StatusIcon className="h-3 w-3" />
+                                  {dealStatusConfig[status]?.label}
+                                </Badge>
+                                {isLost && contact.lost_reason && (
+                                  <p
+                                    className="text-xs text-red-600 dark:text-red-400 max-w-[150px] truncate"
+                                    title={contact.lost_reason}
+                                  >
+                                    {contact.lost_reason}
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </TableCell>
 
                           <TableCell onClick={() => setSelectedContactId(contact.id)}>

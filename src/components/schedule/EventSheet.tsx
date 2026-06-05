@@ -99,12 +99,13 @@ interface EventSheetProps {
   event?: ScheduleEvent | null;
   defaultUserId?: string;
   defaultDate?: Date;
+  defaultType?: EventType;
   leadId?: string;
   leadName?: string;
 }
 
 export function EventSheet({
-  open, onOpenChange, event, defaultUserId, defaultDate, leadId, leadName,
+  open, onOpenChange, event, defaultUserId, defaultDate, defaultType, leadId, leadName,
 }: EventSheetProps) {
   const { data: users = [] } = useUsers();
   const { data: teams = [] } = useTeams();
@@ -183,7 +184,7 @@ export function EventSheet({
       }
     } else {
       setIsEditing(true);
-      setSelectedType("task");
+      setSelectedType(defaultType || "task");
       setTitle("");
       setDescription("");
       setLocation("");
@@ -204,7 +205,7 @@ export function EventSheet({
     setSelectedTeamId("");
     setPendingAssigneeIds([]);
     setCommentText("");
-  }, [open, event, defaultUserId, defaultDate, leadId, leadName]);
+  }, [open, event, defaultUserId, defaultDate, defaultType, leadId, leadName]);
 
   useEffect(() => {
     if (locked || durationTouched.current) return;
@@ -478,7 +479,10 @@ export function EventSheet({
                 <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_76px_12px_76px]">
                   <Popover>
                     <PopoverTrigger asChild>
-                      <button type="button" className="min-h-10 rounded-none bg-transparent px-0 text-left text-base font-medium leading-tight text-zinc-200 transition hover:text-white">
+                      <button
+                        type="button"
+                        className="min-h-10 rounded-none bg-transparent px-0 text-left text-base font-medium leading-tight text-zinc-200 transition hover:text-primary focus-visible:text-primary active:text-primary"
+                      >
                         {date ? format(date, "EEEE, dd 'de' MMMM", { locale: ptBR }) : "Selecionar data"}
                       </button>
                     </PopoverTrigger>

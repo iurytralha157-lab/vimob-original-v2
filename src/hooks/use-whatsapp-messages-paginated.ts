@@ -8,6 +8,36 @@ interface PaginatedMessagesResult {
   nextCursor: string | null;
 }
 
+async function hydrateMessageMediaUrls(messages: WhatsAppMessage[]): Promise<WhatsAppMessage[]> {
+  const messagesWithStoragePath = messages.filter((message) => message.media_storage_path);
+
+  if (messagesWithStoragePath.length === 0) return messages;
+
+  const uniquePaths = [
+    ...new Set(messagesWithStoragePath.map((message) => message.media_storage_path!).filter(Boolean)),
+  ];
+
+  const { data, error } = await supabase.storage
+    .from("whatsapp-media")
+    .createSignedUrls(uniquePaths, 60 * 60);
+
+  if (error || !data) {
+    console.error("Error creating signed WhatsApp media URLs:", error);
+    return messages;
+  }
+
+  const signedByPath = new Map<string, string>();
+  data.forEach((item, index) => {
+    if (item.signedUrl) signedByPath.set(uniquePaths[index], item.signedUrl);
+  });
+
+  return messages.map((message) => {
+    if (!message.media_storage_path) return message;
+    const signedUrl = signedByPath.get(message.media_storage_path);
+    return signedUrl ? { ...message, media_url: signedUrl } : message;
+  });
+}
+
 export function useWhatsAppMessagesPaginated(
   conversationId: string | null,
   options?: { pageSize?: number }
@@ -40,14 +70,17 @@ export function useWhatsAppMessagesPaginated(
 
       const messages = data || [];
       
-      // Reverse to get chronological order for display
-      const chronologicalMessages = [...messages].reverse();
+      // Reverse to get chronological order for display and replace stored media
+      // paths with signed URLs. Public media_url values can be stale/invalid.
+      const chronologicalMessages = await hydrateMessageMediaUrls(
+        ([...messages].reverse()) as WhatsAppMessage[],
+      );
       
       // Next cursor is the oldest message's sent_at if we got a full page
       const nextCursor = messages.length === pageSize ? messages[messages.length - 1]?.sent_at : null;
 
       return {
-        messages: chronologicalMessages as WhatsAppMessage[],
+        messages: chronologicalMessages,
         nextCursor,
       };
     },

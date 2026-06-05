@@ -23,8 +23,30 @@ function maskApiKey(key: string | undefined): string {
 }
 
 function getEvolutionInstanceKey(session: any): string {
-  // Rule: Prefer instance_name, fallback to instance_id, never use session.id
-  return session?.instance_name || session?.instance_id || "";
+  const settings = (session?.advanced_settings || {}) as Record<string, any>;
+  // Evolution Go may keep the old migrated name in the CRM while the API accepts the UUID.
+  return settings.evolution_go_resolved_instance_key || session?.instance_name || session?.instance_id || "";
+}
+
+function getEvolutionInstanceCandidates(session: any, payload: any): string[] {
+  const settings = (session?.advanced_settings || {}) as Record<string, any>;
+  const candidates = [
+    settings.evolution_go_resolved_instance_key,
+    session?.instance_name,
+    session?.instance_id,
+    payload?.instance_name,
+    payload?.instance_id,
+  ];
+  return Array.from(new Set(candidates.filter(Boolean).map(String)));
+}
+
+function isInstanceMissingResponse(result: { status?: number; data?: any; rawText?: string }) {
+  if (result.status !== 404) return false;
+  const text = [
+    result.rawText,
+    JSON.stringify(result.data || {}),
+  ].filter(Boolean).join(" ").toLowerCase();
+  return text.includes("instance") && (text.includes("does not exist") || text.includes("not found"));
 }
 
 async function normalizeEvolutionResponse(res: Response, rawText: string) {
@@ -727,7 +749,47 @@ Deno.serve(async (req) => {
       }
     }
 
-    const finalRes = await evolutionFetch(method, path, { body, query, token, instanceId: instanceKey });
+    let finalRes = await evolutionFetch(method, path, { body, query, token, instanceId: instanceKey });
+    let resolvedInstanceKey = instanceKey;
+
+    if (isSendAction(action) && session?.id && isInstanceMissingResponse(finalRes)) {
+      const candidates = getEvolutionInstanceCandidates(session, payload).filter((candidate) => candidate !== instanceKey);
+      for (const candidate of candidates) {
+        console.warn("[EvolutionProxy] send failed with missing instance, retrying alternate instance key", {
+          session_id: session.id,
+          action,
+          failedInstanceKey: instanceKey,
+          candidate,
+          status: finalRes.status,
+        });
+
+        const retryRes = await evolutionFetch(method, path, { body, query, token, instanceId: candidate });
+        if (!isInstanceMissingResponse(retryRes)) {
+          finalRes = retryRes;
+          resolvedInstanceKey = candidate;
+          break;
+        }
+        finalRes = retryRes;
+      }
+
+      if (finalRes.ok && resolvedInstanceKey !== instanceKey) {
+        const currentSettings = (session.advanced_settings || {}) as Record<string, any>;
+        await supabase
+          .from("whatsapp_sessions")
+          .update({
+            instance_id: resolvedInstanceKey,
+            advanced_settings: {
+              ...currentSettings,
+              evolution_go_resolved_instance_key: resolvedInstanceKey,
+              evolution_go_resolved_instance_key_at: new Date().toISOString(),
+              evolution_go_previous_instance_name: session.instance_name || null,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", session.id);
+      }
+    }
+
     let notificationSafeSettings: any = null;
     if (finalRes.ok && (action === "instance.create" || action === "instance.connect")) {
       const targetInstance = action === "instance.create"
@@ -752,6 +814,9 @@ Deno.serve(async (req) => {
 
     const responseData = withNormalizedSentId(action, finalRes.data);
     const responsePayload: Record<string, any> = { ok: finalRes.ok, status: finalRes.status, data: responseData };
+    if (resolvedInstanceKey !== instanceKey) {
+      responsePayload.resolvedInstanceKey = resolvedInstanceKey;
+    }
     if (action === "instance.create" || action === "instance.connect") {
       responsePayload.notificationSafeSettings = notificationSafeSettings;
     }

@@ -140,7 +140,7 @@ Deno.serve(async (req) => {
         max_users: Number(plan.max_users || 10),
         subscription_value: Number(confirmedValue || plan.price || 0),
         subscription_status: hasTrial ? "trial" : "pending_payment",
-        subscription_type: hasTrial ? "trial" : plan.billing_cycle || billingCycle || "monthly",
+        subscription_type: hasTrial ? "trial" : "paid",
         trial_ends_at: trialEndsAt,
       })
       .select()

@@ -12,9 +12,10 @@ export interface Tag {
   lead_count?: number;
 }
 
-export function useTags() {
+export function useTags(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['tags'],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tags')
