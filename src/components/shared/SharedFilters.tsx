@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Users, User, Globe, X, SlidersHorizontal, Facebook, Search, Tag as TagIcon, CircleDot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -106,19 +106,27 @@ export function SharedFilters({
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [localSearch, setLocalSearch] = useState(searchQuery);
+  const searchFocusedRef = useRef(false);
+  const onSearchChangeRef = useRef(onSearchChange);
+
+  useEffect(() => {
+    onSearchChangeRef.current = onSearchChange;
+  }, [onSearchChange]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       if (localSearch !== searchQuery) {
-        onSearchChange(localSearch);
+        onSearchChangeRef.current(localSearch);
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [localSearch]);
+  }, [localSearch, searchQuery]);
 
   useEffect(() => {
-    setLocalSearch(searchQuery);
+    if (!searchFocusedRef.current || searchQuery === "") {
+      setLocalSearch(searchQuery);
+    }
   }, [searchQuery]);
 
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
@@ -338,6 +346,15 @@ export function SharedFilters({
               placeholder="Buscar..."
               value={localSearch}
               onChange={(event) => setLocalSearch(event.target.value)}
+              onFocus={() => {
+                searchFocusedRef.current = true;
+              }}
+              onBlur={() => {
+                searchFocusedRef.current = false;
+                if (localSearch !== searchQuery) {
+                  onSearchChangeRef.current(localSearch);
+                }
+              }}
               onKeyDown={(event) => {
                 event.stopPropagation();
               }}

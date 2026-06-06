@@ -212,8 +212,6 @@ export default function Pipelines() {
     isLoadingAds,
   } = useSharedFilters({ loadDynamicOptions: shouldLoadFilterOptions });
 
-  const [searchInput, setSearchInput] = useState('');
-
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
   const [editingStageName, setEditingStageName] = useState('');
   const [settingsStage, setSettingsStage] = useState<any | null>(null);
@@ -781,12 +779,6 @@ export default function Pipelines() {
     setEditingStageId(null);
   };
 
-  // Debounce search input → searchQuery
-  useEffect(() => {
-    const timer = setTimeout(() => setSearchQuery(searchInput), 350);
-    return () => clearTimeout(timer);
-  }, [searchInput]);
-
   const deferredSearch = searchQuery;
   
   // Server-side search when there are stages with has_more and user is searching
@@ -866,12 +858,12 @@ export default function Pipelines() {
       let stageLeads = [...(stage.leads || [])];
       
       // Local filtering for instant feedback while typing
-      if (searchInput) {
-        const lowerSearch = searchInput.toLowerCase();
+      if (searchQuery) {
+        const lowerSearch = searchQuery.toLowerCase();
         stageLeads = stageLeads.filter((lead: any) => {
-          const nameMatch = lead.name.toLowerCase().includes(lowerSearch);
-          const phoneMatch = lead.phone.includes(lowerSearch);
-          const emailMatch = lead.email.toLowerCase().includes(lowerSearch);
+          const nameMatch = (lead.name || '').toLowerCase().includes(lowerSearch);
+          const phoneMatch = (lead.phone || '').includes(lowerSearch);
+          const emailMatch = (lead.email || '').toLowerCase().includes(lowerSearch);
           return nameMatch || phoneMatch || emailMatch;
         });
       }
@@ -890,7 +882,7 @@ export default function Pipelines() {
         leads: stageLeads,
       };
     });
-  }, [stages, searchInput, deferredSearch, serverSearchResults]);
+  }, [stages, searchQuery, deferredSearch, serverSearchResults]);
 
   useEffect(() => {
     if (!isMobile || filteredStages.length === 0) return;
