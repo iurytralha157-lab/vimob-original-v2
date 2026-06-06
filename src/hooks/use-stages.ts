@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Tables } from '@/integrations/supabase/types';
 import { normalizePhone } from '@/lib/phone-utils';
@@ -42,7 +42,7 @@ function getLeadSortTimestamp(lead: any) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-function sortLeadsByRecentActivity<T extends any>(leads: T[]) {
+function sortLeadsByRecentActivity<T>(leads: T[]) {
   return [...leads].sort((a, b) => getLeadSortTimestamp(b) - getLeadSortTimestamp(a));
 }
 
@@ -271,6 +271,7 @@ export function useStagesWithLeads(
     ],
     staleTime: 30000,
     gcTime: 1000 * 60 * 15,
+    placeholderData: keepPreviousData,
     enabled: options?.enabled ?? true,
     queryFn: async () => {
       try {

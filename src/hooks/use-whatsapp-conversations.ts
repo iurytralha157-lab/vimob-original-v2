@@ -687,8 +687,13 @@ export function useSendWhatsAppMessage() {
       const actualContent = isMediaMessage && isFilenameOnly ? null : text;
       const caption = isMediaMessage && actualContent ? actualContent : undefined;
       const provider = session.provider || "evolution_go";
-      let mediaSource = provider === "evolution_go" ? (storedMediaUrl || base64) : (storedMediaUrl || base64);
-      if (provider === "evolution_go" && storedMediaPath) {
+      const safeMediaType = ["image", "video", "document", "audio"].includes(mediaType || "")
+        ? (mediaType as "image" | "video" | "document" | "audio")
+        : "image";
+      let mediaSource = provider === "evolution_go" && safeMediaType === "audio" && base64
+        ? base64
+        : (storedMediaUrl || base64);
+      if (provider === "evolution_go" && storedMediaPath && !(safeMediaType === "audio" && base64)) {
         const { data: signedMedia } = await supabase.storage
           .from("whatsapp-media")
           .createSignedUrl(storedMediaPath, 60 * 15);
@@ -709,10 +714,6 @@ export function useSendWhatsAppMessage() {
         instance: session.instance_name,
         destination,
       });
-
-      const safeMediaType = ["image", "video", "document", "audio"].includes(mediaType || "")
-        ? (mediaType as "image" | "video" | "document" | "audio")
-        : "image";
 
       const sendResult = mediaSource
         ? await whatsappClient.sendMedia(
@@ -831,7 +832,7 @@ export function useSendWhatsAppMessage() {
         message_type: mediaType || "text",
         media_url: storedMediaUrl || null,
         media_mime_type: mimetype || null,
-        media_status: storedMediaUrl ? 'ready' : null,
+        media_status: storedMediaUrl ? 'ready' : (base64 ? 'pending' : null),
         media_storage_path: storedMediaPath,
         remote_jid: conversation.remote_jid,
         status: "sent",
@@ -1006,7 +1007,7 @@ export function useSendWhatsAppMessage() {
                     conversation_id: conversationId,
                     status: "sent",
                     media_url: variables.mediaUrl || msg.media_url,
-                    media_status: variables.mediaUrl || msg.media_url ? "ready" : msg.media_status,
+                    media_status: variables.mediaUrl || variables.previewMediaUrl || msg.media_url ? "ready" : msg.media_status,
                   }
                 : msg
             )

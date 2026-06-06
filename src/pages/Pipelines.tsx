@@ -1,5 +1,6 @@
 ﻿import { Component, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import { useDeferredValue } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -280,6 +281,7 @@ export default function Pipelines() {
   const { data: baseStages = [], isLoading: baseStagesLoading } = useStages(selectedPipelineId || undefined);
 
   const shouldLoadPipelineLeads = !!selectedPipelineId && filterUser !== null && !permissionLoading;
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const { data: stagesWithLeads = [], isLoading: leadsLoading, refetch } = useStagesWithLeads(
     selectedPipelineId || undefined, 
@@ -288,7 +290,7 @@ export default function Pipelines() {
       dateRange,
       filterTag: filterTag && filterTag !== 'all' ? filterTag : undefined,
       filterDealStatus: filterDealStatus && filterDealStatus !== 'all' ? filterDealStatus : undefined,
-      searchQuery: searchQuery || undefined,
+      searchQuery: deferredSearchQuery || undefined,
       filterCampaign: filterCampaign && filterCampaign !== 'all' ? filterCampaign : undefined,
       filterAdSet: filterAdSet && filterAdSet !== 'all' ? filterAdSet : undefined,
       filterAd: filterAd && filterAd !== 'all' ? filterAd : undefined,
@@ -331,14 +333,14 @@ export default function Pipelines() {
         dateRange,
         filterTag: filterTag && filterTag !== 'all' ? filterTag : undefined,
         filterDealStatus: filterDealStatus && filterDealStatus !== 'all' ? filterDealStatus : undefined,
-        searchQuery: searchQuery || undefined,
+        searchQuery: deferredSearchQuery || undefined,
         filterCampaign: filterCampaign && filterCampaign !== 'all' ? filterCampaign : undefined,
         filterAdSet: filterAdSet && filterAdSet !== 'all' ? filterAdSet : undefined,
         filterAd: filterAd && filterAd !== 'all' ? filterAd : undefined,
         filterSource: filterSource && filterSource !== 'all' ? filterSource : undefined,
       },
     });
-  }, [selectedPipelineId, stages, loadMoreLeads, filterUser, dateRange, filterTag, filterDealStatus, searchQuery, filterCampaign, filterAdSet, filterAd, filterSource]);
+  }, [selectedPipelineId, stages, loadMoreLeads, filterUser, dateRange, filterTag, filterDealStatus, deferredSearchQuery, filterCampaign, filterAdSet, filterAd, filterSource]);
 
   // Real-time subscription for leads and tags updates
   useEffect(() => {
@@ -779,7 +781,7 @@ export default function Pipelines() {
     setEditingStageId(null);
   };
 
-  const deferredSearch = searchQuery;
+  const deferredSearch = deferredSearchQuery;
   
   // Server-side search when there are stages with has_more and user is searching
   const hasMoreLeads = stages.some((s: any) => s.has_more);

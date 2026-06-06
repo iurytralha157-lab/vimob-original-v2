@@ -89,6 +89,7 @@ export function getWhatsAppClient(session: Pick<WhatsAppSession, "provider" | "i
       return normalizeLegacyResponse(data);
     }
     const normalizedMimeType = normalizeMimeType(mediatype, mimetype);
+    const base64Media = media.startsWith("data:") || /^[A-Za-z0-9+/=]+$/.test(media) ? media : undefined;
     const result = await callEvolutionGo(mediatype === "audio" ? "send.audio" : "send.media", {
       session_id: session.id,
       body: {
@@ -96,6 +97,8 @@ export function getWhatsAppClient(session: Pick<WhatsAppSession, "provider" | "i
         type: mediatype,
         url: media,
         media,
+        base64: base64Media,
+        audio: mediatype === "audio" ? media : undefined,
         mediatype,
         mediaType: mediatype,
         mimetype: normalizedMimeType,

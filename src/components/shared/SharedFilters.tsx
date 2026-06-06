@@ -108,26 +108,31 @@ export function SharedFilters({
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const searchFocusedRef = useRef(false);
   const onSearchChangeRef = useRef(onSearchChange);
+  const searchQueryRef = useRef(searchQuery);
 
   useEffect(() => {
     onSearchChangeRef.current = onSearchChange;
   }, [onSearchChange]);
 
   useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
-      if (localSearch !== searchQuery) {
+      if (localSearch !== searchQueryRef.current) {
         onSearchChangeRef.current(localSearch);
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [localSearch, searchQuery]);
+  }, [localSearch]);
 
   useEffect(() => {
-    if (!searchFocusedRef.current || searchQuery === "") {
+    if (!searchFocusedRef.current && localSearch !== searchQuery) {
       setLocalSearch(searchQuery);
     }
-  }, [searchQuery]);
+  }, [localSearch, searchQuery]);
 
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const canViewAllLeads = isAdmin || hasPermission("lead_view_all");
@@ -351,7 +356,7 @@ export function SharedFilters({
               }}
               onBlur={() => {
                 searchFocusedRef.current = false;
-                if (localSearch !== searchQuery) {
+                if (localSearch !== searchQueryRef.current) {
                   onSearchChangeRef.current(localSearch);
                 }
               }}
