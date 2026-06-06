@@ -27,8 +27,9 @@ window.addEventListener('error', handleChunkError);
 window.addEventListener('unhandledrejection', handleChunkError);
 
 // Aggressive version management and cache busting
-const CACHE_BUST_VERSION = '2.1.2-cachefix-20260604';
+const CACHE_BUST_VERSION = '2.1.5-refreshfix-20260606';
 const BUST_KEY = 'lovable_app_version';
+const BUST_RELOAD_KEY = 'lovable_app_version_reload_at';
 
 async function cleanupServiceWorkers(reload = false) {
   try {
@@ -51,6 +52,13 @@ async function cleanupServiceWorkers(reload = false) {
     }
     
     if (reload) {
+      const lastReload = Number(sessionStorage.getItem(BUST_RELOAD_KEY) || 0);
+      if (Date.now() - lastReload < 10000) {
+        console.warn('[VersionCheck] Reload skipped to avoid a refresh loop');
+        return;
+      }
+      sessionStorage.setItem(BUST_RELOAD_KEY, String(Date.now()));
+
       const url = new URL(window.location.href);
       url.searchParams.set('v_refresh', CACHE_BUST_VERSION);
       window.location.replace(url.toString());

@@ -1,4 +1,4 @@
-const SW_VERSION = "2.1.2-cachefix-20260604";
+const SW_VERSION = "2.1.5-refreshfix-20260606";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

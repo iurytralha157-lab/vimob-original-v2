@@ -12,9 +12,16 @@
     <script>
       (function() {
         const VERSION_KEY = 'lovable_app_version';
+        const RELOAD_KEY = 'lovable_app_version_reload_at';
         
-        async function forceUpdate() {
+        async function forceUpdate(nextVersion) {
           console.log('[VersionCheck] New version detected, clearing cache and reloading...');
+
+          const lastReload = Number(sessionStorage.getItem(RELOAD_KEY) || 0);
+          if (Date.now() - lastReload < 10000) {
+            console.warn('[VersionCheck] Reload skipped to avoid a refresh loop');
+            return;
+          }
           
           if ('serviceWorker' in navigator) {
             const regs = await navigator.serviceWorker.getRegistrations();
@@ -56,7 +63,8 @@
           
           // Use a timestamp to bypass any server-side or ISP caching
           const url = new URL(window.location.href);
-          url.searchParams.set('v_refresh', Date.now());
+          sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+          url.searchParams.set('v_refresh', nextVersion || Date.now());
           window.location.replace(url.toString());
         }
 
@@ -70,7 +78,7 @@
             
             if (currentVersion && currentVersion !== data.version) {
               localStorage.setItem(VERSION_KEY, data.version);
-              await forceUpdate();
+              await forceUpdate(data.version);
             } else if (!currentVersion) {
               localStorage.setItem(VERSION_KEY, data.version);
             }
