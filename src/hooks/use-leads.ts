@@ -468,18 +468,29 @@ export function useUpdateLead() {
       // Get current lead data for comparison
       const { data: currentLead } = await supabase
         .from('leads')
-        .select('name, assigned_user_id, stage_id')
+        .select('id, organization_id, name, assigned_user_id, stage_id')
         .eq('id', id)
-        .single();
+        .maybeSingle();
       
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('leads')
         .update(updateData)
-        .eq('id', id)
-        .select()
-        .single();
+        .eq('id', id);
       
       if (error) throw error;
+
+      const { data: refreshedLead } = await supabase
+        .from('leads')
+        .select()
+        .eq('id', id)
+        .maybeSingle();
+
+      const data = (refreshedLead || {
+        ...(currentLead || { id }),
+        ...updateData,
+        id,
+      }) as Lead;
+
       // Audit log: lead updated
       logAuditAction(
         'update',
@@ -487,7 +498,7 @@ export function useUpdateLead() {
         id,
         { stage_id: currentLead?.stage_id, assigned_user_id: currentLead?.assigned_user_id, name: currentLead?.name },
         updates,
-        data.organization_id
+        data.organization_id || currentLead?.organization_id
       ).catch(console.error);
       
       return data;

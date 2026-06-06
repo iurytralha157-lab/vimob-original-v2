@@ -23,6 +23,11 @@ export interface TeamMember {
   user?: { id: string; name: string; avatar_url: string | null; email?: string | null };
 }
 
+export interface TeamMemberInput {
+  userId: string;
+  isLeader?: boolean;
+}
+
 export function useTeams(options?: { includeInactive?: boolean }) {
   const includeInactive = options?.includeInactive ?? false;
 
@@ -79,7 +84,13 @@ export function useCreateTeam() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { name: string; memberIds?: string[]; logo_url?: string | null; is_active?: boolean }) => {
+    mutationFn: async (data: {
+      name: string;
+      memberIds?: string[];
+      members?: TeamMemberInput[];
+      logo_url?: string | null;
+      is_active?: boolean;
+    }) => {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) throw new Error('Não autenticado');
 
@@ -105,19 +116,25 @@ export function useCreateTeam() {
 
       if (error) throw error;
 
-      if (data.memberIds && data.memberIds.length > 0) {
-        const membersToInsert = data.memberIds.map((userId) => ({
+      const memberInputs = data.members || data.memberIds?.map((userId) => ({ userId })) || [];
+
+      if (memberInputs.length > 0) {
+        const membersToInsert = memberInputs.map((member) => ({
           team_id: team.id,
-          user_id: userId,
+          user_id: member.userId,
+          is_leader: member.isLeader ?? false,
         }));
 
-        await supabase.from('team_members').insert(membersToInsert);
+        const { error: membersError } = await supabase.from('team_members').insert(membersToInsert as any);
+        if (membersError) throw membersError;
       }
 
       return team as Team;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['lead-visibility'] });
+      queryClient.invalidateQueries({ queryKey: ['stages-with-leads'] });
       toast.success('Equipe criada!');
     },
     onError: (error) => {
@@ -134,12 +151,14 @@ export function useUpdateTeam() {
       id,
       name,
       memberIds,
+      members,
       logo_url,
       is_active,
     }: {
       id: string;
       name?: string;
       memberIds?: string[];
+      members?: TeamMemberInput[];
       logo_url?: string | null;
       is_active?: boolean;
     }) => {
@@ -157,8 +176,13 @@ export function useUpdateTeam() {
         if (error) throw error;
       }
 
-      if (memberIds !== undefined) {
-        const normalizedMemberIds = Array.from(new Set(memberIds));
+      const memberInputs = members || memberIds?.map((userId) => ({ userId }));
+
+      if (memberInputs !== undefined) {
+        const memberLeadershipByUserId = new Map(
+          memberInputs.map((member) => [member.userId, member.isLeader ?? false])
+        );
+        const normalizedMemberIds = Array.from(new Set(memberInputs.map((member) => member.userId)));
 
         const { data: currentMembers, error: currentMembersError } = await supabase
           .from('team_members')
@@ -186,13 +210,24 @@ export function useUpdateTeam() {
           const membersToInsert = membersToAdd.map((userId) => ({
             team_id: id,
             user_id: userId,
+            is_leader: memberLeadershipByUserId.get(userId) ?? false,
           }));
 
           const { error: insertError } = await supabase
             .from('team_members')
-            .insert(membersToInsert);
+            .insert(membersToInsert as any);
 
           if (insertError) throw insertError;
+        }
+
+        for (const [userId, isLeader] of memberLeadershipByUserId.entries()) {
+          const { error: leaderError } = await supabase
+            .from('team_members')
+            .update({ is_leader: isLeader } as any)
+            .eq('team_id', id)
+            .eq('user_id', userId);
+
+          if (leaderError) throw leaderError;
         }
 
         await syncRoundRobinWithTeam(id, normalizedMemberIds);
@@ -200,8 +235,38 @@ export function useUpdateTeam() {
 
       return { id };
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
+      if (variables.members) {
+        const leadershipByUserId = new Map(
+          variables.members.map((member) => [member.userId, member.isLeader ?? false])
+        );
+        const selectedUserIds = new Set(variables.members.map((member) => member.userId));
+
+        queryClient.setQueriesData<Team[]>({ queryKey: ['teams'] }, (cachedTeams) => {
+          if (!cachedTeams) return cachedTeams;
+
+          return cachedTeams.map((team) => {
+            if (team.id !== variables.id) return team;
+
+            return {
+              ...team,
+              name: variables.name ?? team.name,
+              logo_url: variables.logo_url !== undefined ? variables.logo_url : team.logo_url,
+              is_active: variables.is_active !== undefined ? variables.is_active : team.is_active,
+              members: (team.members || [])
+                .filter((member) => selectedUserIds.has(member.user_id))
+                .map((member) => ({
+                  ...member,
+                  is_leader: leadershipByUserId.get(member.user_id) ?? false,
+                })),
+            };
+          });
+        });
+      }
+
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['lead-visibility'] });
+      queryClient.invalidateQueries({ queryKey: ['stages-with-leads'] });
       queryClient.invalidateQueries({ queryKey: ['round-robins'] });
       toast.success('Equipe atualizada!');
     },
@@ -272,6 +337,8 @@ export function useDeleteTeam() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['lead-visibility'] });
+      queryClient.invalidateQueries({ queryKey: ['stages-with-leads'] });
       toast.success('Equipe excluída!');
     },
     onError: (error) => {
@@ -297,6 +364,8 @@ export function useUpdateTeamStatus() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+      queryClient.invalidateQueries({ queryKey: ['lead-visibility'] });
+      queryClient.invalidateQueries({ queryKey: ['stages-with-leads'] });
       toast.success(variables.is_active ? 'Equipe ativada!' : 'Equipe desativada!');
     },
     onError: (error) => {

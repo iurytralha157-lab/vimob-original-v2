@@ -131,31 +131,15 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
           name: name.trim(),
           logo_url: finalLogoUrl || null,
           is_active: team.is_active ?? true,
-          memberIds: selectedMembers.map((member) => member.userId),
+          members: selectedMembers,
         });
-
-        for (const member of selectedMembers) {
-          await supabase
-            .from('team_members')
-            .update({ is_leader: member.isLeader } as any)
-            .eq('team_id', team.id)
-            .eq('user_id', member.userId);
-        }
       } else {
-        const result = await createTeam.mutateAsync({
+        await createTeam.mutateAsync({
           name: name.trim(),
           logo_url: finalLogoUrl || null,
           is_active: true,
-          memberIds: selectedMembers.map((member) => member.userId),
+          members: selectedMembers,
         });
-
-        for (const member of selectedMembers.filter((item) => item.isLeader)) {
-          await supabase
-            .from('team_members')
-            .update({ is_leader: true } as any)
-            .eq('team_id', result.id)
-            .eq('user_id', member.userId);
-        }
       }
 
       onOpenChange(false);
