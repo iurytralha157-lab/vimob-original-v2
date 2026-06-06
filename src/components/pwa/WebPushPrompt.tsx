@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Bell, BellRing } from 'lucide-react';
+import { X, Bell, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useWebPush } from '@/hooks/use-web-push';
 import { useAuth } from '@/contexts/AuthContext';
@@ -9,89 +9,93 @@ import { toast } from 'sonner';
 const DISMISS_KEY = 'web-push-prompt-dismissed';
 const DISMISS_DURATION_DAYS = 7;
 
+function isIOSDevice() {
+  if (typeof navigator === 'undefined') return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isStandalonePwa() {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone === true;
+}
+
 export function WebPushPrompt() {
   const { user } = useAuth();
-  const { 
-    isSupported, 
-    isSubscribed, 
-    isLoading, 
+  const {
+    isSupported,
+    isSubscribed,
+    isLoading,
     permission,
-    subscribe 
+    subscribe,
   } = useWebPush();
-  
+
   const [showPrompt, setShowPrompt] = useState(false);
   const [isSubscribing, setIsSubscribing] = useState(false);
+  const showIosInstallPrompt = isIOSDevice() && !isStandalonePwa();
 
-  // Verifica se deve mostrar o prompt
   useEffect(() => {
-    // Não mostra em apps nativos (usa push nativo via Capacitor)
     if (Capacitor.isNativePlatform()) {
       setShowPrompt(false);
       return;
     }
 
-    // Não mostra se não está logado
     if (!user?.id) {
       setShowPrompt(false);
       return;
     }
 
-    // Não mostra se não é suportado
-    if (!isSupported) {
+    if (!showIosInstallPrompt && !isSupported) {
       setShowPrompt(false);
       return;
     }
 
-    // Não mostra se já está inscrito
     if (isSubscribed) {
       setShowPrompt(false);
       return;
     }
 
-    // Não mostra se já negou permissão
     if (permission === 'denied') {
       setShowPrompt(false);
       return;
     }
 
-    // Não mostra se está carregando
-    if (isLoading) {
+    if (!showIosInstallPrompt && isLoading) {
       return;
     }
 
-    // Verifica se foi dispensado recentemente
     const dismissedAt = localStorage.getItem(DISMISS_KEY);
     if (dismissedAt) {
       const dismissedDate = new Date(parseInt(dismissedAt, 10));
       const now = new Date();
       const diffDays = (now.getTime() - dismissedDate.getTime()) / (1000 * 60 * 60 * 24);
-      
+
       if (diffDays < DISMISS_DURATION_DAYS) {
         setShowPrompt(false);
         return;
       }
     }
 
-    // Mostra o prompt após um pequeno delay
     const timer = setTimeout(() => {
       setShowPrompt(true);
     }, 3000);
 
     return () => clearTimeout(timer);
-  }, [user?.id, isSupported, isSubscribed, isLoading, permission]);
+  }, [user?.id, isSupported, isSubscribed, isLoading, permission, showIosInstallPrompt]);
 
   const handleEnable = async () => {
     setIsSubscribing(true);
-    
+
     const success = await subscribe();
-    
+
     setIsSubscribing(false);
-    
+
     if (success) {
-      toast.success('Notificações ativadas com sucesso!');
+      toast.success('Notificacoes ativadas com sucesso!');
       setShowPrompt(false);
     } else {
-      toast.error('Não foi possível ativar as notificações. Verifique as permissões do navegador.');
+      toast.error('Nao foi possivel ativar as notificacoes. Verifique as permissoes do navegador.');
     }
   };
 
@@ -100,12 +104,12 @@ export function WebPushPrompt() {
     setShowPrompt(false);
   };
 
-  // Não renderiza se usuário não está logado (proteção adicional)
-  if (!user?.id) {
-    return null;
-  }
+  const title = showIosInstallPrompt ? 'Instale o Vimob no iPhone' : 'Ativar notificacoes';
+  const description = showIosInstallPrompt
+    ? 'No Safari, toque em compartilhar e depois em Adicionar a Tela de Inicio. Abra pelo icone para ativar push.'
+    : 'Receba alertas de novos leads e mensagens';
 
-  if (!showPrompt) {
+  if (!user?.id || !showPrompt) {
     return null;
   }
 
@@ -118,10 +122,10 @@ export function WebPushPrompt() {
 
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-foreground text-sm">
-            Ativar notificações
+            {title}
           </h3>
-          <p className="text-xs text-muted-foreground truncate">
-            Receba alertas de novos leads e mensagens
+          <p className="text-xs text-muted-foreground leading-snug">
+            {description}
           </p>
         </div>
 
@@ -138,11 +142,11 @@ export function WebPushPrompt() {
           <Button
             size="sm"
             className="gap-1.5"
-            onClick={handleEnable}
-            disabled={isSubscribing}
+            onClick={showIosInstallPrompt ? handleDismiss : handleEnable}
+            disabled={!showIosInstallPrompt && isSubscribing}
           >
-            <Bell className="h-4 w-4" />
-            {isSubscribing ? 'Ativando...' : 'Ativar'}
+            {showIosInstallPrompt ? <Share2 className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+            {showIosInstallPrompt ? 'Entendi' : isSubscribing ? 'Ativando...' : 'Ativar'}
           </Button>
         </div>
       </div>

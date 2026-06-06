@@ -4665,8 +4665,12 @@ export type Database = {
           id: string
           instagram: string | null
           linkedin: string | null
+          legal_accepted_at: string | null
           logo_url: string | null
+          onboarding_completed_at: string | null
           primary_color: string | null
+          privacy_policy_accepted: boolean
+          privacy_policy_version: string | null
           responsible_cpf: string | null
           responsible_email: string
           responsible_name: string
@@ -4680,6 +4684,8 @@ export type Database = {
           site_title: string | null
           status: string
           team_size: string | null
+          terms_accepted: boolean
+          terms_version: string | null
           updated_at: string | null
           user_id: string | null
           youtube: string | null
@@ -4709,8 +4715,12 @@ export type Database = {
           id?: string
           instagram?: string | null
           linkedin?: string | null
+          legal_accepted_at?: string | null
           logo_url?: string | null
+          onboarding_completed_at?: string | null
           primary_color?: string | null
+          privacy_policy_accepted?: boolean
+          privacy_policy_version?: string | null
           responsible_cpf?: string | null
           responsible_email: string
           responsible_name: string
@@ -4724,6 +4734,8 @@ export type Database = {
           site_title?: string | null
           status?: string
           team_size?: string | null
+          terms_accepted?: boolean
+          terms_version?: string | null
           updated_at?: string | null
           user_id?: string | null
           youtube?: string | null
@@ -4753,8 +4765,12 @@ export type Database = {
           id?: string
           instagram?: string | null
           linkedin?: string | null
+          legal_accepted_at?: string | null
           logo_url?: string | null
+          onboarding_completed_at?: string | null
           primary_color?: string | null
+          privacy_policy_accepted?: boolean
+          privacy_policy_version?: string | null
           responsible_cpf?: string | null
           responsible_email?: string
           responsible_name?: string
@@ -4768,6 +4784,8 @@ export type Database = {
           site_title?: string | null
           status?: string
           team_size?: string | null
+          terms_accepted?: boolean
+          terms_version?: string | null
           updated_at?: string | null
           user_id?: string | null
           youtube?: string | null

@@ -117,6 +117,7 @@ const AdminAI = lazy(() => import("./pages/admin/AdminAI"));
 const Checkout = lazy(() => import("./pages/Checkout"));
 const EmailTemplates = lazy(() => import("./pages/admin/EmailTemplates"));
 const EmailLogs = lazy(() => import("./pages/admin/EmailLogs"));
+const LegalPage = lazy(() => import("./pages/public/LegalPage"));
 
 // Public site preview (used inside CRM)
 const PreviewSiteWrapper = lazy(() => import("./pages/public/PreviewSiteWrapper"));
@@ -374,6 +375,22 @@ function AppRoutes() {
               element={
                 <Suspense fallback={<PageLoader />}>
                   <Checkout />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/privacidade"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <LegalPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/termos"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <LegalPage />
                 </Suspense>
               }
             />

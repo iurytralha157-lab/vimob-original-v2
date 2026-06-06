@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,10 +8,21 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { 
   Building2, User, Globe, CheckCircle2, 
   Upload, Loader2, ChevronRight, ChevronLeft, Construction,
-  Instagram, Facebook, Youtube, Linkedin, Mail, Scissors
+  Instagram, Facebook, Youtube, Linkedin, Mail, Scissors,
+  CreditCard, ShieldCheck, ExternalLink, Sparkles
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { maskCNPJ, maskCPF, maskPhone } from '@/lib/masks';
@@ -26,12 +37,47 @@ const STEPS = [
   { id: 3, title: 'Organização' },
   { id: 4, title: 'Personalização' },
   { id: 5, title: 'Redes Sociais' },
-  { id: 6, title: 'Confirmação' },
+  { id: 6, title: 'Plano' },
+  { id: 7, title: 'Termos' },
+  { id: 8, title: 'Confirmação' },
+];
+
+const LEGAL_VERSION = '2026-06-06';
+
+type OnboardingPlan = {
+  id: string;
+  name: string;
+  price: number;
+  billing_cycle: string | null;
+  description: string | null;
+  trial_enabled?: boolean | null;
+  trial_days?: number | null;
+};
+
+const fallbackPlans: OnboardingPlan[] = [
+  {
+    id: 'enterprise-fallback',
+    name: 'Enterprise',
+    price: 197,
+    billing_cycle: 'monthly',
+    description: 'Plano intermediario com 7 dias de teste.',
+    trial_enabled: true,
+    trial_days: 7,
+  },
+  {
+    id: 'master-fallback',
+    name: 'Master',
+    price: 497,
+    billing_cycle: 'monthly',
+    description: 'Plano completo com liberacao apos pagamento.',
+    trial_enabled: false,
+    trial_days: 0,
+  },
 ];
 
 export default function Onboarding() {
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const { data: systemSettings, isLoading: settingsLoading } = useSystemSettings();
   const { resolvedTheme } = useTheme();
 
@@ -54,6 +100,14 @@ export default function Onboarding() {
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [pendingLogoUrl, setPendingLogoUrl] = useState<string | null>(null);
   const [bgLoaded, setBgLoaded] = useState(false);
+  const [plans, setPlans] = useState<OnboardingPlan[]>(fallbackPlans);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [selectedPlanId, setSelectedPlanId] = useState('enterprise-fallback');
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [legalDialog, setLegalDialog] = useState<'privacy' | 'terms' | null>(null);
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [requiresPayment, setRequiresPayment] = useState(false);
 
   const [form, setForm] = useState({
     segment: 'corretor',
@@ -99,7 +153,43 @@ export default function Onboarding() {
     img.onload = () => setBgLoaded(true);
   }, [loginBgUrl]);
 
+  useEffect(() => {
+    const fetchPlans = async () => {
+      setPlansLoading(true);
+      try {
+        const { data, error } = await (supabase as any)
+          .from('admin_subscription_plans')
+          .select('id, name, price, billing_cycle, description, trial_enabled, trial_days')
+          .eq('is_active', true)
+          .in('name', ['Enterprise', 'Master'])
+          .order('price', { ascending: true });
+
+        if (error) throw error;
+
+        const activePlans = (data || []) as OnboardingPlan[];
+        const normalizedPlans = activePlans.length >= 2 ? activePlans : fallbackPlans;
+        setPlans(normalizedPlans);
+        setSelectedPlanId((current) => {
+          if (normalizedPlans.some((plan) => plan.id === current)) return current;
+          return normalizedPlans[0]?.id || 'enterprise-fallback';
+        });
+      } catch (error) {
+        console.warn('[Onboarding] Could not load plans, using fallback:', error);
+        setPlans(fallbackPlans);
+        setSelectedPlanId('enterprise-fallback');
+      } finally {
+        setPlansLoading(false);
+      }
+    };
+
+    fetchPlans();
+  }, []);
+
   const updateField = (field: string, value: any) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) || plans[0] || fallbackPlans[0];
+  const selectedPlanHasTrial = Boolean(selectedPlan?.trial_enabled) && Number(selectedPlan?.trial_days || 0) > 0;
+  const selectedPlanPrice = Number(selectedPlan?.price || 0);
 
   const handleFileUpload = async (file: File) => {
     const reader = new FileReader();
@@ -161,19 +251,49 @@ export default function Onboarding() {
       toast.error('Nome da empresa/profissional é obrigatório');
       return;
     }
+    if (step === 6 && !selectedPlanId) {
+      toast.error('Escolha um plano para continuar');
+      return;
+    }
+    if (step === 7 && (!acceptedPrivacy || !acceptedTerms)) {
+      toast.error('Aceite a Politica de Privacidade e os Termos de Uso para enviar');
+      return;
+    }
     setStep((prev) => prev + 1);
   };
 
   const handleBack = () => setStep((prev) => prev - 1);
 
   const handleSubmit = async () => {
+    if (!acceptedPrivacy || !acceptedTerms) {
+      toast.error('Aceite a Politica de Privacidade e os Termos de Uso para enviar');
+      setStep(7);
+      return;
+    }
+
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('submit-onboarding', { body: form });
+      const { data, error } = await supabase.functions.invoke('submit-onboarding', {
+        body: {
+          ...form,
+          selected_plan_id: selectedPlan?.id,
+          selected_plan_name: selectedPlan?.name,
+          confirmed_value: selectedPlanPrice,
+          billing_cycle: selectedPlan?.billing_cycle || 'monthly',
+          privacy_policy_accepted: acceptedPrivacy,
+          terms_accepted: acceptedTerms,
+          privacy_policy_version: LEGAL_VERSION,
+          terms_version: LEGAL_VERSION,
+          legal_accepted_at: new Date().toISOString(),
+        },
+      });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
+      setPaymentUrl(data?.paymentUrl || null);
+      setRequiresPayment(Boolean(data?.requires_payment));
+      if (user) await refreshProfile();
       setSubmitted(true);
-      toast.success('Solicitação enviada!');
+      toast.success(data?.requires_payment ? 'Ambiente criado. Pagamento pendente.' : 'Ambiente criado com sucesso!');
     } catch (e: any) {
       toast.error('Erro: ' + e.message);
     } finally {
@@ -207,11 +327,25 @@ export default function Onboarding() {
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/20 mb-4">
               <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
             </div>
-            <h2 className="text-2xl font-bold">Solicitação recebida!</h2>
+            <h2 className="text-2xl font-bold">{requiresPayment ? 'Ambiente criado!' : 'Acesso liberado!'}</h2>
             <p className="text-muted-foreground">
-              Nossa equipe vai analisar e liberar seu acesso em breve. Você receberá um e-mail de confirmação.
+              {requiresPayment
+                ? 'Seu board foi criado. Finalize o pagamento para liberar o plano Master.'
+                : 'Seu board foi criado com 7 dias de teste. Voce recebera lembretes antes do fim do periodo.'}
             </p>
-            <Button className="mt-4 w-full" onClick={() => navigate('/')}>Voltar ao Início</Button>
+            {requiresPayment && paymentUrl ? (
+              <Button className="mt-4 w-full gap-2" asChild>
+                <a href={paymentUrl} target="_blank" rel="noreferrer">
+                  Ir para pagamento <ExternalLink className="h-4 w-4" />
+                </a>
+              </Button>
+            ) : requiresPayment ? (
+              <Button className="mt-4 w-full" onClick={() => navigate('/settings?tab=subscription')}>
+                Ir para faturamento
+              </Button>
+            ) : (
+              <Button className="mt-4 w-full" onClick={() => navigate('/')}>Entrar no Vimob</Button>
+            )}
           </CardContent>
         </Card>
 
@@ -523,6 +657,129 @@ export default function Onboarding() {
             {step === 6 && (
               <div className="space-y-6">
                 <div className="space-y-1">
+                  <h2 className="text-xl font-bold">Escolha seu plano</h2>
+                  <p className="text-xs text-muted-foreground">O plano define a liberacao inicial do seu board.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-3">
+                  {plans.map((plan) => {
+                    const isSelected = selectedPlanId === plan.id;
+                    const hasTrial = Boolean(plan.trial_enabled) && Number(plan.trial_days || 0) > 0;
+                    const isMaster = plan.name.toLowerCase().includes('master');
+                    return (
+                      <button
+                        key={plan.id}
+                        type="button"
+                        onClick={() => setSelectedPlanId(plan.id)}
+                        className={`relative rounded-xl border p-4 text-left transition-all hover:border-primary/60 ${
+                          isSelected ? 'border-primary bg-primary/5' : 'border-border bg-card'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-base font-semibold">{plan.name}</h3>
+                              {hasTrial ? (
+                                <Badge variant="secondary">{plan.trial_days || 7} dias de teste</Badge>
+                              ) : (
+                                <Badge variant="outline">Pagamento direto</Badge>
+                              )}
+                            </div>
+                            <p className="text-xs leading-relaxed text-muted-foreground">
+                              {plan.description ||
+                                (hasTrial
+                                  ? 'Teste liberado automaticamente. Depois do periodo, regularize em faturamento.'
+                                  : 'Recursos completos liberados apos confirmacao do pagamento.')}
+                            </p>
+                          </div>
+                          {isSelected && <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" />}
+                        </div>
+                        <div className="mt-4 flex items-end justify-between gap-3">
+                          <div>
+                            <p className="text-2xl font-bold">
+                              {Number(plan.price || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </p>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                              {plan.billing_cycle === 'yearly' ? 'por ano' : 'por mes'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            {isMaster ? <Sparkles className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
+                            {hasTrial ? 'Aprovacao automatica' : 'Checkout obrigatorio'}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {plansLoading && (
+                  <p className="text-center text-xs text-muted-foreground">Atualizando planos disponiveis...</p>
+                )}
+              </div>
+            )}
+
+            {step === 7 && (
+              <div className="space-y-6">
+                <div className="space-y-1">
+                  <h2 className="text-xl font-bold">Termos e privacidade</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Leia os documentos quando precisar. O aceite e obrigatorio antes do envio.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border/50 bg-muted/30 p-4">
+                  <div className="mb-4 flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <ShieldCheck className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold">Versao {LEGAL_VERSION}</p>
+                      <p className="text-xs text-muted-foreground">Politica de Privacidade e Termos de Uso da Vimob.</p>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="flex items-start gap-3 rounded-lg border border-border/50 bg-background/70 p-3 text-sm">
+                      <Checkbox
+                        checked={acceptedPrivacy}
+                        onCheckedChange={(checked) => setAcceptedPrivacy(Boolean(checked))}
+                        className="mt-0.5"
+                      />
+                      <span className="flex-1 leading-relaxed">
+                        Li e concordo com a{' '}
+                        <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => setLegalDialog('privacy')}>
+                          Politica de Privacidade
+                        </button>
+                        .
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-3 rounded-lg border border-border/50 bg-background/70 p-3 text-sm">
+                      <Checkbox
+                        checked={acceptedTerms}
+                        onCheckedChange={(checked) => setAcceptedTerms(Boolean(checked))}
+                        className="mt-0.5"
+                      />
+                      <span className="flex-1 leading-relaxed">
+                        Li e concordo com os{' '}
+                        <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => setLegalDialog('terms')}>
+                          Termos de Uso
+                        </button>
+                        .
+                      </span>
+                    </label>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <Button variant="outline" size="sm" className="flex-1" asChild>
+                      <Link to="/privacidade" target="_blank">Privacidade</Link>
+                    </Button>
+                    <Button variant="outline" size="sm" className="flex-1" asChild>
+                      <Link to="/termos" target="_blank">Termos</Link>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {step === 8 && (
+              <div className="space-y-6">
+                <div className="space-y-1">
                   <h2 className="text-xl font-bold">Confirmação</h2>
                   <p className="text-xs text-muted-foreground">Revise seus dados antes de enviar.</p>
                 </div>
@@ -546,10 +803,14 @@ export default function Onboarding() {
                         <div className="font-semibold text-right">{form.cnpj}</div>
                       </>
                     )}
+                    <div className="text-muted-foreground">Plano:</div>
+                    <div className="font-semibold text-right">
+                      {selectedPlan?.name} - {selectedPlanPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </div>
                   </div>
                   <Separator className="bg-border/50" />
                   <p className="text-[10px] text-center text-muted-foreground leading-relaxed">
-                    Ao enviar, você solicita a análise dos seus dados para liberação do acesso.
+                    Ao enviar, seu board sera criado automaticamente conforme o plano escolhido.
                   </p>
                 </div>
               </div>
@@ -577,6 +838,44 @@ export default function Onboarding() {
           </div>
         </div>
       </div>
+
+      <Dialog open={!!legalDialog} onOpenChange={(open) => !open && setLegalDialog(null)}>
+        <DialogContent className="max-w-[92vw] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{legalDialog === 'terms' ? 'Termos de Uso' : 'Politica de Privacidade'}</DialogTitle>
+            <DialogDescription>Resumo para leitura rapida. Versao {LEGAL_VERSION}.</DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="h-[55vh] pr-4">
+            {legalDialog === 'terms' ? (
+              <div className="space-y-4 text-sm leading-7 text-muted-foreground">
+                <p>Ao usar a Vimob, voce concorda em manter dados corretos, proteger credenciais e responder pelos usuarios e integracoes da sua organizacao.</p>
+                <p>O plano Enterprise de R$197 pode iniciar com 7 dias de teste. Depois do periodo, a continuidade depende de regularizacao em faturamento.</p>
+                <p>O plano Master de R$497 exige pagamento para liberacao completa, pois inclui recursos que nao entram no teste gratuito.</p>
+                <p>A plataforma pode limitar ou suspender acesso por inadimplencia, risco de seguranca, uso abusivo, violacao dos termos ou exigencia legal.</p>
+                <p>Integracoes externas, como pagamentos, WhatsApp, Meta e IA, dependem das regras e disponibilidade dos respectivos fornecedores.</p>
+              </div>
+            ) : (
+              <div className="space-y-4 text-sm leading-7 text-muted-foreground">
+                <p>A Vimob trata dados cadastrais, dados de uso, registros tecnicos, informacoes de faturamento e dados comerciais inseridos pela organizacao.</p>
+                <p>Os dados sao usados para criar contas, operar a plataforma, prestar suporte, processar cobrancas, manter seguranca e cumprir obrigacoes legais.</p>
+                <p>Podemos compartilhar dados com fornecedores necessarios para infraestrutura, banco de dados, autenticacao, pagamentos, mensageria, suporte e integracoes ativadas.</p>
+                <p>Seguimos a LGPD e disponibilizamos canais para direitos do titular, como acesso, correcao, eliminacao, portabilidade e informacoes sobre compartilhamento.</p>
+                <p>Nao vendemos dados pessoais. Dados agregados ou anonimizados podem ser usados para melhoria de produto e estatisticas internas.</p>
+              </div>
+            )}
+          </ScrollArea>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button variant="outline" className="flex-1" asChild>
+              <Link to={legalDialog === 'terms' ? '/termos' : '/privacidade'} target="_blank">
+                Abrir pagina completa
+              </Link>
+            </Button>
+            <Button className="flex-1" onClick={() => setLegalDialog(null)}>
+              Continuar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Desktop background: half screen background on desktop */}
       <div className="hidden lg:block flex-1 relative bg-muted">

@@ -130,7 +130,16 @@ Deno.serve(async (req) => {
     const channels = Array.isArray(template.channels) && template.channels.length > 0
       ? template.channels
       : [template.channel].filter(Boolean);
-    const dispatchResults = await Promise.all(channels.map(async (channel: string) => {
+    const hasSystemChannel = channels.includes('system');
+    const dispatchChannels = channels
+      .filter((channel: string, index: number, self: string[]) => self.indexOf(channel) === index)
+      .filter((channel: string) => !(channel === 'push' && hasSystemChannel));
+
+    if (hasSystemChannel && channels.includes('push')) {
+      console.log(`[NotificationDispatcher] Skipping explicit push for ${event_key}; system notification trigger will send it.`);
+    }
+
+    const dispatchResults = await Promise.all(dispatchChannels.map(async (channel: string) => {
       let result: any = { success: false };
       const startTime = performance.now();
 

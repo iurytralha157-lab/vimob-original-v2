@@ -37,6 +37,12 @@ export interface OnboardingRequestData {
   selected_plan_id?: string | null;
   confirmed_value?: number | null;
   billing_cycle?: string | null;
+  privacy_policy_accepted?: boolean;
+  terms_accepted?: boolean;
+  privacy_policy_version?: string | null;
+  terms_version?: string | null;
+  legal_accepted_at?: string | null;
+  onboarding_completed_at?: string | null;
   creci?: string;
 }
 

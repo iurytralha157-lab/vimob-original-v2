@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useCallback, useRef } from 'react';
 import { maskCPF, maskRG, maskPhone } from '@/lib/masks';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -15,7 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TagSelector } from '@/components/ui/tag-selector';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, User, Briefcase, Building2, MapPin, DollarSign, Trophy, XCircle, CircleDot, UserCheck, CreditCard, Calendar, FileText, X, Home } from 'lucide-react';
+import { Loader2, User, Briefcase, Building2, MapPin, DollarSign, Trophy, XCircle, CircleDot, UserCheck, CreditCard, Calendar, FileText, X, Home, ChevronRight } from 'lucide-react';
 import { PropertyPickerDialog } from '@/components/properties/PropertyPickerDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserPermissions } from '@/hooks/use-user-permissions';
@@ -113,6 +114,17 @@ export function CreateLeadDialog({
   }), [profile?.id, defaultPipelineId, defaultStageId]);
 
   const [formData, setFormData] = useState(getEmptyFormData);
+  const [dialogPosition, setDialogPosition] = useState({ x: 0, y: 0 });
+  const dialogContentRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const dialogPositionRef = useRef({ x: 0, y: 0 });
+  const dragFrameRef = useRef<number | null>(null);
+  const suppressOutsideCloseUntilRef = useRef(0);
 
   // Get stages for selected pipeline
   const { data: stages = [] } = useStages(formData.pipeline_id || undefined);
@@ -123,7 +135,34 @@ export function CreateLeadDialog({
   const coverageNeighborhoods = useCoverageNeighborhoods(formData.uf, formData.cidade);
 
   const isFormEmpty = useCallback((data: typeof formData) => {
-    return !data.name.trim() && !data.phone && !data.email && !data.message && !data.cpf && !data.cargo && !data.empresa;
+    return !data.name.trim()
+      && !data.phone
+      && !data.phone2
+      && !data.email.trim()
+      && !data.message.trim()
+      && !data.source
+      && !data.cpf
+      && !data.rg
+      && !data.birth_date
+      && !data.mother_name
+      && !data.uf
+      && !data.cidade
+      && !data.bairro
+      && !data.endereco
+      && !data.numero
+      && !data.cep
+      && !data.plan_id
+      && !data.due_day
+      && !data.payment_method
+      && !data.cargo
+      && !data.empresa
+      && !data.profissao
+      && !data.renda_familiar
+      && !data.faixa_valor_imovel
+      && !data.valor_interesse
+      && !data.property_id
+      && data.tag_ids.length === 0
+      && !data.is_portability;
   }, []);
 
   // Save draft to localStorage with debounce
@@ -150,6 +189,8 @@ export function CreateLeadDialog({
   useEffect(() => {
     if (open) {
       setDraftRestored(false);
+      setDialogPosition({ x: 0, y: 0 });
+      dialogPositionRef.current = { x: 0, y: 0 };
       
       if (draftKey) {
         try {
@@ -188,12 +229,92 @@ export function CreateLeadDialog({
     });
   }, [draftKey, pipelines, defaultPipelineId, defaultStageId, getEmptyFormData]);
 
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen && draftKey && !isFormEmpty(formData)) {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({ formData, activeTab }));
+      } catch { /* quota exceeded - ignore */ }
+    }
+
+    onOpenChange(nextOpen);
+  }, [activeTab, draftKey, formData, isFormEmpty, onOpenChange]);
+
   // Prevent accidental close on backdrop click when form has data
   const handleInteractOutside = useCallback((e: Event) => {
-    if (!isFormEmpty(formData)) {
+    if (dragStateRef.current || Date.now() < suppressOutsideCloseUntilRef.current || !isFormEmpty(formData)) {
       e.preventDefault();
     }
   }, [formData, isFormEmpty]);
+
+  const handleDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    suppressOutsideCloseUntilRef.current = Date.now() + 1000;
+
+    dragStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: dialogPositionRef.current.x,
+      originY: dialogPositionRef.current.y,
+    };
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+
+  const clampDialogPosition = useCallback((position: { x: number; y: number }) => {
+    const dialog = dialogContentRef.current;
+    if (!dialog) return position;
+
+    const margin = 12;
+    const rect = dialog.getBoundingClientRect();
+    const maxX = Math.max(0, window.innerWidth / 2 - rect.width / 2 - margin);
+    const maxY = Math.max(0, window.innerHeight / 2 - rect.height / 2 - margin);
+
+    return {
+      x: Math.min(maxX, Math.max(-maxX, position.x)),
+      y: Math.min(maxY, Math.max(-maxY, position.y)),
+    };
+  }, []);
+
+  const handleDragMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current;
+    if (!dragState) return;
+
+    if ((event.buttons & 1) === 0) {
+      dragStateRef.current = null;
+      suppressOutsideCloseUntilRef.current = Date.now() + 250;
+      setDialogPosition(dialogPositionRef.current);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
+
+    dialogPositionRef.current = clampDialogPosition({
+      x: dragState.originX + event.clientX - dragState.startX,
+      y: dragState.originY + event.clientY - dragState.startY,
+    });
+
+    if (dragFrameRef.current) return;
+
+    dragFrameRef.current = window.requestAnimationFrame(() => {
+      dragFrameRef.current = null;
+      if (!dialogContentRef.current) return;
+
+      const { x, y } = dialogPositionRef.current;
+      dialogContentRef.current.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+    });
+  }, [clampDialogPosition]);
+
+  const handleDragEnd = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    dragStateRef.current = null;
+    suppressOutsideCloseUntilRef.current = Date.now() + 250;
+    setDialogPosition(dialogPositionRef.current);
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
 
   // Update stage when pipeline changes
   useEffect(() => {
@@ -202,37 +323,29 @@ export function CreateLeadDialog({
     }
   }, [formData.pipeline_id, stages]);
 
+  useEffect(() => {
+    return () => {
+      if (dragFrameRef.current) {
+        window.cancelAnimationFrame(dragFrameRef.current);
+      }
+    };
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name.trim()) {
-      toast.error('Informe o nome do lead');
-      setActiveTab('basic');
+    if (activeTab === 'basic') {
+      if (validateBasicStep()) setActiveTab('profile');
       return;
     }
 
-    if (!formData.phone && !formData.email.trim()) {
-      toast.error('Informe pelo menos um telefone ou email');
-      setActiveTab('basic');
+    if (activeTab === 'profile') {
+      setActiveTab('management');
       return;
     }
 
-    // Validate email format (only if provided)
-    if (formData.email && !EMAIL_REGEX.test(formData.email.trim())) {
-      toast.error('Email inválido. Use o formato nome@dominio.com');
-      setActiveTab('basic');
-      return;
-    }
-
-    // Validate phone has only digits and minimum length (only if provided)
-    if (formData.phone) {
-      const phoneDigits = formData.phone.replace(/\D/g, '');
-      if (phoneDigits.length < 10) {
-        toast.error('Telefone inválido. Informe DDD + número (mín. 10 dígitos).');
-        setActiveTab('basic');
-        return;
-      }
-    }
+    if (!validateBasicStep()) return;
+    if (!validateManagementStep()) return;
 
     try {
       const newLead = await createLead.mutateAsync({
@@ -321,6 +434,24 @@ export function CreateLeadDialog({
   const hasValidEmail = !formData.email.trim() || EMAIL_REGEX.test(formData.email.trim());
   const hasContactChannel = (!!formData.phone && hasValidPhone) || (!!formData.email.trim() && hasValidEmail);
   const hasRequiredLeadIdentity = !!formData.name.trim() && hasContactChannel;
+  const hasRequiredManagement = !!formData.assigned_user_id && !!formData.pipeline_id && !!formData.stage_id;
+  const selectedLeadProperty = (properties as any[]).find((property) => property.id === formData.property_id);
+  const selectedLeadPropertyLabel = selectedLeadProperty
+    ? [selectedLeadProperty.code, selectedLeadProperty.title].filter(Boolean).join(' - ')
+    : '';
+  const leadDialogSurfaceClass = cn(
+    "!left-1/2 !right-auto !top-1/2 !bottom-auto !h-auto max-h-[86vh] !w-[94vw] !border-0 bg-black/82 !p-0 text-white shadow-2xl backdrop-blur-xl sm:!w-[560px] sm:!max-w-[560px]",
+    "!duration-0 !transition-none flex flex-col overflow-hidden rounded-none will-change-transform sm:rounded-[24px]",
+    "data-[state=open]:!animate-none data-[state=closed]:!animate-none data-[state=closed]:!slide-out-to-right data-[state=open]:!slide-in-from-right",
+    "[&_label]:text-white/62 [&_label]:font-medium",
+    "[&_input]:h-10 [&_input]:border-0 [&_input]:bg-[#202020] [&_input]:text-white [&_input]:placeholder:text-white/35 [&_input]:shadow-none [&_input]:ring-0",
+    "[&_textarea]:border-0 [&_textarea]:bg-[#202020] [&_textarea]:text-white [&_textarea]:placeholder:text-white/35 [&_textarea]:shadow-none [&_textarea]:ring-0",
+    "[&_button[role=combobox]]:h-10 [&_button[role=combobox]]:border-0 [&_button[role=combobox]]:bg-[#202020] [&_button[role=combobox]]:text-white [&_button[role=combobox]]:shadow-none",
+    "[&_[data-radix-collection-item]]:text-sm",
+    "[&_input:focus-visible]:ring-1 [&_input:focus-visible]:ring-primary/70",
+    "[&_textarea:focus-visible]:ring-1 [&_textarea:focus-visible]:ring-primary/70",
+    "[&_button[role=combobox]:focus-visible]:ring-1 [&_button[role=combobox]:focus-visible]:ring-primary/70",
+  );
 
   const validateBasicStep = () => {
     if (!formData.name.trim()) {
@@ -350,27 +481,64 @@ export function CreateLeadDialog({
     return true;
   };
 
+  const validateManagementStep = () => {
+    if (!formData.assigned_user_id) {
+      toast.error('Selecione o responsável');
+      setActiveTab('management');
+      return false;
+    }
+
+    if (!formData.pipeline_id) {
+      toast.error('Selecione a pipeline');
+      setActiveTab('management');
+      return false;
+    }
+
+    if (!formData.stage_id) {
+      toast.error('Selecione o estágio');
+      setActiveTab('management');
+      return false;
+    }
+
+    return true;
+  };
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[90%] sm:w-[650px] sm:max-w-[650px] p-0 flex flex-col overflow-hidden">
-        <SheetHeader className="px-6 pt-6 pb-2 flex-shrink-0">
-          <SheetTitle className="flex items-center gap-2">
-            {isTelecom && <UserCheck className="h-5 w-5 text-primary" />}
-            {dialogTitle}
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetContent
+        ref={dialogContentRef}
+        side="right"
+        className={leadDialogSurfaceClass}
+        overlayClassName="!bg-black/20 !backdrop-blur-none"
+        onInteractOutside={handleInteractOutside}
+        style={{
+          transform: `translate(calc(-50% + ${dialogPosition.x}px), calc(-50% + ${dialogPosition.y}px))`,
+        }}
+      >
+        <SheetHeader
+          className="shrink-0 cursor-move select-none px-6 pb-0 pt-5"
+          onPointerDown={handleDragStart}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragEnd}
+          onPointerCancel={handleDragEnd}
+        >
+          <SheetTitle className="flex items-center gap-2 pr-9 text-[15px] font-semibold text-white">
+            {isTelecom ? <UserCheck className="h-4 w-4 text-primary" /> : <User className="h-4 w-4 text-primary" />}
+            <span>{dialogTitle}</span>
           </SheetTitle>
         </SheetHeader>
 
         {/* Draft restored banner */}
         {draftRestored && (
-          <div className="mx-6 flex items-center justify-between gap-2 rounded-md bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 px-3 py-2">
-            <div className="flex items-center gap-2 text-sm text-amber-800 dark:text-amber-200">
+          <div className="mx-6 mt-2 flex items-center justify-between gap-2 rounded-xl bg-[#202020] px-3 py-2">
+            <div className="flex items-center gap-2 text-sm text-white/75">
               <FileText className="h-4 w-4 flex-shrink-0" />
               <span>Rascunho restaurado</span>
             </div>
             <button
               type="button"
               onClick={discardDraft}
-              className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 text-xs font-medium flex items-center gap-1"
+              className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80"
             >
               <X className="h-3 w-3" />
               Descartar
@@ -380,14 +548,14 @@ export function CreateLeadDialog({
         
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto">
-            <div className="px-6 pb-4">
+            <div className="px-6 pb-4 pt-3">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-3 mb-4">
-                  <TabsTrigger value="basic" className="text-xs">Básico</TabsTrigger>
-                  <TabsTrigger value="profile" className="text-xs">
+                <TabsList className="mb-4 grid h-10 w-full grid-cols-3 rounded-xl bg-[#202020] p-1">
+                  <TabsTrigger value="basic" className="rounded-lg text-xs text-white/55 data-[state=active]:bg-primary data-[state=active]:text-white">Básico</TabsTrigger>
+                  <TabsTrigger value="profile" className="rounded-lg text-xs text-white/55 data-[state=active]:bg-primary data-[state=active]:text-white">
                     {isTelecom ? 'Contrato' : 'Perfil'}
                   </TabsTrigger>
-                  <TabsTrigger value="management" className="text-xs">Gestão</TabsTrigger>
+                  <TabsTrigger value="management" className="rounded-lg text-xs text-white/55 data-[state=active]:bg-primary data-[state=active]:text-white">Gestão</TabsTrigger>
                 </TabsList>
 
                 {/* Basic Info Tab */}
@@ -826,6 +994,28 @@ export function CreateLeadDialog({
                               updateField('valor_interesse', String(p.preco));
                             }
                           }}
+                          trigger={
+                            selectedLeadProperty ? (
+                              <button
+                                type="button"
+                                className="flex min-h-10 w-full items-center gap-2 rounded-xl bg-transparent px-0 text-left text-sm font-medium text-primary hover:text-primary/85"
+                              >
+                                <Building2 className="h-4 w-4 shrink-0 text-white/55" />
+                                <span className="truncate">{selectedLeadPropertyLabel}</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="flex h-10 w-full items-center justify-between rounded-xl bg-primary/20 px-3 text-left text-xs font-medium text-primary hover:bg-primary/25"
+                              >
+                                <span className="flex min-w-0 items-center gap-2">
+                                  <Building2 className="h-3.5 w-3.5 shrink-0" />
+                                  <span className="truncate">Selecionar imóvel</span>
+                                </span>
+                                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                              </button>
+                            )
+                          }
                         />
                       </div>
                     </>
@@ -949,14 +1139,14 @@ export function CreateLeadDialog({
             </div>
           </div>
 
-          <div className="flex gap-2 px-6 py-4 border-t bg-background flex-shrink-0">
-            <Button type="button" variant="outline" className="w-[40%]" onClick={() => onOpenChange(false)}>
+          <div className="flex shrink-0 gap-2 px-6 pb-6 pt-3">
+            <Button type="button" className="h-10 w-[40%] border-0 bg-[#202020] text-white hover:bg-[#2b2b2b]" onClick={() => handleOpenChange(false)}>
               Cancelar
             </Button>
             {activeTab !== 'management' ? (
               <Button
                 type="button"
-                className="w-[60%]"
+                className="h-10 w-[60%] bg-primary text-white hover:bg-primary/90"
                 onClick={() => {
                   if (activeTab === 'basic') {
                     if (!validateBasicStep()) return;
@@ -968,7 +1158,7 @@ export function CreateLeadDialog({
                 Avançar
               </Button>
             ) : (
-              <Button type="submit" className="w-[60%]" disabled={createLead.isPending || upsertTelecomCustomer.isPending || !hasRequiredLeadIdentity}>
+              <Button type="submit" className="h-10 w-[60%] bg-primary text-white hover:bg-primary/90" disabled={createLead.isPending || upsertTelecomCustomer.isPending || !hasRequiredLeadIdentity || !hasRequiredManagement}>
                 {(createLead.isPending || upsertTelecomCustomer.isPending) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {submitLabel}
               </Button>
