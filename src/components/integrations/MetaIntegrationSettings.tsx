@@ -495,9 +495,9 @@ export function MetaIntegrationSettings({
       </AlertDialog>
 
       <Dialog open={wizardOpen} onOpenChange={setWizardOpen}>
-        <DialogContent className="w-[96vw] sm:max-w-6xl p-0 overflow-hidden">
-          <div className="grid min-h-[520px] grid-cols-1 lg:grid-cols-[340px_1fr]">
-            <aside className="border-r bg-muted/20 p-4 space-y-3">
+        <DialogContent className="w-[96vw] max-w-[1100px] max-h-[92vh] p-0 overflow-hidden">
+          <div className="grid max-h-[92vh] min-h-[520px] min-w-0 grid-cols-1 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
+            <aside className="min-w-0 overflow-y-auto border-r bg-muted/20 p-4 space-y-3">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2"><Plug className="h-5 w-5 text-primary" />Criar nova integração</DialogTitle>
                 <DialogDescription>Escolha uma conta, uma página e o formulário que será configurado.</DialogDescription>
@@ -516,19 +516,19 @@ export function MetaIntegrationSettings({
                       setForms([]);
                     }}
                   >
-                    <div>
-                      <p className="font-medium">{account.name}</p>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{account.name}</p>
                       <p className="text-xs text-muted-foreground">{account.isNew ? "Nova conexão" : "Conta conectada"}</p>
                     </div>
-                    {selectedAccount?.key === account.key && <Check className="h-4 w-4 text-primary" />}
+                    {selectedAccount?.key === account.key && <Check className="h-4 w-4 shrink-0 text-primary" />}
                   </button>
                 ))}
               </div>
             </aside>
 
-            <main className="p-4 space-y-4">
+            <main className="min-w-0 overflow-y-auto p-4 space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-lg font-semibold">Páginas e formulários</h3>
                   <p className="text-sm text-muted-foreground">Selecione uma página para carregar os formulários ativos.</p>
                 </div>
@@ -537,8 +537,8 @@ export function MetaIntegrationSettings({
               {!selectedAccount ? (
                 <Alert><AlertCircle className="h-4 w-4" /><AlertDescription>Conecte ou selecione uma conta do Facebook para continuar.</AlertDescription></Alert>
               ) : (
-                <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
-                  <div className="rounded-xl border bg-card p-2.5 space-y-2">
+                <div className="grid min-w-0 grid-cols-1 xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)] gap-4">
+                  <div className="min-w-0 rounded-xl border bg-card p-2.5 space-y-2">
                     <p className="text-xs font-medium uppercase text-muted-foreground">Páginas</p>
                     <ScrollArea className="h-[370px] pr-2">
                       <div className="space-y-2">
@@ -548,12 +548,12 @@ export function MetaIntegrationSettings({
                           const picture = page.page_picture_url || getPagePicture(page);
                           const active = selectedIntegration?.page_id === pageId;
                           return (
-                            <button key={pageId} type="button" className={cn("flex w-full items-center justify-between rounded-lg border p-2.5 text-left hover:bg-muted", active && "border-primary bg-primary/10")} onClick={() => handleSelectPage(page)}>
+                            <button key={pageId} type="button" className={cn("flex w-full min-w-0 items-center justify-between rounded-lg border p-2.5 text-left hover:bg-muted", active && "border-primary bg-primary/10")} onClick={() => handleSelectPage(page)}>
                               <div className="flex min-w-0 items-center gap-3">
                                 <Avatar className="h-10 w-10"><AvatarImage src={picture || undefined} /><AvatarFallback>{name?.[0] || "F"}</AvatarFallback></Avatar>
                                 <span className="truncate font-medium">{name}</span>
                               </div>
-                              {active && <Check className="h-4 w-4 text-primary" />}
+                              {active && <Check className="h-4 w-4 shrink-0 text-primary" />}
                             </button>
                           );
                         })}
@@ -561,13 +561,13 @@ export function MetaIntegrationSettings({
                     </ScrollArea>
                   </div>
 
-                  <div className="rounded-xl border bg-card p-2.5 space-y-3">
+                  <div className="min-w-0 overflow-hidden rounded-xl border bg-card p-2.5 space-y-3">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
+                      <div className="min-w-0">
                         <p className="font-medium">Formulários</p>
-                        <p className="text-xs text-muted-foreground">{selectedIntegration ? `${forms.length} formulários encontrados em ${selectedIntegration.page_name}` : "Escolha uma página"}</p>
+                        <p className="truncate text-xs text-muted-foreground">{selectedIntegration ? `${forms.length} formulários encontrados em ${selectedIntegration.page_name}` : "Escolha uma página"}</p>
                       </div>
-                      <div className="relative sm:w-72">
+                      <div className="relative min-w-0 sm:w-64 lg:w-72">
                         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input className="pl-9" value={formSearch} onChange={(event) => setFormSearch(event.target.value)} placeholder="Buscar formulário" />
                       </div>
@@ -580,19 +580,19 @@ export function MetaIntegrationSettings({
                       ) : filteredForms.length === 0 ? (
                         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Nenhum formulário encontrado.</div>
                       ) : (
-                        <div className="divide-y rounded-lg border">
+                        <div className="min-w-0 divide-y rounded-lg border">
                           {filteredForms.map((form) => {
                             const existing = configuredByFormId.get(form.id);
                             return (
-                              <div key={form.id} className="flex items-center justify-between gap-3 p-3">
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2">
+                              <div key={form.id} className="flex min-w-0 items-center justify-between gap-3 p-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex min-w-0 items-center gap-2">
                                     <span className="truncate font-medium">{form.name}</span>
-                                    {existing && <Badge variant="secondary">Configurado</Badge>}
+                                    {existing && <Badge variant="secondary" className="shrink-0">Configurado</Badge>}
                                   </div>
-                                  <p className="text-xs text-muted-foreground">ID {form.id}</p>
+                                  <p className="truncate text-xs text-muted-foreground">ID {form.id}</p>
                                 </div>
-                                <Button variant={existing ? "outline" : "default"} size="sm" onClick={() => openConfig(form, existing, selectedIntegration)}>
+                                <Button className="shrink-0" variant={existing ? "outline" : "default"} size="sm" onClick={() => openConfig(form, existing, selectedIntegration)}>
                                   <FilePlus2 className="mr-2 h-4 w-4" />{existing ? "Editar" : "Integrar"}
                                 </Button>
                               </div>
