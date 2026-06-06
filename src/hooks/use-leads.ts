@@ -472,12 +472,15 @@ export function useUpdateLead() {
         .eq('id', id)
         .maybeSingle();
       
-      const { error } = await supabase
+      const { error, count } = await supabase
         .from('leads')
-        .update(updateData)
+        .update(updateData, { count: 'exact' })
         .eq('id', id);
       
       if (error) throw error;
+      if (count === 0) {
+        throw new Error('Nenhuma alteração foi gravada. Verifique se você tem permissão para editar este lead.');
+      }
 
       const { data: refreshedLead } = await supabase
         .from('leads')

@@ -40,18 +40,20 @@ begin
     raise exception 'Lead pertence a outra organização';
   end if;
 
-  select organization_id
-    into v_target_org_id
-  from public.users
-  where id = p_assigned_user_id
-    and coalesce(is_active, true) = true;
+  if p_assigned_user_id is not null then
+    select organization_id
+      into v_target_org_id
+    from public.users
+    where id = p_assigned_user_id
+      and coalesce(is_active, true) = true;
 
-  if v_target_org_id is null then
-    raise exception 'Responsável não encontrado ou inativo';
-  end if;
+    if v_target_org_id is null then
+      raise exception 'Responsável não encontrado ou inativo';
+    end if;
 
-  if v_target_org_id <> v_lead.organization_id then
-    raise exception 'Responsável pertence a outra organização';
+    if v_target_org_id <> v_lead.organization_id then
+      raise exception 'Responsável pertence a outra organização';
+    end if;
   end if;
 
   if not (
@@ -77,7 +79,7 @@ begin
 
   update public.leads
      set assigned_user_id = p_assigned_user_id,
-         assigned_at = now(),
+         assigned_at = case when p_assigned_user_id is null then null else now() end,
          updated_at = now()
    where id = p_lead_id
    returning * into v_updated_lead;

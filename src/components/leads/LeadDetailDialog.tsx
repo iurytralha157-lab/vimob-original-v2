@@ -544,10 +544,11 @@ export function LeadDetailDialog({
 
     if (!userId) {
       try {
-        await updateLead.mutateAsync({
-          id: lead.id,
-          assigned_user_id: null
+        const { error } = await (supabase as any).rpc('transfer_lead_assignee', {
+          p_lead_id: lead.id,
+          p_assigned_user_id: null
         });
+        if (error) throw error;
         refetchStages();
       } catch (error) {
         setLocalLead(previousLead);
@@ -604,10 +605,11 @@ export function LeadDetailDialog({
         }
       }
 
-      await updateLead.mutateAsync({
-        id: lead.id,
-        assigned_user_id: userId
+      const { error } = await (supabase as any).rpc('transfer_lead_assignee', {
+        p_lead_id: lead.id,
+        p_assigned_user_id: userId
       });
+      if (error) throw error;
       refetchStages();
     } catch (error) {
       setLocalLead(previousLead);
