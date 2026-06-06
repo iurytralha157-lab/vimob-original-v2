@@ -61,6 +61,8 @@ begin
     or public.is_admin()
     or public.user_has_permission('lead_transfer', v_actor_id)
     or public.user_has_permission('lead_edit_all', v_actor_id)
+    or public.user_has_permission('settings_teams', v_actor_id)
+    or public.user_has_permission('settings_users', v_actor_id)
     or v_lead.assigned_user_id = v_actor_id
     or (
       public.is_team_leader(v_actor_id)
