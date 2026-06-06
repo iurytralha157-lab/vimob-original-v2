@@ -72,17 +72,20 @@ const getPropertyLabel = (property: any, fallback: string) => {
   return property.code || property.vista_codigo || property.imoview_codigo || property.title || cleanFallback;
 };
 
+const EMPTY_ROUND_ROBINS: RoundRobinType[] = [];
+const EMPTY_LIST: any[] = [];
+
 export function DistributionTab() {
-  const { data: roundRobins = [], isLoading } = useRoundRobins();
-  const { data: teams = [], isLoading: teamsLoading } = useTeams();
-  const { data: tags = [] } = useTags();
-  const { data: properties = [] } = useProperties();
-  const { data: plans = [] } = useServicePlans();
-  const { data: webhooks = [] } = useWebhooks();
-  const { data: whatsappSessions = [] } = useWhatsAppSessions();
-  const { data: metaIntegrations = [] } = useMetaIntegrations();
+  const { data: roundRobins = EMPTY_ROUND_ROBINS, isLoading } = useRoundRobins();
+  const { data: teams = EMPTY_LIST, isLoading: teamsLoading } = useTeams();
+  const { data: tags = EMPTY_LIST } = useTags();
+  const { data: properties = EMPTY_LIST } = useProperties();
+  const { data: plans = EMPTY_LIST } = useServicePlans();
+  const { data: webhooks = EMPTY_LIST } = useWebhooks();
+  const { data: whatsappSessions = EMPTY_LIST } = useWhatsAppSessions();
+  const { data: metaIntegrations = EMPTY_LIST } = useMetaIntegrations();
   const activeMetaIntegration = metaIntegrations.find(i => i.is_connected);
-  const { data: metaFormConfigs = [] } = useMetaFormConfigs(activeMetaIntegration?.id);
+  const { data: metaFormConfigs = EMPTY_LIST } = useMetaFormConfigs(activeMetaIntegration?.id);
   const updateRoundRobin = useUpdateRoundRobin();
   const deleteRoundRobin = useDeleteRoundRobin();
   const createQueue = useCreateQueueAdvanced();
@@ -107,7 +110,7 @@ export function DistributionTab() {
 
     const loadRuleProperties = async () => {
       if (!propertyRuleIds.length) {
-        setRuleProperties([]);
+        setRuleProperties(current => (current.length ? [] : current));
         return;
       }
 
@@ -115,7 +118,7 @@ export function DistributionTab() {
       const missingIds = propertyRuleIds.filter(id => !loadedIds.has(id));
 
       if (!missingIds.length) {
-        setRuleProperties([]);
+        setRuleProperties(current => (current.length ? [] : current));
         return;
       }
 
@@ -128,7 +131,7 @@ export function DistributionTab() {
 
       if (error) {
         console.error('[DistributionTab] Failed to load rule properties:', error);
-        setRuleProperties([]);
+        setRuleProperties(current => (current.length ? [] : current));
         return;
       }
 

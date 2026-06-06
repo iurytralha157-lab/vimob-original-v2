@@ -150,7 +150,6 @@ export function TeamsTab() {
               <TableBody>
                 {teams.map((team) => {
                   const members = team.members || [];
-                  const visibleMembers = members.slice(0, 10);
                   const createdAt = format(new Date(team.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR });
                   const creator = team.created_by_user?.name || team.created_by_user?.email || 'Não informado';
 
@@ -183,8 +182,8 @@ export function TeamsTab() {
 
                       <TableCell>
                         {members.length > 0 ? (
-                          <div className="flex -space-x-1.5">
-                            {visibleMembers.map((member) => {
+                          <div className="flex max-h-[92px] max-w-[520px] flex-wrap gap-1.5 overflow-y-auto overflow-x-hidden pr-1">
+                            {members.map((member) => {
                               const availabilitySummary = formatAvailabilitySummary(getMemberAvailability(member.id));
 
                               return (
@@ -192,7 +191,7 @@ export function TeamsTab() {
                                   <TooltipTrigger asChild>
                                     <button
                                       type="button"
-                                      className="relative rounded-full transition hover:z-10 hover:scale-105"
+                                      className="relative shrink-0 rounded-full transition hover:z-10 hover:scale-105"
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         openAvailability(member);
@@ -228,23 +227,6 @@ export function TeamsTab() {
                                 </Tooltip>
                               );
                             })}
-                            {members.length > visibleMembers.length && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="h-10 w-10 rounded-full bg-muted border-2 border-background flex items-center justify-center">
-                                    <span className="text-xs text-muted-foreground">
-                                      +{members.length - visibleMembers.length}
-                                    </span>
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  {members
-                                    .slice(visibleMembers.length)
-                                    .map((member) => member.user?.name || 'Usuário')
-                                    .join(', ')}
-                                </TooltipContent>
-                              </Tooltip>
-                            )}
                           </div>
                         ) : (
                           <Button

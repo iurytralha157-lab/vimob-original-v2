@@ -154,8 +154,8 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
   const displayLogo = logoPreview || logoUrl || undefined;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[560px] border-0 bg-black/82 p-0 text-white shadow-2xl backdrop-blur-xl sm:rounded-[20px] [&>button]:hidden">
-        <div className="p-4 sm:p-5">
+      <DialogContent className="max-h-[88vh] max-w-[560px] overflow-hidden border-0 bg-black/82 p-0 text-white shadow-2xl backdrop-blur-xl sm:rounded-[20px] [&>button]:hidden">
+        <div className="flex max-h-[88vh] flex-col p-4 sm:p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <UserPlus className="h-4 w-4 text-primary" />
@@ -170,7 +170,7 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
             </button>
           </div>
 
-          <div className="space-y-3">
+          <div className="flex min-h-0 flex-1 flex-col space-y-3">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -207,8 +207,8 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
               </div>
             </div>
 
-            <ScrollArea className="max-h-[340px] pr-2">
-              <div className="space-y-1">
+            <ScrollArea className="min-h-[220px] flex-1 pr-2">
+              <div className="space-y-1 pb-1">
                 {users.map((user) => {
                   const isSelected = isMemberSelected(user.id);
                   const memberData = getMemberSelection(user.id);
