@@ -46,6 +46,7 @@ const EVENT_KEY_OPTIONS = [
   { value: 'lead_transferred_to_user', label: 'Lead Transferido ao Responsavel', category: 'Leads' },
   { value: 'manual_lead_registered', label: 'Novo Lead (Manual)', category: 'Leads' },
   { value: 'lead_reentry', label: 'Reentrada de Lead', category: 'Leads' },
+  { value: 'lead_duplicate_existing', label: 'Lead já cadastrado', category: 'Leads' },
   { value: 'lead_moved_system', label: 'Lead Movido', category: 'Leads' },
   { value: 'welcome_lead', label: 'Boas-vindas ao Lead', category: 'Leads' },
   { value: 'new_appointment', label: 'Novo Agendamento', category: 'Agenda' },

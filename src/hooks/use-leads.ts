@@ -152,90 +152,14 @@ export function useCreateLead() {
       // Buscar org_id para verificaÃ§Ã£o de leads duplicados (nÃ£o para INSERT)
       const { data: userData } = await supabase
         .from('users')
-        .select('organization_id')
+        .select('organization_id, name')
         .eq('id', user.user.id)
         .single();
       const organizationId = userData?.organization_id;
       
       if (!organizationId) throw new Error('Usuário não possui organização');
-      
-      // ===== VERIFICAR SE JÃ EXISTE LEAD COM ESTE TELEFONE =====
-      if (lead.phone) {
-        const normalizedPhone = normalizePhone(lead.phone);
-        
-        if (normalizedPhone) {
-          // Buscar leads existentes com telefone similar
-          const { data: existingLeads } = await supabase
-            .from('leads')
-            .select('id, phone')
-            .eq('organization_id', organizationId)
-            .not('phone', 'is', null);
-          
-          // Verificar se algum lead tem o mesmo telefone normalizado
-          const existingLead = existingLeads?.find(l => {
-            if (!l.phone) return false;
-            return normalizePhone(l.phone) === normalizedPhone;
-          });
-          
-          if (existingLead) {
-            // Registrar reentrada via RPC
-            const { error: reentryError } = await (supabase.rpc as any)('register_lead_reentry', {
-              p_lead_id: existingLead.id,
-              p_org_id: organizationId,
-              p_entry_type: 'manual_reentry',
-              p_source: lead.source || 'manual',
-              p_property_id: lead.property_id || null,
-              p_valor_interesse: lead.valor_interesse || null,
-              p_metadata: {
-                new_data: {
-                  name: lead.name,
-                  email: lead.email,
-                  message: lead.message,
-                  property_code: lead.property_code
-                }
-              }
-            });
 
-            if (reentryError) {
-              console.error('Erro ao registrar reentrada:', reentryError);
-              // Fallback para atualizaÃ§Ã£o simples se a RPC falhar
-              await supabase.from('leads').update({
-                name: lead.name,
-                email: lead.email,
-                message: lead.message
-              }).eq('id', existingLead.id);
-            }
-
-            toast.success('Lead atualizado (telefone já existia)');
-            
-            // Notify assignee about re-entry
-            if (existingLead.id && organizationId) {
-              const { data: leadData } = await supabase
-                .from('leads')
-                .select('assigned_user_id')
-                .eq('id', existingLead.id)
-                .single();
-              
-              if (leadData?.assigned_user_id) {
-                await notificationService.send({
-                  eventKey: 'lead_reentry',
-                  organizationId: organizationId,
-                  userId: leadData.assigned_user_id,
-                  leadId: existingLead.id,
-                  dedupeKey: `lead_reentry:${existingLead.id}`,
-                  variables: {
-                    lead_name: lead.name,
-                    source: lead.source || 'manual'
-                  }
-                });
-              }
-            }
-            return { id: existingLead.id };
-          }
-        }
-      }
-      
-      // Get default pipeline and first stage if not provided
+      // Resolve destino antes de tratar duplicidade para reentrada aparecer na coluna escolhida.
       let pipelineId = lead.pipeline_id;
       let stageId = lead.stage_id;
       
@@ -260,6 +184,147 @@ export function useCreateLead() {
           .single();
         
         stageId = stage?.id;
+      }
+      
+      // ===== VERIFICAR SE JÃ EXISTE LEAD COM ESTE TELEFONE =====
+      if (lead.phone) {
+        const normalizedPhone = normalizePhone(lead.phone);
+        
+        if (normalizedPhone) {
+          // Buscar leads existentes com telefone similar
+          const { data: existingLeads } = await supabase
+            .from('leads')
+            .select('id, phone, assigned_user_id, assignee:users!leads_assigned_user_id_fkey(name)')
+            .eq('organization_id', organizationId)
+            .not('phone', 'is', null);
+          
+          // Verificar se algum lead tem o mesmo telefone normalizado
+          const existingLead = existingLeads?.find(l => {
+            if (!l.phone) return false;
+            return normalizePhone(l.phone) === normalizedPhone;
+          });
+          
+          if (existingLead) {
+            const reentryAt = new Date().toISOString();
+
+            // Registrar reentrada via RPC
+            const { error: reentryError } = await (supabase.rpc as any)('register_lead_reentry', {
+              p_lead_id: existingLead.id,
+              p_org_id: organizationId,
+              p_entry_type: 'manual_reentry',
+              p_source: lead.source || 'manual',
+              p_property_id: lead.property_id || null,
+              p_valor_interesse: lead.valor_interesse || null,
+              p_metadata: {
+                new_data: {
+                  name: lead.name,
+                  email: lead.email,
+                  message: lead.message,
+                  property_code: lead.property_code
+                }
+              }
+            });
+
+            if (reentryError) {
+              console.error('Erro ao registrar reentrada:', reentryError);
+            }
+
+            const reentryUpdate: Record<string, any> = {
+              name: lead.name,
+              email: lead.email || null,
+              message: lead.message || null,
+              last_entry_at: reentryAt,
+              updated_at: reentryAt,
+            };
+
+            if (pipelineId) reentryUpdate.pipeline_id = pipelineId;
+            if (stageId) {
+              reentryUpdate.stage_id = stageId;
+              reentryUpdate.stage_entered_at = reentryAt;
+            }
+            if (lead.property_id) reentryUpdate.interest_property_id = lead.property_id;
+            if (lead.valor_interesse !== undefined) reentryUpdate.valor_interesse = lead.valor_interesse;
+
+            const { error: updateExistingError } = await supabase
+              .from('leads')
+              .update(reentryUpdate)
+              .eq('id', existingLead.id);
+
+            if (updateExistingError) throw updateExistingError;
+
+            const existingAssignee = (existingLead as any).assignee;
+            const assignedUserName = (
+              Array.isArray(existingAssignee) ? existingAssignee[0]?.name : existingAssignee?.name
+            ) || 'sem responsável';
+            const actorName = userData?.name || user.user.email || 'Usuário';
+            const reentryDateLabel = new Intl.DateTimeFormat('pt-BR', {
+              timeZone: 'America/Sao_Paulo',
+            }).format(new Date(reentryAt));
+
+            const { error: manualReentryActivityError } = await supabase.from('activities').insert({
+              lead_id: existingLead.id,
+              user_id: user.user.id,
+              type: 'lead_reentry',
+              content: `Nova entrada manual registrada por ${actorName} em ${reentryDateLabel}. Lead mantido com ${assignedUserName}.`,
+              metadata: {
+                entry_type: 'manual_reentry',
+                source: lead.source || 'manual',
+                actor_id: user.user.id,
+                actor_name: actorName,
+                assigned_user_id: existingLead.assigned_user_id || null,
+                assigned_user_name: assignedUserName,
+                kept_assignee: true,
+                registered_at: reentryAt,
+                pipeline_id: pipelineId || null,
+                stage_id: stageId || null,
+                property_id: lead.property_id || null,
+                property_code: lead.property_code || null,
+              },
+            });
+            if (manualReentryActivityError) {
+              console.error('Erro ao registrar atividade de reentrada manual:', manualReentryActivityError);
+            }
+
+            toast.success(`Lead já existia e foi atualizado. Responsável atual: ${assignedUserName}`);
+            
+            // Notify assignee about re-entry
+            if (existingLead.id && organizationId) {
+              const { data: leadData } = await supabase
+                .from('leads')
+                .select('assigned_user_id')
+                .eq('id', existingLead.id)
+                .single();
+              
+              if (leadData?.assigned_user_id) {
+                await notificationService.send({
+                  eventKey: 'lead_reentry',
+                  organizationId: organizationId,
+                  userId: leadData.assigned_user_id,
+                  leadId: existingLead.id,
+                  dedupeKey: `lead_reentry:${existingLead.id}`,
+                  variables: {
+                    lead_name: lead.name,
+                    source: lead.source || 'manual'
+                  }
+                });
+              }
+
+              await notificationService.send({
+                eventKey: 'lead_duplicate_existing',
+                organizationId: organizationId,
+                userId: user.user.id,
+                leadId: existingLead.id,
+                dedupeKey: `lead_duplicate_existing:${existingLead.id}:${user.user.id}:${reentryAt}`,
+                variables: {
+                  lead_name: lead.name,
+                  assignee_name: assignedUserName,
+                  source: lead.source || 'manual'
+                }
+              });
+            }
+            return { id: existingLead.id, reentry: true };
+          }
+        }
       }
       
       const { tag_ids, ...leadData } = lead;
@@ -350,15 +415,21 @@ export function useCreateLead() {
       
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
       queryClient.invalidateQueries({ queryKey: ['stages'] });
       queryClient.invalidateQueries({ queryKey: ['stages-with-leads'] });
       queryClient.invalidateQueries({ queryKey: ['activities'] });
+      if (data?.id) {
+        queryClient.invalidateQueries({ queryKey: ['lead', data.id] });
+        queryClient.invalidateQueries({ queryKey: ['lead-history-v2', data.id] });
+      }
       queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
       queryClient.invalidateQueries({ queryKey: ['telecom-customers'] });
       queryClient.invalidateQueries({ queryKey: ['telecom-customer-stats'] });
-      toast.success('Lead criado com sucesso!');
+      if (!data?.reentry) {
+        toast.success('Lead criado com sucesso!');
+      }
     },
     onError: (error) => {
       const rateLimitMessage = getClientRateLimitMessage(error);

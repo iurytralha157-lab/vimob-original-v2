@@ -438,7 +438,7 @@ export function SharedFilters({
         </PopoverContent>
       </Popover>
 
-      {hasActiveFilters && (
+      {hasActiveFilters && !isMobile && (
         <Button
           variant="ghost"
           size="sm"

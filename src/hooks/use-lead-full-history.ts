@@ -183,6 +183,9 @@ function getActivityLabel(activity: Activity): string {
       return 'Responsável alterado';
       
     case 'lead_reentry':
+      if (meta.entry_type === 'manual_reentry') {
+        return 'Lead reentrou';
+      }
       if (meta.webhook_name) {
         return `Lead reentrou via webhook "${meta.webhook_name}"`;
       }

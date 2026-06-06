@@ -24,16 +24,27 @@ interface FilteredStageCountsParams {
 
 // Limite de leads por estágio para paginação inicial (otimizado para performance)
 const LEADS_PER_STAGE = 12;
+const LEADS_PREFETCH_PER_STAGE = LEADS_PER_STAGE * 3;
 
 const LEAD_PIPELINE_BASIC_FIELDS = `
-  id, name, phone, email, source, created_at,
+  id, name, phone, email, source, created_at, updated_at,
   stage_id, assigned_user_id, pipeline_id, message,
-  stage_entered_at, organization_id,
+  stage_entered_at, organization_id, last_entry_at, reentry_count,
   whatsapp_avatar_url,
   deal_status, valor_interesse, property_id, lost_reason, won_at, lost_at,
   interest_property_id, interest_plan_id,
   first_response_at, first_response_seconds, first_response_is_automation
 `;
+
+function getLeadSortTimestamp(lead: any) {
+  const rawDate = lead?.last_entry_at || lead?.stage_entered_at || lead?.updated_at || lead?.created_at;
+  const timestamp = rawDate ? new Date(rawDate).getTime() : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortLeadsByRecentActivity<T extends any>(leads: T[]) {
+  return [...leads].sort((a, b) => getLeadSortTimestamp(b) - getLeadSortTimestamp(a));
+}
 
 // Helper para buscar IDs de leads filtrados por tags ou Meta Ads (joins complexos)
 // Retorna:
@@ -169,9 +180,15 @@ export async function buildPipelineLeadQueryFilters(params: {
       query = query.eq('deal_status', filters.filterDealStatus);
     }
     if (filters.dateRange) {
+      const fromISO = filters.dateRange.from.toISOString();
+      const toISO = filters.dateRange.to.toISOString();
       query = query
-        .gte('created_at', filters.dateRange.from.toISOString())
-        .lte('created_at', filters.dateRange.to.toISOString());
+        .or(
+          [
+            `and(created_at.gte.${fromISO},created_at.lte.${toISO})`,
+            `and(last_entry_at.gte.${fromISO},last_entry_at.lte.${toISO})`,
+          ].join(',')
+        );
     }
     if (filteredLeadIds) {
       query = query.in('id', filteredLeadIds);
@@ -301,7 +318,7 @@ export function useStagesWithLeads(
             .eq('pipeline_id', targetPipelineId)
             .eq('stage_id', stage.id)
             .order('stage_entered_at', { ascending: false })
-            .limit(LEADS_PER_STAGE);
+            .limit(LEADS_PREFETCH_PER_STAGE);
           return apply(query);
         });
 
@@ -341,7 +358,7 @@ export function useStagesWithLeads(
 
         return stages.map((stage) => ({
           ...stage,
-          leads: enrichedLeadsByStage[stage.id] || [],
+          leads: sortLeadsByRecentActivity(enrichedLeadsByStage[stage.id] || []).slice(0, LEADS_PER_STAGE),
           total_lead_count: totalCountsByStage[stage.id] || 0,
           has_more: (totalCountsByStage[stage.id] || 0) > LEADS_PER_STAGE,
         }));
@@ -768,12 +785,12 @@ export function useLoadMoreLeads() {
             .eq('pipeline_id', pipelineId)
             .eq('stage_id', stageId)
             .order('stage_entered_at', { ascending: false })
-            .range(offset, offset + LEADS_PER_STAGE - 1)
+            .range(offset, offset + LEADS_PREFETCH_PER_STAGE - 1)
         );
 
         const { data, error } = await query;
         if (error) throw error;
-        const enrichedLeads = await getEnrichedLeadsBatch(data || []);
+        const enrichedLeads = sortLeadsByRecentActivity(await getEnrichedLeadsBatch(data || [])).slice(0, LEADS_PER_STAGE);
         return { stageId, leads: enrichedLeads };
       } catch (err) {
         console.error('[Pipeline filters] useLoadMoreLeads error:', err);

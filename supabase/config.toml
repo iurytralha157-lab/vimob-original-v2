@@ -7,7 +7,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.evolution-go-proxy]
-verify_jwt = true
+verify_jwt = false
 
 [functions.change-password]
 verify_jwt = true

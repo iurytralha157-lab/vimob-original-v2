@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Shuffle, Users, Tags, GitBranch, Workflow } from 'lucide-react';
+import { Shuffle, Users, Tags, GitBranch } from 'lucide-react';
 import { TeamPipelinesManager } from '@/components/teams/TeamPipelinesManager';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AnimatedTabNav, AnimatedTabItem } from '@/components/ui/animated-tab-nav';
@@ -12,9 +12,8 @@ import { AnimatedTabNav, AnimatedTabItem } from '@/components/ui/animated-tab-na
 import { DistributionTab } from '@/components/crm-management/DistributionTab';
 import { TeamsTab } from '@/components/crm-management/TeamsTab';
 import { TagsTab } from '@/components/crm-management/TagsTab';
-import { OperationalTab } from '@/components/crm-management/OperationalTab';
 
-const VALID_TABS = ['teams', 'pipelines', 'distribution', 'tags', 'operational'];
+const VALID_TABS = ['teams', 'distribution', 'pipelines', 'tags'];
 
 export default function CRMManagement() {
   const [searchParams] = useSearchParams();
@@ -35,10 +34,9 @@ export default function CRMManagement() {
 
   const managementTabs: AnimatedTabItem[] = useMemo(() => [
     { value: 'teams', label: 'Equipes', icon: Users },
-    { value: 'pipelines', label: 'Pipelines', icon: GitBranch },
     { value: 'distribution', label: 'Distribuição', icon: Shuffle },
+    { value: 'pipelines', label: 'Pipelines', icon: GitBranch },
     { value: 'tags', label: 'Tags', icon: Tags },
-    { value: 'operational', label: 'Mapeamento', icon: Workflow },
   ], []);
 
   const currentTab = managementTabs.find(tab => tab.value === activeTab);
@@ -77,20 +75,16 @@ export default function CRMManagement() {
             <TeamsTab />
           </TabsContent>
 
-          <TabsContent value="pipelines" className="mt-4">
-            <TeamPipelinesManager />
-          </TabsContent>
-
           <TabsContent value="distribution" className="mt-4">
             <DistributionTab />
           </TabsContent>
 
-          <TabsContent value="tags" className="mt-4">
-            <TagsTab />
+          <TabsContent value="pipelines" className="mt-4">
+            <TeamPipelinesManager />
           </TabsContent>
 
-          <TabsContent value="operational" className="mt-4">
-            <OperationalTab />
+          <TabsContent value="tags" className="mt-4">
+            <TagsTab />
           </TabsContent>
         </Tabs>
       </div>

@@ -996,13 +996,13 @@ export default function Pipelines() {
         isMobile && "pb-4"
       )}>
         <div className="flex flex-col gap-2 mb-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-row items-center justify-between gap-2 lg:gap-3">
+            <div className="flex min-w-0 items-center gap-2">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="h-9 px-2 gap-2 hover:bg-muted font-bold text-base">
+                  <Button variant="ghost" className="h-9 min-w-0 px-2 gap-2 hover:bg-muted font-bold text-base">
                     <LayoutGrid className="h-5 w-5 text-primary" />
-                    <span className="truncate max-w-[150px] sm:max-w-[200px]">{currentPipeline?.name || 'Pipeline'}</span>
+                    <span className="truncate max-w-[96px] sm:max-w-[200px]">{currentPipeline?.name || 'Pipeline'}</span>
                     <ChevronDown className="h-4 w-4 opacity-50" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -1040,7 +1040,7 @@ export default function Pipelines() {
 
               <div className="hidden lg:block h-6 w-px bg-border/60 mx-1" />
 
-              {canEditPipeline && (
+              {canEditPipeline && !isMobile && (
                 <Button
                   variant="outline"
                   size="icon"
@@ -1054,7 +1054,7 @@ export default function Pipelines() {
               )}
             </div>
 
-            <div className="flex items-center gap-2 self-end lg:self-auto">
+            <div className="flex shrink-0 items-center gap-2">
               <Button
                 variant="outline"
                 size="icon"
@@ -1159,7 +1159,7 @@ export default function Pipelines() {
 
         {/* Kanban Board with Drag and Drop */}
         <DragDropContext onDragEnd={handleDragEnd}>
-          <div className={cn("flex-1 min-h-0 scrollbar-thin", isMobile ? "overflow-y-auto overflow-x-hidden pb-24" : "overflow-x-auto overflow-y-auto pb-2")}>
+          <div className={cn("flex-1 min-h-0 scrollbar-thin", isMobile ? "overflow-y-auto overflow-x-hidden pb-3" : "overflow-x-auto overflow-y-auto pb-2")}>
             <div className={cn("flex gap-3 h-full px-1", isMobile ? "min-w-0" : "min-w-max")}>
               {visibleStages.map((stage: any) => (
                 <div 

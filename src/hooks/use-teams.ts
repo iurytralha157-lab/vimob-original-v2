@@ -7,6 +7,10 @@ export interface Team {
   name: string;
   organization_id: string;
   created_at: string;
+  is_active?: boolean;
+  logo_url?: string | null;
+  created_by?: string | null;
+  created_by_user?: { id: string; name: string | null; email?: string | null; avatar_url?: string | null } | null;
   members?: TeamMember[];
 }
 
@@ -19,42 +23,52 @@ export interface TeamMember {
   user?: { id: string; name: string; avatar_url: string | null; email?: string | null };
 }
 
-export function useTeams() {
+export function useTeams(options?: { includeInactive?: boolean }) {
+  const includeInactive = options?.includeInactive ?? false;
+
   return useQuery({
-    queryKey: ['teams'],
+    queryKey: ['teams', { includeInactive }],
     queryFn: async () => {
-      const { data: teams, error } = await supabase
+      let query = supabase
         .from('teams')
-        .select('*')
+        .select('*, created_by_user:users!teams_created_by_fkey(id, name, email, avatar_url)')
         .order('name');
-      
+
+      if (!includeInactive) {
+        query = query.eq('is_active', true);
+      }
+
+      const { data: teams, error } = await query;
       if (error) throw error;
-      
+
       if (!teams || teams.length === 0) return [];
-      
-      const teamIds = teams.map(t => t.id);
-      
+
+      const teamIds = teams.map((team) => team.id);
+
       const { data: members } = await supabase
         .from('team_members')
         .select('*, user:users(id, name, avatar_url, email, is_active)')
         .in('team_id', teamIds);
-      
-      // Filter only active members and cast the result to include is_leader
+
       const membersWithLeader = (members || [])
-        .filter(m => m.user && (m.user as any).is_active !== false)
-        .map(m => ({
-          ...m,
-          is_leader: (m as any).is_leader ?? false,
+        .filter((member) => member.user && (member.user as any).is_active !== false)
+        .map((member) => ({
+          ...member,
+          is_leader: (member as any).is_leader ?? false,
         }));
-      
-      const membersByTeam = membersWithLeader.reduce((acc, m) => {
-        if (!acc[m.team_id]) acc[m.team_id] = [];
-        acc[m.team_id].push(m as TeamMember);
+
+      const membersByTeam = membersWithLeader.reduce((acc, member) => {
+        if (!acc[member.team_id]) acc[member.team_id] = [];
+        acc[member.team_id].push(member as TeamMember);
         return acc;
       }, {} as Record<string, TeamMember[]>);
-      
-      return teams.map(team => ({
+
+      return teams.map((team) => ({
         ...team,
+        is_active: (team as any).is_active ?? true,
+        logo_url: (team as any).logo_url ?? null,
+        created_by: (team as any).created_by ?? null,
+        created_by_user: (team as any).created_by_user ?? null,
         members: membersByTeam[team.id] || [],
       })) as Team[];
     },
@@ -63,41 +77,44 @@ export function useTeams() {
 
 export function useCreateTeam() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: async (data: { name: string; memberIds?: string[] }) => {
+    mutationFn: async (data: { name: string; memberIds?: string[]; logo_url?: string | null; is_active?: boolean }) => {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) throw new Error('Não autenticado');
-      
+
       const { data: profile } = await supabase
         .from('users')
         .select('organization_id')
         .eq('id', userData.user.id)
         .single();
-      
+
       if (!profile?.organization_id) throw new Error('Organização não encontrada');
-      
+
       const { data: team, error } = await supabase
         .from('teams')
         .insert({
           name: data.name,
           organization_id: profile.organization_id,
-        })
+          logo_url: data.logo_url || null,
+          is_active: data.is_active ?? true,
+          created_by: userData.user.id,
+        } as any)
         .select()
         .single();
-      
+
       if (error) throw error;
-      
+
       if (data.memberIds && data.memberIds.length > 0) {
-        const membersToInsert = data.memberIds.map(userId => ({
+        const membersToInsert = data.memberIds.map((userId) => ({
           team_id: team.id,
           user_id: userId,
         }));
-        
+
         await supabase.from('team_members').insert(membersToInsert);
       }
-      
-      return team;
+
+      return team as Team;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
@@ -111,18 +128,35 @@ export function useCreateTeam() {
 
 export function useUpdateTeam() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: async ({ id, name, memberIds }: { id: string; name?: string; memberIds?: string[] }) => {
-      if (name) {
+    mutationFn: async ({
+      id,
+      name,
+      memberIds,
+      logo_url,
+      is_active,
+    }: {
+      id: string;
+      name?: string;
+      memberIds?: string[];
+      logo_url?: string | null;
+      is_active?: boolean;
+    }) => {
+      const teamUpdates: Record<string, unknown> = {};
+      if (name !== undefined) teamUpdates.name = name;
+      if (logo_url !== undefined) teamUpdates.logo_url = logo_url;
+      if (is_active !== undefined) teamUpdates.is_active = is_active;
+
+      if (Object.keys(teamUpdates).length > 0) {
         const { error } = await supabase
           .from('teams')
-          .update({ name })
+          .update(teamUpdates as any)
           .eq('id', id);
-        
+
         if (error) throw error;
       }
-      
+
       if (memberIds !== undefined) {
         const normalizedMemberIds = Array.from(new Set(memberIds));
 
@@ -133,23 +167,23 @@ export function useUpdateTeam() {
 
         if (currentMembersError) throw currentMembersError;
 
-        const currentMemberIds = new Set((currentMembers || []).map(member => member.user_id));
+        const currentMemberIds = new Set((currentMembers || []).map((member) => member.user_id));
         const membersToRemove = (currentMembers || []).filter(
-          member => !normalizedMemberIds.includes(member.user_id)
+          (member) => !normalizedMemberIds.includes(member.user_id)
         );
-        const membersToAdd = normalizedMemberIds.filter(userId => !currentMemberIds.has(userId));
+        const membersToAdd = normalizedMemberIds.filter((userId) => !currentMemberIds.has(userId));
 
         if (membersToRemove.length > 0) {
           const { error: removeError } = await supabase
             .from('team_members')
             .delete()
-            .in('id', membersToRemove.map(member => member.id));
+            .in('id', membersToRemove.map((member) => member.id));
 
           if (removeError) throw removeError;
         }
 
         if (membersToAdd.length > 0) {
-          const membersToInsert = membersToAdd.map(userId => ({
+          const membersToInsert = membersToAdd.map((userId) => ({
             team_id: id,
             user_id: userId,
           }));
@@ -161,10 +195,9 @@ export function useUpdateTeam() {
           if (insertError) throw insertError;
         }
 
-        // Sync round_robin_members for queues that use this team
         await syncRoundRobinWithTeam(id, normalizedMemberIds);
       }
-      
+
       return { id };
     },
     onSuccess: () => {
@@ -178,84 +211,63 @@ export function useUpdateTeam() {
   });
 }
 
-/**
- * Sync round_robin_members when a team's membership changes.
- * For queues configured by team, adds new members and removes old ones.
- */
 async function syncRoundRobinWithTeam(teamId: string, newMemberIds: string[]) {
   try {
-    // Find all round_robin_members linked to this team
     const { data: existingRRMembers } = await supabase
       .from('round_robin_members')
       .select('id, round_robin_id, user_id, position, weight')
       .eq('team_id', teamId);
 
-    if (!existingRRMembers || existingRRMembers.length === 0) {
-      // No queues use this team - nothing to sync
-      return;
-    }
+    if (!existingRRMembers || existingRRMembers.length === 0) return;
 
-    // Group by round_robin_id
-    const byQueue = existingRRMembers.reduce((acc, m) => {
-      if (!acc[m.round_robin_id]) acc[m.round_robin_id] = [];
-      acc[m.round_robin_id].push(m);
+    const byQueue = existingRRMembers.reduce((acc, member) => {
+      if (!acc[member.round_robin_id]) acc[member.round_robin_id] = [];
+      acc[member.round_robin_id].push(member);
       return acc;
     }, {} as Record<string, typeof existingRRMembers>);
 
     for (const [roundRobinId, currentMembers] of Object.entries(byQueue)) {
-      const currentUserIds = currentMembers.map(m => m.user_id);
-      
-      // Users to add (in team but not in queue)
-      const toAdd = newMemberIds.filter(uid => !currentUserIds.includes(uid));
-      
-      // Users to remove (in queue but no longer in team)
-      const toRemove = currentMembers.filter(m => !newMemberIds.includes(m.user_id));
+      const currentUserIds = currentMembers.map((member) => member.user_id);
+      const toAdd = newMemberIds.filter((userId) => !currentUserIds.includes(userId));
+      const toRemove = currentMembers.filter((member) => !newMemberIds.includes(member.user_id));
 
-      // Remove members no longer in team
       if (toRemove.length > 0) {
         await supabase
           .from('round_robin_members')
           .delete()
-          .in('id', toRemove.map(m => m.id));
+          .in('id', toRemove.map((member) => member.id));
       }
 
-      // Add new members
       if (toAdd.length > 0) {
-        // Get max position
-        const maxPos = Math.max(...currentMembers.map(m => m.position ?? 0), -1);
+        const maxPos = Math.max(...currentMembers.map((member) => member.position ?? 0), -1);
         const defaultWeight = currentMembers[0]?.weight ?? 10;
 
-        const newMembers = toAdd.map((userId, idx) => ({
+        const newMembers = toAdd.map((userId, index) => ({
           round_robin_id: roundRobinId,
           user_id: userId,
           team_id: teamId,
           weight: defaultWeight,
-          position: maxPos + 1 + idx,
+          position: maxPos + 1 + index,
         }));
 
         await supabase.from('round_robin_members').insert(newMembers);
       }
-
-      if (toAdd.length > 0 || toRemove.length > 0) {
-        console.log(`[sync] Queue ${roundRobinId}: added ${toAdd.length}, removed ${toRemove.length} members`);
-      }
     }
   } catch (err) {
     console.error('Error syncing round robin with team:', err);
-    // Non-blocking: don't fail the team update
   }
 }
 
 export function useDeleteTeam() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
         .from('teams')
         .delete()
         .eq('id', id);
-      
+
       if (error) throw error;
     },
     onSuccess: () => {
@@ -264,6 +276,31 @@ export function useDeleteTeam() {
     },
     onError: (error) => {
       toast.error('Erro ao excluir equipe: ' + error.message);
+    },
+  });
+}
+
+export function useUpdateTeamStatus() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
+      const { data, error } = await supabase
+        .from('teams')
+        .update({ is_active } as any)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as Team;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      toast.success(variables.is_active ? 'Equipe ativada!' : 'Equipe desativada!');
+    },
+    onError: (error) => {
+      toast.error('Erro ao atualizar equipe: ' + error.message);
     },
   });
 }

@@ -23,6 +23,10 @@ function normalizeEmail(email: string) {
   return String(email || '').trim().toLowerCase();
 }
 
+function onlyDigits(value: string | null | undefined) {
+  return String(value || '').replace(/\D/g, '');
+}
+
 function cleanFallbackPlanId(planId: string | null | undefined) {
   if (!planId || planId.endsWith('-fallback')) return null;
   return planId;
@@ -148,8 +152,9 @@ Deno.serve(async (req) => {
     } = body;
 
     const email = normalizeEmail(responsible_email);
-    if (!company_name || !responsible_name || !email) {
-      return new Response(JSON.stringify({ error: 'Campos obrigatorios: nome da empresa, nome e email do responsavel' }), {
+    const responsiblePhoneDigits = onlyDigits(responsible_phone);
+    if (!company_name || !responsible_name || !email || responsiblePhoneDigits.length < 10) {
+      return new Response(JSON.stringify({ error: 'Campos obrigatorios: nome da empresa, nome, email e WhatsApp do responsavel' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

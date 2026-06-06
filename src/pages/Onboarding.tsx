@@ -14,15 +14,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog';
 import { 
   Building2, User, Globe, CheckCircle2, 
   Upload, Loader2, ChevronRight, ChevronLeft, Construction,
   Instagram, Facebook, Youtube, Linkedin, Mail, Scissors,
-  CreditCard, ShieldCheck, ExternalLink, Sparkles
+  CreditCard, ShieldCheck, ExternalLink, Sparkles, X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { maskCNPJ, maskCPF, maskPhone } from '@/lib/masks';
@@ -75,6 +72,123 @@ const fallbackPlans: OnboardingPlan[] = [
   },
 ];
 
+type LegalModalSection = {
+  title: string;
+  eyebrow: string;
+  items: string[];
+};
+
+function buildLegalSections(
+  type: 'privacy' | 'terms',
+  form: Record<string, any>,
+  selectedPlan: OnboardingPlan,
+): LegalModalSection[] {
+  const planLine = `${selectedPlan?.name || 'Plano Vimob'} - ${Number(selectedPlan?.price || 0).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  })}`;
+
+  if (type === 'terms') {
+    return [
+      {
+        eyebrow: 'Uso da plataforma',
+        title: 'Aceite, conta e responsabilidade',
+        items: [
+          'Ao criar o board, acessar o Vimob ou aceitar estes Termos, voce confirma que pode representar a organizacao informada e contratar/usar a plataforma em nome dela.',
+          `A conta sera criada para ${form.company_name || 'a organizacao informada'}, com ${form.responsible_name || 'o responsavel informado'} como administrador inicial.`,
+          'O administrador responde pelos usuarios convidados, permissoes concedidas, dados inseridos, integracoes ativadas, automacoes configuradas e pelo uso correto das credenciais.',
+        ],
+      },
+      {
+        eyebrow: 'Plano escolhido',
+        title: 'Planos, teste e pagamento',
+        items: [
+          `O plano selecionado no onboarding e ${planLine}.`,
+          'O plano Enterprise de R$197 pode iniciar com 7 dias de teste quando essa condicao aparecer no momento da contratacao. Apos o teste, a continuidade depende da regularizacao em Faturamento.',
+          'O plano Master de R$497 exige pagamento para liberacao completa, porque inclui recursos que nao entram no teste gratuito.',
+          'A inadimplencia, fim de trial sem pagamento, chargeback ou falha de cobranca pode colocar o board em pagamento pendente e restringir o acesso as telas necessarias para regularizacao.',
+        ],
+      },
+      {
+        eyebrow: 'Conduta',
+        title: 'Uso permitido e limites',
+        items: [
+          'O Vimob deve ser usado de forma licita, respeitando LGPD, regras de comunicacao, propriedade intelectual, politicas antispam, normas profissionais e direitos de terceiros.',
+          'E proibido tentar acessar dados de outra organizacao, burlar limites, explorar falhas, realizar engenharia reversa, automatizar abuso, sobrecarregar sistemas ou usar a plataforma para fraude/conteudo ilegal.',
+          'A Vimob pode suspender, limitar ou bloquear acessos quando houver risco de seguranca, violacao destes Termos, uso abusivo, exigencia legal ou inadimplencia.',
+        ],
+      },
+      {
+        eyebrow: 'Operacao',
+        title: 'Recursos, integracoes e disponibilidade',
+        items: [
+          'A plataforma pode operar CRM, funis, leads, contatos, WhatsApp, agenda, automacoes, financeiro, site publico, IA, campanhas, relatorios e modulos contratados.',
+          'Integracoes como WhatsApp, Meta, meios de pagamento, mapas, e-mail, telefonia, IA e outros fornecedores dependem de disponibilidade, credenciais, limites e politicas desses terceiros.',
+          'Podem ocorrer indisponibilidades por manutencao, atualizacoes, incidentes, internet, provedores externos ou fatores fora do controle razoavel da Vimob.',
+        ],
+      },
+      {
+        eyebrow: 'Encerramento',
+        title: 'Dados, propriedade e cancelamento',
+        items: [
+          'A plataforma, marca, codigo, fluxos, telas, documentacao e recursos da Vimob pertencem a Vimob ou seus licenciantes.',
+          'Os dados da organizacao, leads, clientes, contatos, mensagens, arquivos e configuracoes pertencem ou sao de responsabilidade da empresa cliente, respeitado o tratamento necessario para operar o servico.',
+          'Em cancelamento, inadimplencia prolongada ou encerramento, o acesso pode ser bloqueado e os dados podem ser retidos ou excluidos conforme contrato, politica de retencao e obrigacoes legais.',
+        ],
+      },
+    ];
+  }
+
+  return [
+    {
+      eyebrow: 'Dados do onboarding',
+      title: 'Informacoes que coletamos para criar o board',
+      items: [
+        `Perfil de atuacao: ${form.segment || 'nao informado'}.`,
+        `Responsavel: ${form.responsible_name || 'nao informado'}, e-mail ${form.responsible_email || 'nao informado'}, WhatsApp ${form.responsible_phone || 'nao informado'}${form.responsible_cpf ? `, CPF ${form.responsible_cpf}` : ''}.`,
+        `Organizacao: ${form.company_name || 'nao informada'}${form.cnpj ? `, CNPJ ${form.cnpj}` : ''}${form.creci ? `, CRECI ${form.creci}` : ''}.`,
+        'Tambem podemos tratar telefone, e-mail, endereco, cidade, bairro, numero, complemento, logotipo, titulo de site, dominio proprio e redes sociais informadas no onboarding.',
+      ],
+    },
+    {
+      eyebrow: 'Uso dos dados',
+      title: 'Por que esses dados entram no sistema',
+      items: [
+        'Usamos os dados para criar a organizacao, configurar o administrador, liberar modulos, registrar o aceite legal, operar o trial, gerar cobranca e prestar suporte.',
+        'WhatsApp e telefone sao usados para identificacao, suporte, notificacoes operacionais, contato sobre onboarding, faturamento, seguranca e integracoes de atendimento quando ativadas.',
+        'Dados de plano, valor, status de assinatura, trial, pagamento e faturamento sao usados para liberar ou restringir recursos conforme a contratacao.',
+      ],
+    },
+    {
+      eyebrow: 'Dados dentro da plataforma',
+      title: 'Informacoes que voce e sua equipe podem inserir depois',
+      items: [
+        'A organizacao pode inserir leads, clientes, contatos, mensagens, anotacoes, tarefas, agenda, arquivos, imoveis, propostas, contratos, funis, automacoes, relatorios e configuracoes.',
+        'Esses dados sao tratados para executar as funcionalidades contratadas, sincronizar integracoes, distribuir atendimento, registrar historico e gerar indicadores.',
+        'A empresa cliente e controladora dos dados que insere sobre seus clientes/leads; a Vimob atua principalmente como operadora, seguindo as instrucoes e configuracoes da organizacao.',
+      ],
+    },
+    {
+      eyebrow: 'Seguranca',
+      title: 'Protecao, logs e compartilhamentos',
+      items: [
+        'Podemos registrar IP, navegador, dispositivo, data/hora de acesso, eventos de seguranca, logs de uso e auditoria para proteger contas e investigar incidentes.',
+        'Compartilhamos dados com fornecedores necessarios para infraestrutura, banco de dados, autenticacao, armazenamento, pagamentos, mensageria, suporte, analiticos e integracoes ativadas.',
+        'Nao vendemos dados pessoais. Dados agregados ou anonimizados podem ser usados para melhoria de produto, metricas e estabilidade.',
+      ],
+    },
+    {
+      eyebrow: 'LGPD',
+      title: 'Direitos, retencao e contato',
+      items: [
+        'Titulares podem solicitar confirmacao de tratamento, acesso, correcao, portabilidade, anonimizacao, eliminacao, informacoes sobre compartilhamento e revisao de decisoes automatizadas, conforme a LGPD.',
+        'Mantemos dados pelo tempo necessario para prestar o servico, cumprir obrigacoes legais, resolver disputas, prevenir fraude, preservar registros e executar o contrato.',
+        'Solicitacoes de privacidade devem ser enviadas ao canal oficial da Vimob ou a empresa cliente quando ela for a controladora direta do relacionamento com o titular.',
+      ],
+    },
+  ];
+}
+
 export default function Onboarding() {
   const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
@@ -106,6 +220,7 @@ export default function Onboarding() {
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [legalDialog, setLegalDialog] = useState<'privacy' | 'terms' | null>(null);
+  const [legalPageIndex, setLegalPageIndex] = useState(0);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [requiresPayment, setRequiresPayment] = useState(false);
 
@@ -190,6 +305,25 @@ export default function Onboarding() {
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) || plans[0] || fallbackPlans[0];
   const selectedPlanHasTrial = Boolean(selectedPlan?.trial_enabled) && Number(selectedPlan?.trial_days || 0) > 0;
   const selectedPlanPrice = Number(selectedPlan?.price || 0);
+  const responsiblePhoneDigits = form.responsible_phone.replace(/\D/g, '');
+  const legalSections = legalDialog ? buildLegalSections(legalDialog, form, selectedPlan) : [];
+  const currentLegalSection = legalSections[legalPageIndex] || legalSections[0];
+
+  const openLegalDialog = (type: 'privacy' | 'terms') => {
+    setLegalDialog(type);
+    setLegalPageIndex(0);
+  };
+
+  const closeLegalDialog = () => {
+    setLegalDialog(null);
+    setLegalPageIndex(0);
+  };
+
+  const finishLegalDialog = () => {
+    if (legalDialog === 'privacy') setAcceptedPrivacy(true);
+    if (legalDialog === 'terms') setAcceptedTerms(true);
+    closeLegalDialog();
+  };
 
   const handleFileUpload = async (file: File) => {
     const reader = new FileReader();
@@ -243,7 +377,7 @@ export default function Onboarding() {
   };
 
   const handleNext = () => {
-    if (step === 2 && (!form.responsible_name || !form.responsible_email)) {
+    if (step === 2 && (!form.responsible_name || !form.responsible_email || responsiblePhoneDigits.length < 10)) {
       toast.error('Preencha os campos obrigatórios');
       return;
     }
@@ -265,6 +399,12 @@ export default function Onboarding() {
   const handleBack = () => setStep((prev) => prev - 1);
 
   const handleSubmit = async () => {
+    if (responsiblePhoneDigits.length < 10) {
+      toast.error('WhatsApp é obrigatório');
+      setStep(2);
+      return;
+    }
+
     if (!acceptedPrivacy || !acceptedTerms) {
       toast.error('Aceite a Politica de Privacidade e os Termos de Uso para enviar');
       setStep(7);
@@ -474,8 +614,17 @@ export default function Onboarding() {
                       <Input id="responsible_cpf" value={form.responsible_cpf} onChange={(e) => updateField('responsible_cpf', maskCPF(e.target.value))} placeholder="000.000.000-00" className="h-10 text-sm rounded-lg" />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="responsible_phone" className="text-xs">WhatsApp</Label>
-                      <Input id="responsible_phone" value={form.responsible_phone} onChange={(e) => updateField('responsible_phone', maskPhone(e.target.value))} placeholder="(00) 00000-0000" className="h-10 text-sm rounded-lg" />
+                      <Label htmlFor="responsible_phone" className="text-xs">WhatsApp *</Label>
+                      <Input
+                        id="responsible_phone"
+                        required
+                        inputMode="tel"
+                        aria-required="true"
+                        value={form.responsible_phone}
+                        onChange={(e) => updateField('responsible_phone', maskPhone(e.target.value))}
+                        placeholder="(00) 00000-0000"
+                        className="h-10 text-sm rounded-lg"
+                      />
                     </div>
                   </div>
                 </div>
@@ -598,24 +747,6 @@ export default function Onboarding() {
                     )}
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="primary_color" className="text-xs">Cor principal da marca</Label>
-                    <div className="flex gap-2">
-                      <input 
-                        id="primary_color" 
-                        type="color" 
-                        className="w-12 h-10 p-1 cursor-pointer bg-transparent border rounded-lg" 
-                        value={form.primary_color} 
-                        onChange={(e) => updateField('primary_color', e.target.value)} 
-                      />
-                      <Input 
-                        value={form.primary_color} 
-                        onChange={(e) => updateField('primary_color', e.target.value)} 
-                        className="font-mono h-10 text-sm rounded-lg" 
-                        placeholder="#000000"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
                     <Label htmlFor="site_title" className="text-xs">Título do site</Label>
                     <Input id="site_title" value={form.site_title} onChange={(e) => updateField('site_title', e.target.value)} placeholder="Ex: Melhores Imóveis em São Paulo" className="h-10 text-sm rounded-lg" />
                   </div>
@@ -670,8 +801,10 @@ export default function Onboarding() {
                         key={plan.id}
                         type="button"
                         onClick={() => setSelectedPlanId(plan.id)}
-                        className={`relative rounded-xl border p-4 text-left transition-all hover:border-primary/60 ${
-                          isSelected ? 'border-primary bg-primary/5' : 'border-border bg-card'
+                        className={`relative rounded-xl p-4 text-left transition-all ${
+                          isSelected
+                            ? 'bg-primary text-primary-foreground shadow-[0_16px_34px_rgba(255,59,38,0.22)]'
+                            : 'bg-[#171717] text-foreground hover:bg-[#1f1f1f]'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-4">
@@ -679,30 +812,34 @@ export default function Onboarding() {
                             <div className="flex flex-wrap items-center gap-2">
                               <h3 className="text-base font-semibold">{plan.name}</h3>
                               {hasTrial ? (
-                                <Badge variant="secondary">{plan.trial_days || 7} dias de teste</Badge>
+                                <Badge className={isSelected ? 'border-0 bg-white/20 text-white hover:bg-white/25' : 'border-0 bg-[#2a2a2a] text-zinc-100'}>
+                                  {plan.trial_days || 7} dias de teste
+                                </Badge>
                               ) : (
-                                <Badge variant="outline">Pagamento direto</Badge>
+                                <Badge className={isSelected ? 'border-0 bg-white/20 text-white hover:bg-white/25' : 'border-0 bg-[#2a2a2a] text-zinc-100'}>
+                                  Pagamento direto
+                                </Badge>
                               )}
                             </div>
-                            <p className="text-xs leading-relaxed text-muted-foreground">
+                            <p className={`text-xs leading-relaxed ${isSelected ? 'text-white/85' : 'text-muted-foreground'}`}>
                               {plan.description ||
                                 (hasTrial
                                   ? 'Teste liberado automaticamente. Depois do periodo, regularize em faturamento.'
                                   : 'Recursos completos liberados apos confirmacao do pagamento.')}
                             </p>
                           </div>
-                          {isSelected && <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" />}
+                          {isSelected && <CheckCircle2 className="h-5 w-5 shrink-0 text-white" />}
                         </div>
                         <div className="mt-4 flex items-end justify-between gap-3">
                           <div>
                             <p className="text-2xl font-bold">
                               {Number(plan.price || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                             </p>
-                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            <p className={`text-[10px] uppercase tracking-wider ${isSelected ? 'text-white/75' : 'text-muted-foreground'}`}>
                               {plan.billing_cycle === 'yearly' ? 'por ano' : 'por mes'}
                             </p>
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <div className={`flex items-center gap-2 text-xs ${isSelected ? 'text-white/85' : 'text-muted-foreground'}`}>
                             {isMaster ? <Sparkles className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
                             {hasTrial ? 'Aprovacao automatica' : 'Checkout obrigatorio'}
                           </div>
@@ -744,7 +881,7 @@ export default function Onboarding() {
                       />
                       <span className="flex-1 leading-relaxed">
                         Li e concordo com a{' '}
-                        <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => setLegalDialog('privacy')}>
+                        <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => openLegalDialog('privacy')}>
                           Politica de Privacidade
                         </button>
                         .
@@ -758,7 +895,7 @@ export default function Onboarding() {
                       />
                       <span className="flex-1 leading-relaxed">
                         Li e concordo com os{' '}
-                        <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => setLegalDialog('terms')}>
+                        <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => openLegalDialog('terms')}>
                           Termos de Uso
                         </button>
                         .
@@ -839,40 +976,102 @@ export default function Onboarding() {
         </div>
       </div>
 
-      <Dialog open={!!legalDialog} onOpenChange={(open) => !open && setLegalDialog(null)}>
-        <DialogContent className="max-w-[92vw] sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{legalDialog === 'terms' ? 'Termos de Uso' : 'Politica de Privacidade'}</DialogTitle>
-            <DialogDescription>Resumo para leitura rapida. Versao {LEGAL_VERSION}.</DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="h-[55vh] pr-4">
-            {legalDialog === 'terms' ? (
-              <div className="space-y-4 text-sm leading-7 text-muted-foreground">
-                <p>Ao usar a Vimob, voce concorda em manter dados corretos, proteger credenciais e responder pelos usuarios e integracoes da sua organizacao.</p>
-                <p>O plano Enterprise de R$197 pode iniciar com 7 dias de teste. Depois do periodo, a continuidade depende de regularizacao em faturamento.</p>
-                <p>O plano Master de R$497 exige pagamento para liberacao completa, pois inclui recursos que nao entram no teste gratuito.</p>
-                <p>A plataforma pode limitar ou suspender acesso por inadimplencia, risco de seguranca, uso abusivo, violacao dos termos ou exigencia legal.</p>
-                <p>Integracoes externas, como pagamentos, WhatsApp, Meta e IA, dependem das regras e disponibilidade dos respectivos fornecedores.</p>
+      <Dialog open={!!legalDialog} onOpenChange={(open) => !open && closeLegalDialog()}>
+        <DialogContent className="flex max-h-[82vh] w-[calc(100vw-24px)] max-w-[620px] flex-col overflow-hidden rounded-[24px] border-0 bg-[#090909]/90 p-0 text-white shadow-[0_24px_80px_rgba(0,0,0,0.62)] backdrop-blur-2xl sm:max-w-[620px] [&>button.absolute.right-4.top-4]:hidden">
+          <div className="border-b border-white/10 px-5 py-4 sm:px-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-white">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
+                    Versao {LEGAL_VERSION}
+                  </p>
+                  <h3 className="mt-1 text-lg font-bold leading-tight text-white">
+                    {legalDialog === 'terms' ? 'Termos de Uso' : 'Politica de Privacidade'}
+                  </h3>
+                  <p className="mt-1 text-xs leading-relaxed text-white/55">
+                    Parte {legalPageIndex + 1} de {legalSections.length}
+                  </p>
+                </div>
               </div>
-            ) : (
-              <div className="space-y-4 text-sm leading-7 text-muted-foreground">
-                <p>A Vimob trata dados cadastrais, dados de uso, registros tecnicos, informacoes de faturamento e dados comerciais inseridos pela organizacao.</p>
-                <p>Os dados sao usados para criar contas, operar a plataforma, prestar suporte, processar cobrancas, manter seguranca e cumprir obrigacoes legais.</p>
-                <p>Podemos compartilhar dados com fornecedores necessarios para infraestrutura, banco de dados, autenticacao, pagamentos, mensageria, suporte e integracoes ativadas.</p>
-                <p>Seguimos a LGPD e disponibilizamos canais para direitos do titular, como acesso, correcao, eliminacao, portabilidade e informacoes sobre compartilhamento.</p>
-                <p>Nao vendemos dados pessoais. Dados agregados ou anonimizados podem ser usados para melhoria de produto e estatisticas internas.</p>
+              <button
+                type="button"
+                onClick={closeLegalDialog}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/8 text-white/70 transition hover:bg-white/14 hover:text-white"
+                aria-label="Fechar"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${((legalPageIndex + 1) / Math.max(legalSections.length, 1)) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {currentLegalSection && (
+            <ScrollArea className="min-h-0 flex-1 px-5 py-5 sm:px-6">
+              <div className="space-y-5 pr-2">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-primary">
+                    {currentLegalSection.eyebrow}
+                  </p>
+                  <h4 className="mt-2 text-xl font-bold leading-tight text-white">
+                    {currentLegalSection.title}
+                  </h4>
+                </div>
+                <div className="space-y-3">
+                  {currentLegalSection.items.map((item, index) => (
+                    <div key={`${currentLegalSection.title}-${index}`} className="rounded-2xl bg-white/[0.055] p-4 text-sm leading-6 text-white/78">
+                      {item}
+                    </div>
+                  ))}
+                </div>
               </div>
-            )}
-          </ScrollArea>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button variant="outline" className="flex-1" asChild>
-              <Link to={legalDialog === 'terms' ? '/termos' : '/privacidade'} target="_blank">
-                Abrir pagina completa
-              </Link>
-            </Button>
-            <Button className="flex-1" onClick={() => setLegalDialog(null)}>
-              Continuar
-            </Button>
+            </ScrollArea>
+          )}
+
+          <div className="border-t border-white/10 px-5 py-4 sm:px-6">
+            <div className="mb-3 flex justify-center gap-1.5">
+              {legalSections.map((section, index) => (
+                <button
+                  key={section.title}
+                  type="button"
+                  onClick={() => setLegalPageIndex(index)}
+                  className={`h-1.5 rounded-full transition-all ${index === legalPageIndex ? 'w-7 bg-primary' : 'w-2 bg-white/18 hover:bg-white/30'}`}
+                  aria-label={`Ir para parte ${index + 1}`}
+                />
+              ))}
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr]">
+              <Button variant="outline" className="border-white/12 bg-white/5 text-white hover:bg-white/10 hover:text-white" asChild>
+                <Link to={legalDialog === 'terms' ? '/termos' : '/privacidade'} target="_blank">
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Pagina completa
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                className="text-white/70 hover:bg-white/8 hover:text-white"
+                onClick={legalPageIndex > 0 ? () => setLegalPageIndex((current) => current - 1) : closeLegalDialog}
+              >
+                {legalPageIndex > 0 ? 'Anterior' : 'Pular'}
+              </Button>
+              {legalPageIndex < legalSections.length - 1 ? (
+                <Button className="bg-primary text-white hover:bg-primary/90" onClick={() => setLegalPageIndex((current) => current + 1)}>
+                  Proximo
+                  <ChevronRight className="ml-2 h-4 w-4" />
+                </Button>
+              ) : (
+                <Button className="bg-primary text-white hover:bg-primary/90" onClick={finishLegalDialog}>
+                  Concluir e aceitar
+                </Button>
+              )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>

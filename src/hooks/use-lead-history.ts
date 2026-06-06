@@ -149,6 +149,7 @@ function buildLabel(type: string, metadata: Record<string, any>, source: 'timeli
       return 'Responsável alterado';
     }
     case 'lead_reentry': {
+      if (metadata?.entry_type === 'manual_reentry') return 'Lead reentrou';
       if (metadata?.webhook_name) return `Lead reentrou via webhook "${metadata.webhook_name}"`;
       if (metadata?.source === 'whatsapp') return 'Lead reentrou via WhatsApp';
       return `Lead reentrou via ${metadata?.source || 'sistema'}`;
@@ -377,6 +378,7 @@ export function useLeadHistory(leadId: string | null) {
         .filter((a: any) => {
           // Always include activity-only types
           if (ACTIVITY_ONLY_TYPES.has(a.type)) return true;
+          if (a.type === 'lead_reentry' && a.metadata?.entry_type === 'manual_reentry') return true;
           // Skip if timeline already has authority over this type
           if (TIMELINE_AUTHORITY_TYPES.has(a.type) && timelineTypesPresent.has(a.type)) return false;
           // Also map stage_change → stage_changed
