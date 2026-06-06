@@ -40,8 +40,8 @@
             for (let k of keys) await caches.delete(k);
           }
           
-          // Preservar apenas tokens de autenticação essenciais
-          const authKeysToKeep = ['sb-iemalzlfnbouobyjwlwi-auth-token', 'impersonate_session'];
+          // Preservar tokens de autenticação e chaves do próprio versionamento.
+          const authKeysToKeep = ['sb-iemalzlfnbouobyjwlwi-auth-token', 'impersonate_session', VERSION_KEY, RELOAD_KEY];
           const keysToRemove = [];
           
           for (let i = 0; i < localStorage.length; i++) {
@@ -61,10 +61,15 @@
           }
           sessionKeysToRemove.forEach(k => sessionStorage.removeItem(k));
           
-          // Use a timestamp to bypass any server-side or ISP caching
+          // Usa a versão como cache-buster estável para evitar loops por timestamp.
           const url = new URL(window.location.href);
+          const refreshVersion = String(nextVersion || Date.now());
           sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
-          url.searchParams.set('v_refresh', nextVersion || Date.now());
+          if (url.searchParams.get('v_refresh') === refreshVersion) {
+            window.location.reload();
+            return;
+          }
+          url.searchParams.set('v_refresh', refreshVersion);
           window.location.replace(url.toString());
         }
 
