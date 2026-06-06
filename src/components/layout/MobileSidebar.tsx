@@ -53,6 +53,7 @@ interface NavItem {
   path: string;
   module?: string;
   permission?: string;
+  anyPermissions?: string[];
   adminOnly?: boolean;
   children?: NavItem[];
 }
@@ -94,7 +95,7 @@ const allNavItems: NavItem[] = [
   { icon: MapPin, labelKey: 'coverage', path: '/coverage', module: 'coverage' },
   { icon: UserCheck, labelKey: 'telecomCustomers', path: '/telecom/customers', module: 'telecom' },
   // Admin modules
-  { icon: Shuffle, labelKey: 'crmManagement', path: '/crm/management', module: 'crm', adminOnly: true },
+  { icon: Shuffle, labelKey: 'crmManagement', path: '/crm/management', module: 'crm', anyPermissions: ['settings_teams', 'settings_users', 'settings_pipelines'] },
   { icon: Calendar, labelKey: 'schedule', path: '/agenda', module: 'agenda' },
   { icon: Zap, labelKey: 'automations', path: '/automations', module: 'automations' },
   { 
@@ -157,6 +158,7 @@ export function MobileSidebar({ externalOpen, onExternalOpenChange }: MobileSide
         
         // Permission check
         if (item.permission && !hasPermission(item.permission)) return false;
+        if (item.anyPermissions && !item.anyPermissions.some(permission => hasPermission(permission))) return false;
         
         // Segment specific rules
         if (item.path === '/crm/contacts' && organization?.segment === 'telecom') return false;
@@ -176,7 +178,7 @@ export function MobileSidebar({ externalOpen, onExternalOpenChange }: MobileSide
     };
 
     return filterItems(allNavItems);
-  }, [allNavItems, hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, modulesLoading]);
+  }, [hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, modulesLoading]);
 
 
   // Filter bottom items based on user role and modules

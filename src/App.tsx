@@ -602,7 +602,7 @@ function AppRoutes() {
               path="/crm/management"
               element={
                 <ProtectedRoute>
-                  <AdminRoute>
+                  <AdminRoute allowedPermissions={['settings_teams', 'settings_users', 'settings_pipelines']}>
                     <CRMManagement />
                   </AdminRoute>
                 </ProtectedRoute>

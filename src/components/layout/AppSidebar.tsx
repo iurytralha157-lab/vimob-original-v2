@@ -29,6 +29,7 @@ interface NavItem {
   path: string;
   module?: string;
   permission?: string;
+  anyPermissions?: string[];
   adminOnly?: boolean;
   children?: NavItem[];
 }
@@ -144,7 +145,7 @@ const allNavItems: NavItem[] = [{
   labelKey: 'crmManagement',
   path: '/crm/management',
   module: 'crm',
-  adminOnly: true
+  anyPermissions: ['settings_teams', 'settings_users', 'settings_pipelines']
 }, {
   icon: Calendar,
   labelKey: 'schedule',
@@ -300,6 +301,7 @@ export const AppSidebar = React.memo(function AppSidebar() {
         
         // Permission check
         if (item.permission && !hasPermission(item.permission)) return false;
+        if (item.anyPermissions && !item.anyPermissions.some(permission => hasPermission(permission))) return false;
         
         // Segment specific rules
         if (item.path === '/crm/contacts' && organization?.segment === 'telecom') return false;
@@ -319,7 +321,7 @@ export const AppSidebar = React.memo(function AppSidebar() {
     };
 
     return filterItems(allNavItems);
-  }, [allNavItems, hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, organization?.subscription_status, modulesLoading, isBillingBlocked]);
+  }, [hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, organization?.subscription_status, modulesLoading, isBillingBlocked]);
 
 
   // Filter bottom items based on user role and modules
