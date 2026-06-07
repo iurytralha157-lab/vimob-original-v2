@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 // VAPID public key - confirm this matches your server-side VAPID_PUBLIC_KEY
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWjUfBw5nc02KFFL6pr1jM51bHv0CllEuy5ypnldeYLMhYSbQbKlWHK7T9VK1CF2xVgH_9HOc3tavj0iuT1mEzA'; 
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || 'BEQcTiHMHjQUgY_z4Dqd_rXDszAWINm5AaKy3rDOEDqISjT8T_1wXwlzanhwiIQBoS222rwRGC2yOet0bz3HejM'; 
 
 
 // Converte base64 URL-safe para Uint8Array (necessário para applicationServerKey)
@@ -46,6 +46,21 @@ function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   return outputArray.buffer.slice(0, outputArray.byteLength);
 }
 
+function arrayBufferToBase64Url(buffer: ArrayBuffer | null | undefined): string | null {
+  if (!buffer) return null;
+
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  return window.btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
 interface WebPushState {
   isSupported: boolean;
   isSubscribed: boolean;
@@ -80,6 +95,18 @@ export function useWebPush() {
     try {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await (registration as any).pushManager.getSubscription();
+
+      if (subscription) {
+        const currentKey = arrayBufferToBase64Url(urlBase64ToUint8Array(VAPID_PUBLIC_KEY));
+        const subscriptionKey = arrayBufferToBase64Url(subscription.options?.applicationServerKey);
+
+        if (currentKey && subscriptionKey && currentKey !== subscriptionKey) {
+          console.log('[WebPush] Subscription usa VAPID antigo; removendo para reinscrever.');
+          await subscription.unsubscribe();
+          return null;
+        }
+      }
+
       return subscription;
     } catch (error) {
       console.error('[WebPush] Erro ao verificar subscription:', error);

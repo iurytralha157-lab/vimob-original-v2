@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Camera, Crown, Loader2, UserPlus, X } from 'lucide-react';
+import { Camera, Clock, Crown, Loader2, UserPlus, X } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import { useUsers } from '@/hooks/use-users';
 import { useCreateTeam, useUpdateTeam, Team } from '@/hooks/use-teams';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { MemberAvailabilityDialog } from './MemberAvailabilityDialog';
 
 interface TeamDialogProps {
   open: boolean;
@@ -28,6 +29,11 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [selectedMembers, setSelectedMembers] = useState<MemberSelection[]>([]);
+  const [availabilityMember, setAvailabilityMember] = useState<{
+    id: string;
+    name: string;
+    avatar?: string | null;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -71,6 +77,7 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
 
   const isMemberSelected = (userId: string) => selectedMembers.some((member) => member.userId === userId);
   const getMemberSelection = (userId: string) => selectedMembers.find((member) => member.userId === userId);
+  const getSavedTeamMember = (userId: string) => team?.members?.find((member) => member.user_id === userId);
 
   const toggleMember = (userId: string) => {
     setSelectedMembers((prev) => {
@@ -89,6 +96,17 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
   const uploadLogo = async () => {
     if (!logoFile) return logoUrl;
 
+    const maxLogoSize = 5 * 1024 * 1024;
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+
+    if (!allowedTypes.includes(logoFile.type)) {
+      throw new Error('Tipo de imagem nao permitido. Use JPG, PNG, WEBP, GIF ou SVG.');
+    }
+
+    if (logoFile.size > maxLogoSize) {
+      throw new Error('Imagem muito grande. O limite para logo da equipe e 5MB.');
+    }
+
     const { data: authUser } = await supabase.auth.getUser();
     if (!authUser.user) throw new Error('Usuario nao autenticado');
 
@@ -100,12 +118,14 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
 
     if (!profile?.organization_id) throw new Error('Organizacao nao encontrada');
 
-    const extension = logoFile.name.split('.').pop() || 'webp';
-    const path = `orgs/${profile.organization_id}/teams/${team?.id || crypto.randomUUID()}.${extension}`;
+    const extension = logoFile.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'webp';
+    const teamFolder = team?.id || 'new';
+    const fileName = `${Date.now()}-${crypto.randomUUID()}.${extension}`;
+    const path = `organizations/${profile.organization_id}/teams/${teamFolder}/${fileName}`;
 
     const { error } = await supabase.storage.from('logos').upload(path, logoFile, {
       cacheControl: '3600',
-      upsert: true,
+      upsert: false,
     });
 
     if (error) throw error;
@@ -145,7 +165,8 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
       onOpenChange(false);
     } catch (error) {
       console.error('Error saving team:', error);
-      toast.error('Erro ao salvar equipe');
+      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      toast.error(`Erro ao salvar equipe: ${message}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -208,26 +229,27 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
             </div>
 
             <ScrollArea className="min-h-[220px] flex-1 pr-2">
-              <div className="space-y-1 pb-1">
+              <div className="space-y-0.5 pb-1">
                 {users.map((user) => {
                   const isSelected = isMemberSelected(user.id);
                   const memberData = getMemberSelection(user.id);
+                  const savedMember = getSavedTeamMember(user.id);
 
                   return (
                     <div
                       key={user.id}
-                      className={`flex items-center gap-3 rounded-xl px-3 py-1.5 transition ${
+                      className={`flex items-center gap-2 rounded-xl px-2.5 py-1 transition ${
                         isSelected ? 'bg-primary/14' : 'bg-white/8 hover:bg-white/12'
                       }`}
                     >
                       <button
                         type="button"
-                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                         onClick={() => toggleMember(user.id)}
                       >
-                        <Avatar className="h-9 w-9">
+                        <Avatar className="h-8 w-8">
                           <AvatarImage src={user.avatar_url || undefined} />
-                          <AvatarFallback className="bg-primary text-xs text-primary-foreground">
+                          <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
                             {getInitials(user.name || '?')}
                           </AvatarFallback>
                         </Avatar>
@@ -245,7 +267,23 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
                       </button>
 
                       {isSelected && (
-                        <div className="flex shrink-0 items-center gap-2 rounded-lg bg-black/20 px-2.5 py-1.5">
+                        <div className="flex shrink-0 items-center gap-1.5 rounded-lg bg-black/20 px-2 py-1">
+                          {savedMember && (
+                            <button
+                              type="button"
+                              className="flex h-8 w-8 items-center justify-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-primary"
+                              title="Editar escala"
+                              onClick={() =>
+                                setAvailabilityMember({
+                                  id: savedMember.id,
+                                  name: user.name || 'Usuario',
+                                  avatar: user.avatar_url,
+                                })
+                              }
+                            >
+                              <Clock className="h-4 w-4" />
+                            </button>
+                          )}
                           <div className="flex items-center gap-1.5 text-xs text-white/70">
                             <Crown className={`h-3.5 w-3.5 ${memberData?.isLeader ? 'text-amber-400' : 'text-white/35'}`} />
                             Lider
@@ -280,6 +318,17 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
           </div>
         </div>
       </DialogContent>
+      {availabilityMember && (
+        <MemberAvailabilityDialog
+          open={!!availabilityMember}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setAvailabilityMember(null);
+          }}
+          teamMemberId={availabilityMember.id}
+          memberName={availabilityMember.name}
+          memberAvatar={availabilityMember.avatar}
+        />
+      )}
     </Dialog>
   );
 }

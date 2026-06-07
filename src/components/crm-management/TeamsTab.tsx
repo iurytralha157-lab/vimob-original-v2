@@ -182,7 +182,7 @@ export function TeamsTab() {
 
                       <TableCell>
                         {members.length > 0 ? (
-                          <div className="flex max-h-[92px] max-w-[520px] flex-wrap gap-1.5 overflow-y-auto overflow-x-hidden pr-1">
+                          <div className="flex max-w-[560px] items-center gap-0.5 overflow-x-auto overflow-y-hidden py-1 pr-1 [scrollbar-width:thin]">
                             {members.map((member) => {
                               const availabilitySummary = formatAvailabilitySummary(getMemberAvailability(member.id));
 
@@ -197,15 +197,15 @@ export function TeamsTab() {
                                         openAvailability(member);
                                       }}
                                     >
-                                      <Avatar className="h-10 w-10 border-2 border-background shadow-sm">
+                                      <Avatar className="h-8 w-8 border border-background shadow-sm">
                                         <AvatarImage src={member.user?.avatar_url || undefined} />
-                                        <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                                        <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
                                           {getInitials(member.user?.name || '?')}
                                         </AvatarFallback>
                                       </Avatar>
                                       {member.is_leader && (
-                                        <span className="absolute -right-0.5 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black text-amber-400 shadow-sm ring-1 ring-amber-400/40">
-                                          <Crown className="h-2.5 w-2.5 fill-amber-400/25" />
+                                        <span className="absolute -right-0.5 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black text-amber-400 shadow-sm ring-1 ring-amber-400/40">
+                                          <Crown className="h-2 w-2 fill-amber-400/25" />
                                         </span>
                                       )}
                                     </button>

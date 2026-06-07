@@ -78,6 +78,7 @@ export default function Contacts() {
     setDatePreset,
     customDateRange,
     setCustomDateRange,
+    setTeamId,
     userId: selectedAssignee,
     setUserId: setSelectedAssignee,
     tagId: selectedTag,
@@ -86,6 +87,12 @@ export default function Contacts() {
     setDealStatus: setSelectedDealStatus,
     source: selectedSource,
     setSource: setSelectedSource,
+    campaignId,
+    setCampaignId,
+    adSetId,
+    setAdSetId,
+    adId,
+    setAdId,
     searchQuery: search,
     setSearchQuery: setSearch,
     clearFilters,
@@ -128,19 +135,23 @@ export default function Contacts() {
 
   const filters: ContactListFilters = {
     search: deferredSearch || undefined,
-    pipelineId: !deferredSearch && selectedPipeline !== "all" ? selectedPipeline : undefined,
-    stageId: !deferredSearch && selectedStage !== "all" ? selectedStage : undefined,
+    teamId: sharedFilters.teamId || undefined,
+    pipelineId: selectedPipeline !== "all" ? selectedPipeline : undefined,
+    stageId: selectedStage !== "all" ? selectedStage : undefined,
     assigneeId:
-      !deferredSearch && selectedAssignee !== "all" && selectedAssignee !== "unassigned" ? selectedAssignee : undefined,
-    unassigned: !deferredSearch && selectedAssignee === "unassigned",
-    tagId: !deferredSearch && selectedTag !== "all" ? selectedTag : undefined,
-    source: !deferredSearch && selectedSource !== "all" ? selectedSource : undefined,
+      selectedAssignee && selectedAssignee !== "all" && selectedAssignee !== "unassigned" ? selectedAssignee : undefined,
+    unassigned: selectedAssignee === "unassigned",
+    tagId: selectedTag && selectedTag !== "all" ? selectedTag : undefined,
+    source: selectedSource && selectedSource !== "all" ? selectedSource : undefined,
+    campaignId: campaignId || undefined,
+    adSetId: adSetId || undefined,
+    adId: adId || undefined,
     dealStatus:
-      !deferredSearch && effectiveDealStatus !== "all"
+      effectiveDealStatus && effectiveDealStatus !== "all"
         ? (effectiveDealStatus as "open" | "won" | "lost")
         : undefined,
-    createdFrom: !deferredSearch && dateRange ? dateRange.from.toISOString() : undefined,
-    createdTo: !deferredSearch && dateRange ? dateRange.to.toISOString() : undefined,
+    createdFrom: dateRange ? dateRange.from.toISOString() : undefined,
+    createdTo: dateRange ? dateRange.to.toISOString() : undefined,
     sortBy,
     sortDir,
     page,
@@ -193,12 +204,16 @@ export default function Contacts() {
       const count = await exportContactsFiltered({
         filters: {
           search: deferredSearch || undefined,
+          teamId: sharedFilters.teamId || undefined,
           pipelineId: selectedPipeline !== "all" ? selectedPipeline : undefined,
           stageId: selectedStage !== "all" ? selectedStage : undefined,
           assigneeId: selectedAssignee !== "all" && selectedAssignee !== "unassigned" ? selectedAssignee : undefined,
           unassigned: selectedAssignee === "unassigned",
           tagId: selectedTag !== "all" ? selectedTag : undefined,
           source: selectedSource !== "all" ? selectedSource : undefined,
+          campaignId: campaignId || undefined,
+          adSetId: adSetId || undefined,
+          adId: adId || undefined,
           dealStatus: effectiveDealStatus !== "all" ? effectiveDealStatus : undefined,
           createdFrom: dateRange ? dateRange.from.toISOString() : undefined,
           createdTo: dateRange ? dateRange.to.toISOString() : undefined,
@@ -321,17 +336,17 @@ export default function Contacts() {
               customDateRange={customDateRange}
               onCustomDateRangeChange={setCustomDateRange}
               teamId={sharedFilters.teamId}
-              onTeamChange={() => {}}
+              onTeamChange={setTeamId}
               userId={selectedAssignee}
               onUserChange={setSelectedAssignee}
               source={selectedSource}
               onSourceChange={setSelectedSource}
               campaignId={sharedFilters.campaignId}
-              onCampaignChange={() => {}}
+              onCampaignChange={setCampaignId}
               adSetId={sharedFilters.adSetId}
-              onAdSetChange={() => {}}
+              onAdSetChange={setAdSetId}
               adId={sharedFilters.adId}
-              onAdChange={() => {}}
+              onAdChange={setAdId}
               tagId={selectedTag}
               onTagChange={setSelectedTag}
               dealStatus={effectiveDealStatus}
@@ -438,17 +453,17 @@ export default function Contacts() {
                   customDateRange={customDateRange}
                   onCustomDateRangeChange={handleFilterChange(setCustomDateRange)}
                   teamId={sharedFilters.teamId}
-                  onTeamChange={() => {}}
+                  onTeamChange={handleFilterChange(setTeamId)}
                   userId={selectedAssignee}
                   onUserChange={handleFilterChange(setSelectedAssignee)}
                   source={selectedSource}
                   onSourceChange={handleFilterChange(setSelectedSource)}
                   campaignId={sharedFilters.campaignId}
-                  onCampaignChange={() => {}}
+                  onCampaignChange={handleFilterChange(setCampaignId)}
                   adSetId={sharedFilters.adSetId}
-                  onAdSetChange={() => {}}
+                  onAdSetChange={handleFilterChange(setAdSetId)}
                   adId={sharedFilters.adId}
-                  onAdChange={() => {}}
+                  onAdChange={handleFilterChange(setAdId)}
                   tagId={selectedTag}
                   onTagChange={handleFilterChange(setSelectedTag)}
                   dealStatus={effectiveDealStatus}

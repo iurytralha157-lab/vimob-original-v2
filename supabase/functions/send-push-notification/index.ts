@@ -6,6 +6,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const DEFAULT_VAPID_PUBLIC_KEY = "BEQcTiHMHjQUgY_z4Dqd_rXDszAWINm5AaKy3rDOEDqISjT8T_1wXwlzanhwiIQBoS222rwRGC2yOet0bz3HejM";
+
 interface PushPayload {
   user_id: string;
   title: string;
@@ -30,7 +32,7 @@ function getVapidKeys() {
   const publicKey =
     Deno.env.get("VAPID_PUBLIC_KEY") ||
     Deno.env.get("VITE_VAPID_PUBLIC_KEY") ||
-    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWjUfBw5nc02KFFL6pr1jM51bHv0CllEuy5ypnldeYLMhYSbQbKlWHK7T9VK1CF2xVgH_9HOc3tavj0iuT1mEzA";
+    DEFAULT_VAPID_PUBLIC_KEY;
   
   if (!privateKey) {
     throw new Error("VAPID_PRIVATE_KEY not configured");
@@ -119,12 +121,24 @@ async function createVapidJwt(audience: string, subject: string, privateKeyPem: 
 
 // Helper to extract raw P-256 key from SPKI/DER (91 bytes)
 function getRawPublicKey(publicKeyB64: string): string {
-  const bytes = base64UrlDecode(publicKeyB64);
+  const normalized = publicKeyB64
+    .replace(/-----BEGIN PUBLIC KEY-----/g, '')
+    .replace(/-----END PUBLIC KEY-----/g, '')
+    .replace(/\s/g, '');
+
+  const bytes = base64UrlDecode(normalized);
+
   if (bytes.length === 91) {
     // Offset 26 is where the 65-byte raw uncompressed point starts
     return base64UrlEncode(bytes.slice(26));
   }
-  return publicKeyB64;
+
+  if (bytes.length === 65) {
+    return base64UrlEncode(bytes);
+  }
+
+  console.warn(`[WebPush] Invalid VAPID public key length (${bytes.length}); falling back to default frontend key.`);
+  return getRawPublicKey(DEFAULT_VAPID_PUBLIC_KEY);
 }
 
 // Send Web Push notification
@@ -149,9 +163,11 @@ async function sendWebPushNotification(
 
     console.log(`[WebPush] Sending to endpoint: ${subscription.endpoint.substring(0, 50)}...`);
 
+    const rawPublicKey = getRawPublicKey(publicKey);
+
     webpush.setVapidDetails(
       Deno.env.get("VAPID_MAILTO") || "mailto:suporte@vimob.com.br",
-      publicKey,
+      rawPublicKey,
       privateKey
     );
 
@@ -429,6 +445,7 @@ Deno.serve(async (req) => {
     let sentCount = 0;
     let failedCount = 0;
     const invalidTokenIds: string[] = [];
+    const failures: Array<{ token_id: string; platform: string; error: string }> = [];
 
     for (const tokenRecord of tokens) {
       let result: { success: boolean; error?: string };
@@ -464,6 +481,11 @@ Deno.serve(async (req) => {
         sentCount++;
       } else {
         failedCount++;
+        failures.push({
+          token_id: tokenRecord.id,
+          platform: tokenRecord.platform,
+          error: result.error || "unknown_error",
+        });
         if (result.error === "invalid_token") {
           invalidTokenIds.push(tokenRecord.id);
         }
@@ -486,7 +508,8 @@ Deno.serve(async (req) => {
         success: true, 
         sent: sentCount, 
         failed: failedCount,
-        deactivated: invalidTokenIds.length 
+        deactivated: invalidTokenIds.length,
+        failures: failures.slice(0, 10),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

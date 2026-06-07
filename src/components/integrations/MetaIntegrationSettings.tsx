@@ -102,6 +102,25 @@ const buildConfigForm = (config: MetaFormConfig): MetaForm => ({
   status: config.is_active ? "ACTIVE" : "INACTIVE",
 });
 
+const mergeFormsWithConfigured = (
+  metaForms: MetaForm[],
+  configuredForms: MetaFormConfig[]
+): MetaForm[] => {
+  const byId = new Map<string, MetaForm>();
+
+  for (const form of metaForms) {
+    byId.set(form.id, form);
+  }
+
+  for (const config of configuredForms) {
+    if (!byId.has(config.form_id)) {
+      byId.set(config.form_id, buildConfigForm(config));
+    }
+  }
+
+  return Array.from(byId.values());
+};
+
 export function MetaIntegrationSettings({
   oauthPayload,
 }: {
@@ -220,6 +239,9 @@ export function MetaIntegrationSettings({
   const configuredByFormId = useMemo(() => new Map(configs.map((config) => [config.form_id, config])), [configs]);
   const integrationById = useMemo(() => new Map(integrations.map((integration) => [integration.id, integration])), [integrations]);
 
+  const getConfiguredFormsForIntegration = (integrationId?: string | null) =>
+    integrationId ? configs.filter((config) => config.integration_id === integrationId) : [];
+
   const filteredAccounts = accounts.filter((account) =>
     account.name.toLowerCase().includes(accountSearch.toLowerCase())
   );
@@ -250,7 +272,7 @@ export function MetaIntegrationSettings({
     }
     setSelectedIntegration(integration);
     const result = await fetchForms.mutateAsync({ pageId: integration.page_id, accessToken: integration.access_token });
-    setForms(result.forms || []);
+    setForms(mergeFormsWithConfigured(result.forms || [], getConfiguredFormsForIntegration(integration.id)));
   };
 
   const connectAndLoadPage = async (page: MetaPage) => {
@@ -540,7 +562,7 @@ export function MetaIntegrationSettings({
                 <div className="grid min-w-0 grid-cols-1 xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)] gap-4">
                   <div className="min-w-0 rounded-xl border bg-card p-2.5 space-y-2">
                     <p className="text-xs font-medium uppercase text-muted-foreground">Páginas</p>
-                    <ScrollArea className="h-[370px] pr-2">
+                    <ScrollArea className="h-[370px] pr-3">
                       <div className="space-y-2">
                         {pageItems.map((page: any) => {
                           const pageId = page.page_id || page.id;
@@ -580,11 +602,23 @@ export function MetaIntegrationSettings({
                       ) : filteredForms.length === 0 ? (
                         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Nenhum formulário encontrado.</div>
                       ) : (
-                        <div className="min-w-0 divide-y rounded-lg border">
+                        <div className="min-w-0 overflow-hidden rounded-lg border">
                           {filteredForms.map((form) => {
                             const existing = configuredByFormId.get(form.id);
                             return (
-                              <div key={form.id} className="flex min-w-0 items-center justify-between gap-3 p-3">
+                              <div
+                                key={form.id}
+                                role="button"
+                                tabIndex={0}
+                                className="grid w-full min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 p-3 text-left transition-colors hover:bg-muted/60"
+                                onClick={() => openConfig(form, existing, selectedIntegration)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    openConfig(form, existing, selectedIntegration);
+                                  }
+                                }}
+                              >
                                 <div className="min-w-0 flex-1">
                                   <div className="flex min-w-0 items-center gap-2">
                                     <span className="truncate font-medium">{form.name}</span>
@@ -592,8 +626,16 @@ export function MetaIntegrationSettings({
                                   </div>
                                   <p className="truncate text-xs text-muted-foreground">ID {form.id}</p>
                                 </div>
-                                <Button className="shrink-0" variant={existing ? "outline" : "default"} size="sm" onClick={() => openConfig(form, existing, selectedIntegration)}>
-                                  <FilePlus2 className="mr-2 h-4 w-4" />{existing ? "Editar" : "Integrar"}
+                                <Button
+                                  className="shrink-0 whitespace-nowrap"
+                                  variant={existing ? "outline" : "default"}
+                                  size="sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openConfig(form, existing, selectedIntegration);
+                                  }}
+                                >
+                                  <FilePlus2 className="mr-2 h-4 w-4" />{existing ? "Editar" : "Configurar"}
                                 </Button>
                               </div>
                             );

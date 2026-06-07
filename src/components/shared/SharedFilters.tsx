@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Users, User, Globe, X, SlidersHorizontal, Facebook, Search, Tag as TagIcon, CircleDot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -105,8 +105,10 @@ export function SharedFilters({
   const { hasPermission } = useUserPermissions();
 
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [localSearch, setLocalSearch] = useState(searchQuery);
-  const searchFocusedRef = useRef(false);
+
+  // ✅ FIX: Usamos apenas refs para o input de busca — sem useState controlado
+  // Isso evita re-renders a cada keystroke que causavam o "piscar" e perda de foco
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const onSearchChangeRef = useRef(onSearchChange);
   const searchQueryRef = useRef(searchQuery);
 
@@ -118,21 +120,41 @@ export function SharedFilters({
     searchQueryRef.current = searchQuery;
   }, [searchQuery]);
 
+  // ✅ FIX: Quando searchQuery mudar externamente (ex: limpar filtros),
+  // atualiza o valor do input via ref sem causar re-render
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (localSearch !== searchQueryRef.current) {
-        onSearchChangeRef.current(localSearch);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [localSearch]);
-
-  useEffect(() => {
-    if (!searchFocusedRef.current && localSearch !== searchQuery) {
-      setLocalSearch(searchQuery);
+    if (searchInputRef.current && searchInputRef.current.value !== searchQuery) {
+      searchInputRef.current.value = searchQuery;
     }
-  }, [localSearch, searchQuery]);
+  }, [searchQuery]);
+
+  const commitSearch = useCallback(() => {
+    const nextSearch = searchInputRef.current?.value ?? "";
+    if (nextSearch !== searchQueryRef.current) {
+      onSearchChangeRef.current(nextSearch);
+      searchQueryRef.current = nextSearch;
+    }
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    // Limpa o input via ref — sem setState, sem re-render desnecessário
+    if (searchInputRef.current) {
+      searchInputRef.current.value = "";
+    }
+    searchQueryRef.current = "";
+    onClear();
+  }, [onClear]);
+
+  const handleFiltersOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        commitSearch();
+      }
+      setFiltersOpen(open);
+      onFiltersOpenChange?.(open);
+    },
+    [commitSearch, onFiltersOpenChange],
+  );
 
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const canViewAllLeads = isAdmin || hasPermission("lead_view_all");
@@ -143,9 +165,10 @@ export function SharedFilters({
 
   const showUserFilter = canViewAllLeads || isTeamLeader;
 
+  const activeTeams = teams.filter((team) => team.is_active !== false);
   const availableTeams = isAdmin
-    ? teams
-    : teams.filter((team) => team.members?.some((member) => member.user_id === user?.id && member.is_leader));
+    ? activeTeams
+    : activeTeams.filter((team) => team.members?.some((member) => member.user_id === user?.id && member.is_leader));
 
   const availableUsers = teamId
     ? users.filter((availableUser) => {
@@ -165,321 +188,334 @@ export function SharedFilters({
     dealStatus !== null ||
     searchQuery !== "";
 
-  const TeamFilter = () =>
-    availableTeams.length > 0 ? (
-      <Select
-        value={teamId || "all"}
-        onValueChange={(value) => {
-          onTeamChange(value === "all" ? null : value);
-          onUserChange(null);
-        }}
-      >
-        <SelectTrigger className={cn("h-9 w-full text-xs", teamId && "border-primary text-primary")}>
-          <Users className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
-          <SelectValue placeholder="Equipe" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Todas equipes</SelectItem>
-          {availableTeams.map((team) => (
-            <SelectItem key={team.id} value={team.id}>
-              {team.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    ) : null;
-
-  const UserFilter = () => (
-    <Select value={userId || "all"} onValueChange={(value) => onUserChange(value === "all" ? null : value)}>
-      <SelectTrigger className={cn("h-9 w-full text-xs", userId && userId !== "all" && "border-primary text-primary")}>
-        <User className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
-        <SelectValue placeholder="Corretor" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">Todos</SelectItem>
-        {availableUsers.map((availableUser) => (
-          <SelectItem key={availableUser.id} value={availableUser.id}>
-            {availableUser.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-
-  const SourceFilter = () => (
-    <Select value={source || "all"} onValueChange={(value) => onSourceChange(value === "all" ? null : value)}>
-      <SelectTrigger className={cn("h-9 w-full text-xs", source && "border-primary text-primary")}>
-        <Globe className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
-        <SelectValue placeholder={isLoadingSources ? "Carregando..." : "Origem"} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">Todas origens</SelectItem>
-        {dynamicSources.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-
-  const TagFilter = () => (
-    <Select value={tagId || "all"} onValueChange={(value) => onTagChange(value === "all" ? null : value)}>
-      <SelectTrigger className={cn("h-9 w-full text-xs", tagId && "border-primary text-primary")}>
-        <TagIcon className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
-        <SelectValue placeholder="Tag" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">Todas tags</SelectItem>
-        {tags.map((tag) => (
-          <SelectItem key={tag.id} value={tag.id}>
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} />
-              {tag.name}
-            </div>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-
-  const DealStatusFilter = () => (
-    <Select value={dealStatus || "all"} onValueChange={(value) => onDealStatusChange(value === "all" ? null : value)}>
-      <SelectTrigger className={cn("h-9 w-full text-xs", dealStatus && "border-primary text-primary")}>
-        <CircleDot className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
-        <SelectValue placeholder="Status" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">Todos status</SelectItem>
-        <SelectItem value="open">Aberto</SelectItem>
-        <SelectItem value="won">Ganho</SelectItem>
-        <SelectItem value="lost">Perdido</SelectItem>
-      </SelectContent>
-    </Select>
-  );
-
-  const MetaFilters = () => (
-    <div className="space-y-2">
-      <div className="space-y-1">
-        <Select
-          value={campaignId || "all"}
-          onValueChange={(value) => {
-            onCampaignChange(value === "all" ? null : value);
-          }}
-        >
-          <SelectTrigger className="h-8 text-xs bg-background/50 border-border/40">
-            <SelectValue placeholder={isLoadingCampaigns ? "Carregando..." : "Todas campanhas"} />
-          </SelectTrigger>
-          <SelectContent className="z-[120]">
-            <SelectItem value="all">Todas campanhas</SelectItem>
-            {campaigns.map((campaign) => (
-              <SelectItem key={campaign.id} value={campaign.id}>
-                {campaign.name}
-              </SelectItem>
-            ))}
-            {!isLoadingCampaigns && campaigns.length === 0 && (
-              <div className="p-2 text-[10px] text-center text-muted-foreground">Nenhuma campanha no período</div>
-            )}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {campaignId && (
-        <div className="space-y-1">
-          <Select
-            value={adSetId || "all"}
-            onValueChange={(value) => {
-              onAdSetChange(value === "all" ? null : value);
-            }}
-          >
-            <SelectTrigger className="h-8 text-xs bg-background/50 border-border/40 animate-in fade-in slide-in-from-top-1">
-              <SelectValue placeholder={isLoadingAdSets ? "Carregando..." : "Todos conjuntos"} />
-            </SelectTrigger>
-            <SelectContent className="z-[120]">
-              <SelectItem value="all">Todos conjuntos</SelectItem>
-              {adSets.map((adSet) => (
-                <SelectItem key={adSet.id} value={adSet.id}>
-                  {adSet.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {adSetId && (
-        <div className="space-y-1">
-          <Select value={adId || "all"} onValueChange={(value) => onAdChange(value === "all" ? null : value)}>
-            <SelectTrigger className="h-8 text-xs bg-background/50 border-border/40 animate-in fade-in slide-in-from-top-1">
-              <SelectValue placeholder={isLoadingAds ? "Carregando..." : "Todos criativos"} />
-            </SelectTrigger>
-            <SelectContent className="z-[120]">
-              <SelectItem value="all">Todos criativos</SelectItem>
-              {ads.map((ad) => (
-                <SelectItem key={ad.id} value={ad.id}>
-                  {ad.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-    </div>
-  );
-
-  const FilterContent = () => (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between border-b border-border/40 pb-2">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Filtros Avançados</span>
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClear}
-            className="h-5 px-1.5 text-[9px] uppercase font-bold text-primary hover:bg-primary/10"
-          >
-            Limpar
-          </Button>
-        )}
-      </div>
-
-      <div className="grid gap-2">
-        {!hideSearch && (
-          <div className="relative group">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground group-focus-within:text-primary" />
-            <Input
-              placeholder="Buscar..."
-              value={localSearch}
-              onChange={(event) => setLocalSearch(event.target.value)}
-              onFocus={() => {
-                searchFocusedRef.current = true;
-              }}
-              onBlur={() => {
-                searchFocusedRef.current = false;
-                if (localSearch !== searchQueryRef.current) {
-                  onSearchChangeRef.current(localSearch);
-                }
-              }}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-              }}
-              onKeyUp={(event) => {
-                event.stopPropagation();
-              }}
-              onPointerDown={(event) => {
-                event.stopPropagation();
-              }}
-              onClick={(event) => {
-                event.stopPropagation();
-              }}
-              autoComplete="off"
-              className="h-9 pl-8 text-xs bg-muted/30 border-border/50 focus:bg-background"
-            />
-          </div>
-        )}
-
-        {availableTeams.length > 0 && <TeamFilter />}
-
-        {showUserFilter && <UserFilter />}
-
-        <SourceFilter />
-
-        <TagFilter />
-
-        <DealStatusFilter />
-
-        <div className="space-y-2 pt-2 border-t border-border/40">
-          <div className="flex items-center gap-1.5 px-1 mb-1">
-            <Facebook className="h-3 w-3 text-[#1877F2]" />
-            <span className="text-[10px] font-bold text-muted-foreground">CAMPANHAS META</span>
-          </div>
-          <MetaFilters />
-        </div>
-      </div>
-    </div>
-  );
-
-  const DateControl = () => (
-    <div className="flex items-center">
-      <DateFilterPopover
-        datePreset={datePreset}
-        onDatePresetChange={onDatePresetChange}
-        customDateRange={customDateRange}
-        onCustomDateRangeChange={onCustomDateRangeChange}
-        triggerClassName={cn(
-          "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
-          isMobile ? "px-2 text-xs font-medium normal-case tracking-normal" : "",
-          (datePreset !== "last30days" || customDateRange) && "border-primary/50 bg-primary/5 text-primary",
-        )}
-        align="end"
-      />
-    </div>
-  );
-
-  const FiltersControl = () => (
-    <div className="flex items-center gap-1">
-      <Popover
-        open={filtersOpen}
-        onOpenChange={(open) => {
-          setFiltersOpen(open);
-          onFiltersOpenChange?.(open);
-        }}
-        modal={true}
-      >
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
-              isMobile ? "px-2.5 text-xs font-medium normal-case tracking-normal" : "",
-              hasExtraFilters && "border-primary/50 bg-primary/5 text-primary",
-            )}
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            <span className={isMobile ? "hidden xs:inline" : ""}>Filtros</span>
-            {hasExtraFilters && (
-              <Badge
-                variant="default"
-                className={cn(
-                  "ml-1 h-4 min-w-[16px] px-1 text-[9px] bg-primary flex items-center justify-center",
-                  isMobile && "h-4 w-4 p-0 text-[10px] ml-0.5",
-                )}
-              >
-              </Badge>
-            )}
-          </Button>
-        </PopoverTrigger>
-
-        <PopoverContent
-          align="end"
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          className={cn("w-72 p-3 border-border/40 shadow-2xl", isMobile && "w-[280px] max-h-[80vh] overflow-y-auto")}
-        >
-          {FilterContent()}
-        </PopoverContent>
-      </Popover>
-
-      {hasActiveFilters && !isMobile && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 px-2 text-muted-foreground hover:text-destructive transition-colors"
-          onClick={onClear}
-          title="Limpar todos os filtros"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      )}
-    </div>
-  );
+  const filterSelectContentClass = "z-[130]";
 
   return (
     <div className="flex items-center justify-end gap-2 w-full">
-      {datePosition === "start" && <DateControl />}
-      <FiltersControl />
-      {datePosition === "end" && <DateControl />}
+      {/* Data no início */}
+      {datePosition === "start" && (
+        <DateFilterPopover
+          datePreset={datePreset}
+          onDatePresetChange={onDatePresetChange}
+          customDateRange={customDateRange}
+          onCustomDateRangeChange={onCustomDateRangeChange}
+          triggerClassName={cn(
+            "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
+            isMobile ? "px-2 text-xs font-medium normal-case tracking-normal" : "",
+            (datePreset !== "last30days" || customDateRange) && "border-primary/50 bg-primary/5 text-primary",
+          )}
+          align="end"
+        />
+      )}
+
+      {/* Botão de filtros + popover */}
+      <div className="flex items-center gap-1">
+        <Popover open={filtersOpen} onOpenChange={handleFiltersOpenChange} modal={false}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-expanded={filtersOpen}
+              className={cn(
+                "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
+                isMobile ? "px-2.5 text-xs font-medium normal-case tracking-normal" : "",
+                hasExtraFilters && "border-primary/50 bg-primary/5 text-primary",
+              )}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span className={isMobile ? "hidden xs:inline" : ""}>Filtros</span>
+              {hasExtraFilters && (
+                <Badge
+                  variant="default"
+                  className={cn(
+                    "ml-1 h-4 min-w-[16px] px-1 text-[9px] bg-primary flex items-center justify-center",
+                    isMobile && "h-4 w-4 p-0 text-[10px] ml-0.5",
+                  )}
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+
+          <PopoverContent
+            align="end"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onInteractOutside={(e) => {
+              const target = e.target instanceof Element ? e.target : null;
+              if (
+                target?.closest("[role='listbox']") ||
+                target?.closest("[data-radix-popper-content-wrapper]")
+              ) {
+                e.preventDefault();
+              }
+            }}
+            className={cn(
+              "z-[100] w-72 p-3 border-border/40 shadow-2xl",
+              isMobile && "w-[280px] max-h-[80vh] overflow-y-auto",
+            )}
+          >
+            {/* ✅ FIX: Conteúdo do filtro como JSX direto, não como sub-componente
+                Sub-componentes definidos dentro do pai são recriados a cada render,
+                causando desmontagem do <Input> e perda de foco a cada keystroke */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  Filtros Avançados
+                </span>
+                {hasActiveFilters && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClearFilters}
+                    className="h-5 px-1.5 text-[9px] uppercase font-bold text-primary hover:bg-primary/10"
+                  >
+                    Limpar
+                  </Button>
+                )}
+              </div>
+
+              <div className="grid gap-2">
+                {/* ✅ FIX: Input UNCONTROLLED — sem value/onChange que causam re-render
+                    Usamos defaultValue + ref. O valor é lido via ref no commitSearch. */}
+                {!hideSearch && (
+                  <div className="relative group">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground group-focus-within:text-primary" />
+                    <Input
+                      ref={searchInputRef}
+                      placeholder="Buscar..."
+                      defaultValue={searchQuery}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitSearch();
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        e.stopPropagation();
+                      }}
+                      autoComplete="off"
+                      className="h-9 pl-8 text-xs bg-muted/30 border-border/50 focus:bg-background"
+                    />
+                  </div>
+                )}
+
+                {/* Team Filter */}
+                {availableTeams.length > 0 && (
+                  <Select
+                    value={teamId || "all"}
+                    onValueChange={(value) => {
+                      onTeamChange(value === "all" ? null : value);
+                      onUserChange(null);
+                    }}
+                  >
+                    <SelectTrigger className={cn("h-9 w-full text-xs", teamId && "border-primary text-primary")}>
+                      <Users className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                      <SelectValue placeholder="Equipe" />
+                    </SelectTrigger>
+                    <SelectContent className={filterSelectContentClass}>
+                      <SelectItem value="all">Todas equipes</SelectItem>
+                      {availableTeams.map((team) => (
+                        <SelectItem key={team.id} value={team.id}>
+                          {team.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* User Filter */}
+                {showUserFilter && (
+                  <Select
+                    value={userId || "all"}
+                    onValueChange={(value) => onUserChange(value === "all" ? null : value)}
+                  >
+                    <SelectTrigger
+                      className={cn("h-9 w-full text-xs", userId && userId !== "all" && "border-primary text-primary")}
+                    >
+                      <User className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                      <SelectValue placeholder="Corretor" />
+                    </SelectTrigger>
+                    <SelectContent className={filterSelectContentClass}>
+                      <SelectItem value="all">Todos</SelectItem>
+                      {availableUsers.map((availableUser) => (
+                        <SelectItem key={availableUser.id} value={availableUser.id}>
+                          {availableUser.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* Source Filter */}
+                <Select
+                  value={source || "all"}
+                  onValueChange={(value) => onSourceChange(value === "all" ? null : value)}
+                >
+                  <SelectTrigger className={cn("h-9 w-full text-xs", source && "border-primary text-primary")}>
+                    <Globe className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                    <SelectValue placeholder={isLoadingSources ? "Carregando..." : "Origem"} />
+                  </SelectTrigger>
+                  <SelectContent className={filterSelectContentClass}>
+                    <SelectItem value="all">Todas origens</SelectItem>
+                    {dynamicSources.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Tag Filter */}
+                <Select
+                  value={tagId || "all"}
+                  onValueChange={(value) => onTagChange(value === "all" ? null : value)}
+                >
+                  <SelectTrigger className={cn("h-9 w-full text-xs", tagId && "border-primary text-primary")}>
+                    <TagIcon className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                    <SelectValue placeholder="Tag" />
+                  </SelectTrigger>
+                  <SelectContent className={filterSelectContentClass}>
+                    <SelectItem value="all">Todas tags</SelectItem>
+                    {tags.map((tag) => (
+                      <SelectItem key={tag.id} value={tag.id}>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                          {tag.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Deal Status Filter */}
+                <Select
+                  value={dealStatus || "all"}
+                  onValueChange={(value) => onDealStatusChange(value === "all" ? null : value)}
+                >
+                  <SelectTrigger className={cn("h-9 w-full text-xs", dealStatus && "border-primary text-primary")}>
+                    <CircleDot className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent className={filterSelectContentClass}>
+                    <SelectItem value="all">Todos status</SelectItem>
+                    <SelectItem value="open">Aberto</SelectItem>
+                    <SelectItem value="won">Ganho</SelectItem>
+                    <SelectItem value="lost">Perdido</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Meta Filters */}
+                <div className="space-y-2 pt-2 border-t border-border/40">
+                  <div className="flex items-center gap-1.5 px-1 mb-1">
+                    <Facebook className="h-3 w-3 text-[#1877F2]" />
+                    <span className="text-[10px] font-bold text-muted-foreground">CAMPANHAS META</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {/* Campaign */}
+                    <div className="space-y-1">
+                      <Select
+                        value={campaignId || "all"}
+                        onValueChange={(value) => onCampaignChange(value === "all" ? null : value)}
+                      >
+                        <SelectTrigger className="h-8 text-xs bg-background/50 border-border/40">
+                          <SelectValue placeholder={isLoadingCampaigns ? "Carregando..." : "Todas campanhas"} />
+                        </SelectTrigger>
+                        <SelectContent className={filterSelectContentClass}>
+                          <SelectItem value="all">Todas campanhas</SelectItem>
+                          {campaigns.map((campaign) => (
+                            <SelectItem key={campaign.id} value={campaign.id}>
+                              {campaign.name}
+                            </SelectItem>
+                          ))}
+                          {!isLoadingCampaigns && campaigns.length === 0 && (
+                            <div className="p-2 text-[10px] text-center text-muted-foreground">
+                              Nenhuma campanha no período
+                            </div>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Ad Set — só aparece se campaign selecionada */}
+                    {campaignId && (
+                      <div className="space-y-1">
+                        <Select
+                          value={adSetId || "all"}
+                          onValueChange={(value) => onAdSetChange(value === "all" ? null : value)}
+                        >
+                          <SelectTrigger className="h-8 text-xs bg-background/50 border-border/40 animate-in fade-in slide-in-from-top-1">
+                            <SelectValue placeholder={isLoadingAdSets ? "Carregando..." : "Todos conjuntos"} />
+                          </SelectTrigger>
+                          <SelectContent className={filterSelectContentClass}>
+                            <SelectItem value="all">Todos conjuntos</SelectItem>
+                            {adSets.map((adSet) => (
+                              <SelectItem key={adSet.id} value={adSet.id}>
+                                {adSet.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {/* Ad — só aparece se adSet selecionado */}
+                    {adSetId && (
+                      <div className="space-y-1">
+                        <Select
+                          value={adId || "all"}
+                          onValueChange={(value) => onAdChange(value === "all" ? null : value)}
+                        >
+                          <SelectTrigger className="h-8 text-xs bg-background/50 border-border/40 animate-in fade-in slide-in-from-top-1">
+                            <SelectValue placeholder={isLoadingAds ? "Carregando..." : "Todos criativos"} />
+                          </SelectTrigger>
+                          <SelectContent className={filterSelectContentClass}>
+                            <SelectItem value="all">Todos criativos</SelectItem>
+                            {ads.map((ad) => (
+                              <SelectItem key={ad.id} value={ad.id}>
+                                {ad.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        {/* Botão limpar fora do popover (desktop) */}
+        {hasActiveFilters && !isMobile && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-muted-foreground hover:text-destructive transition-colors"
+            onClick={handleClearFilters}
+            title="Limpar todos os filtros"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+
+      {/* Data no final */}
+      {datePosition === "end" && (
+        <DateFilterPopover
+          datePreset={datePreset}
+          onDatePresetChange={onDatePresetChange}
+          customDateRange={customDateRange}
+          onCustomDateRangeChange={onCustomDateRangeChange}
+          triggerClassName={cn(
+            "h-8 gap-2 text-[11px] font-semibold uppercase tracking-wider px-3 border-border/60 hover:border-primary/50 transition-colors",
+            isMobile ? "px-2 text-xs font-medium normal-case tracking-normal" : "",
+            (datePreset !== "last30days" || customDateRange) && "border-primary/50 bg-primary/5 text-primary",
+          )}
+          align="end"
+        />
+      )}
     </div>
   );
 }
-

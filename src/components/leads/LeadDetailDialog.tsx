@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { ExternalLink } from 'lucide-react';
 import { PropertyPickerDialog } from '@/components/properties/PropertyPickerDialog';
@@ -171,6 +172,7 @@ export function LeadDetailDialog({
   const [historyEventDialogOpen, setHistoryEventDialogOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
 
   const leadId = lead?.id ?? null;
   const [lostReasonLocal, setLostReasonLocal] = useState(lead?.lost_reason || '');
@@ -522,6 +524,75 @@ export function LeadDetailDialog({
       // Error handled by mutation
     }
   };
+
+  const updatePipelineAssigneeCache = (nextLead: any) => {
+    const snapshots = queryClient.getQueriesData({ queryKey: ['stages-with-leads'] });
+    const nextUpdatedAt = new Date().toISOString();
+
+    snapshots.forEach(([queryKey, cachedData]) => {
+      if (!Array.isArray(cachedData)) return;
+
+      const keyParts = Array.isArray(queryKey) ? queryKey : [];
+      const filterUserId = keyParts[2] as string | null | undefined;
+      const shouldKeepInFilteredView =
+        !filterUserId || filterUserId === 'all' || filterUserId === nextLead.assigned_user_id;
+
+      let changed = false;
+      const nextStages = cachedData.map((stage: any) => {
+        if (!Array.isArray(stage?.leads)) return stage;
+
+        let stageChanged = false;
+        const nextLeads = stage.leads.reduce((acc: any[], stageLead: any) => {
+          if (stageLead?.id !== nextLead.id) {
+            acc.push(stageLead);
+            return acc;
+          }
+
+          changed = true;
+          stageChanged = true;
+
+          if (!shouldKeepInFilteredView) return acc;
+
+          acc.push({
+            ...stageLead,
+            assigned_user_id: nextLead.assigned_user_id,
+            assignee: nextLead.assignee || null,
+            updated_at: nextUpdatedAt
+          });
+          return acc;
+        }, []);
+
+        if (!stageChanged) return stage;
+
+        const totalLeadCount = Number(stage.total_lead_count ?? stage.leads.length);
+        return {
+          ...stage,
+          leads: nextLeads,
+          total_lead_count: shouldKeepInFilteredView
+            ? totalLeadCount
+            : Math.max(totalLeadCount - 1, 0)
+        };
+      });
+
+      if (changed) {
+        queryClient.setQueryData(queryKey as any, nextStages);
+      }
+    });
+
+    return snapshots;
+  };
+
+  const restorePipelineCache = (snapshots: Array<[unknown, unknown]>) => {
+    snapshots.forEach(([queryKey, data]) => {
+      queryClient.setQueryData(queryKey as any, data);
+    });
+  };
+
+  const refreshPipelineInBackground = () => {
+    queryClient.invalidateQueries({ queryKey: ['stages-with-leads'], refetchType: 'inactive' });
+    refetchStages();
+  };
+
   const handleAssignUser = async (userId: string | null) => {
     // UI Otimista
     const previousLead = { ...localLead };
@@ -539,6 +610,7 @@ export function LeadDetailDialog({
     };
 
     setLocalLead(updatedLead);
+    const pipelineSnapshots = updatePipelineAssigneeCache(updatedLead);
     setIsUpdatingAssignee(true);
     setAssigneePopoverOpen(false);
 
@@ -549,9 +621,10 @@ export function LeadDetailDialog({
           p_assigned_user_id: null
         });
         if (error) throw error;
-        refetchStages();
+        refreshPipelineInBackground();
       } catch (error) {
         setLocalLead(previousLead);
+        restorePipelineCache(pipelineSnapshots);
       } finally {
         setIsUpdatingAssignee(false);
       }
@@ -589,6 +662,7 @@ export function LeadDetailDialog({
             );
             if (!confirmAssign) {
               setLocalLead(previousLead);
+              restorePipelineCache(pipelineSnapshots);
               setIsUpdatingAssignee(false);
               return;
             }
@@ -599,6 +673,7 @@ export function LeadDetailDialog({
           );
           if (!confirmAssign) {
             setLocalLead(previousLead);
+            restorePipelineCache(pipelineSnapshots);
             setIsUpdatingAssignee(false);
             return;
           }
@@ -610,9 +685,10 @@ export function LeadDetailDialog({
         p_assigned_user_id: userId
       });
       if (error) throw error;
-      refetchStages();
+      refreshPipelineInBackground();
     } catch (error) {
       setLocalLead(previousLead);
+      restorePipelineCache(pipelineSnapshots);
     } finally {
       setIsUpdatingAssignee(false);
     }

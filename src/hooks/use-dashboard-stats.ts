@@ -349,13 +349,104 @@ export function useFunnelData(filters?: DashboardFilters, pipelineId?: string | 
     ],
     queryFn: async () => {
       const visibility = user?.id ? await checkLeadVisibility(user.id) : { canViewAll: false, userId: undefined };
+      const hasMetaFilter = !!(filters?.campaignId || filters?.adSetId || filters?.adId);
+      const hasClientOnlyFilter = hasMetaFilter || !!filters?.searchQuery;
 
       let effectiveUserId = filters?.userId;
       if (!effectiveUserId && !visibility.canViewAll) {
         effectiveUserId = visibility.teamMemberIds ? null : visibility.userId;
       }
 
-        const { data, error } = await (supabase as any).rpc("get_funnel_data", {
+      if (hasClientOnlyFilter) {
+        let effectivePipelineId = pipelineId || null;
+        if (!effectivePipelineId) {
+          const { data: pipeline } = await supabase
+            .from("pipelines")
+            .select("id")
+            .order("is_default", { ascending: false })
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          effectivePipelineId = pipeline?.id || null;
+        }
+
+        if (!effectivePipelineId) return [] as FunnelDataPoint[];
+
+        const { data: stages, error: stagesError } = await supabase
+          .from("stages")
+          .select("id, name, stage_key, position")
+          .eq("pipeline_id", effectivePipelineId)
+          .order("position");
+
+        if (stagesError) throw stagesError;
+
+        const stageIds = (stages || []).map((stage) => stage.id);
+        if (stageIds.length === 0) return [] as FunnelDataPoint[];
+
+        let selectString = "id, stage_id, assigned_user_id, source, deal_status";
+        if (hasMetaFilter) selectString += ", lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)";
+        if (filters?.tagId) selectString += ", lead_tags!inner(tag_id)";
+
+        let query = (supabase as any)
+          .from("leads")
+          .select(selectString)
+          .in("stage_id", stageIds);
+
+        if (filters?.dateRange?.from) query = query.gte("created_at", filters.dateRange.from.toISOString());
+        if (filters?.dateRange?.to) query = query.lte("created_at", filters.dateRange.to.toISOString());
+        if (filters?.source) query = query.eq("source", filters.source);
+        if (filters?.dealStatus) query = query.eq("deal_status", filters.dealStatus);
+        if (filters?.tagId) query = query.eq("lead_tags.tag_id", filters.tagId);
+        if (filters?.campaignId) {
+          query = /^\d+$/.test(filters.campaignId)
+            ? query.eq("lead_meta.campaign_id", filters.campaignId)
+            : query.eq("lead_meta.campaign_name", filters.campaignId);
+        }
+        if (filters?.adSetId) {
+          query = /^\d+$/.test(filters.adSetId)
+            ? query.eq("lead_meta.adset_id", filters.adSetId)
+            : query.eq("lead_meta.adset_name", filters.adSetId);
+        }
+        if (filters?.adId) {
+          query = /^\d+$/.test(filters.adId)
+            ? query.eq("lead_meta.ad_id", filters.adId)
+            : query.eq("lead_meta.ad_name", filters.adId);
+        }
+        if (filters?.searchQuery) {
+          const q = `%${filters.searchQuery}%`;
+          query = query.or(`name.ilike.${q},email.ilike.${q},phone.ilike.${q}`);
+        }
+
+        query = applyVisibilityFilter(query, visibility, "assigned_user_id", effectiveUserId);
+        const teamLeadIds = await fetchDashboardTeamLeadIds(filters?.teamId, filters?.dateRange);
+        query = applyLeadIdFilter(query, teamLeadIds);
+
+        const { data: leads, error } = await query;
+        if (error) {
+          console.error("Error fetching filtered funnel data:", error);
+          return [] as FunnelDataPoint[];
+        }
+
+        const counts = (leads || []).reduce((acc: Record<string, number>, lead: any) => {
+          acc[lead.stage_id] = (acc[lead.stage_id] || 0) + 1;
+          return acc;
+        }, {});
+
+        const result = (stages || []).map((stage: any) => ({
+          name: stage.name,
+          value: counts[stage.id] || 0,
+          percentage: 0,
+          stage_key: stage.stage_key || stage.name,
+        }));
+
+        const total = result.reduce((sum: number, item: FunnelDataPoint) => sum + item.value, 0);
+        return result.map((item: FunnelDataPoint) => ({
+          ...item,
+          percentage: total > 0 ? Math.round((item.value / total) * 100) : 0,
+        })) as FunnelDataPoint[];
+      }
+
+      const { data, error } = await (supabase as any).rpc("get_funnel_data", {
         p_date_from: filters?.dateRange?.from?.toISOString() || null,
         p_date_to: filters?.dateRange?.to?.toISOString() || null,
         p_team_id: filters?.teamId || null,
@@ -410,13 +501,89 @@ export function useLeadSourcesData(filters?: DashboardFilters, pipelineId?: stri
     ],
     queryFn: async () => {
       const visibility = user?.id ? await checkLeadVisibility(user.id) : { canViewAll: false, userId: undefined };
+      const hasMetaFilter = !!(filters?.campaignId || filters?.adSetId || filters?.adId);
+      const hasClientOnlyFilter = hasMetaFilter || !!filters?.searchQuery;
 
       let effectiveUserId = filters?.userId;
       if (!effectiveUserId && !visibility.canViewAll) {
         effectiveUserId = visibility.teamMemberIds ? null : visibility.userId;
       }
 
-        const { data, error } = await (supabase as any).rpc("get_lead_sources_data", {
+      if (hasClientOnlyFilter) {
+        let stageIds: string[] | null = null;
+        if (pipelineId) {
+          const { data: stages, error: stagesError } = await supabase
+            .from("stages")
+            .select("id")
+            .eq("pipeline_id", pipelineId);
+          if (stagesError) throw stagesError;
+          stageIds = (stages || []).map((stage) => stage.id);
+          if (stageIds.length === 0) return [] as SourceDataPoint[];
+        }
+
+        let selectString = "id, assigned_user_id, source";
+        if (hasMetaFilter) selectString += ", lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)";
+        if (filters?.tagId) selectString += ", lead_tags!inner(tag_id)";
+
+        let query = (supabase as any)
+          .from("leads")
+          .select(selectString);
+
+        if (stageIds) query = query.in("stage_id", stageIds);
+        if (filters?.dateRange?.from) query = query.gte("created_at", filters.dateRange.from.toISOString());
+        if (filters?.dateRange?.to) query = query.lte("created_at", filters.dateRange.to.toISOString());
+        if (filters?.source) query = query.eq("source", filters.source);
+        if (filters?.dealStatus) query = query.eq("deal_status", filters.dealStatus);
+        if (filters?.tagId) query = query.eq("lead_tags.tag_id", filters.tagId);
+        if (filters?.campaignId) {
+          query = /^\d+$/.test(filters.campaignId)
+            ? query.eq("lead_meta.campaign_id", filters.campaignId)
+            : query.eq("lead_meta.campaign_name", filters.campaignId);
+        }
+        if (filters?.adSetId) {
+          query = /^\d+$/.test(filters.adSetId)
+            ? query.eq("lead_meta.adset_id", filters.adSetId)
+            : query.eq("lead_meta.adset_name", filters.adSetId);
+        }
+        if (filters?.adId) {
+          query = /^\d+$/.test(filters.adId)
+            ? query.eq("lead_meta.ad_id", filters.adId)
+            : query.eq("lead_meta.ad_name", filters.adId);
+        }
+        if (filters?.searchQuery) {
+          const q = `%${filters.searchQuery}%`;
+          query = query.or(`name.ilike.${q},email.ilike.${q},phone.ilike.${q}`);
+        }
+
+        query = applyVisibilityFilter(query, visibility, "assigned_user_id", effectiveUserId);
+        const teamLeadIds = await fetchDashboardTeamLeadIds(filters?.teamId, filters?.dateRange);
+        query = applyLeadIdFilter(query, teamLeadIds);
+
+        const { data: leads, error } = await query;
+        if (error) {
+          console.error("Error fetching filtered lead sources:", error);
+          return [] as SourceDataPoint[];
+        }
+
+        const aggregatedData: Record<string, { count: number; rawSource: string }> = {};
+        (leads || []).forEach((lead: any) => {
+          const rawSource = lead.source || "manual";
+          const label = sourceLabels[rawSource] || rawSource || "Outros";
+
+          if (!aggregatedData[label]) aggregatedData[label] = { count: 0, rawSource };
+          aggregatedData[label].count += 1;
+        });
+
+        return Object.entries(aggregatedData)
+          .map(([name, data]) => ({
+            name,
+            value: data.count,
+            rawSource: data.rawSource,
+          }))
+          .sort((a, b) => b.value - a.value) as SourceDataPoint[];
+      }
+
+      const { data, error } = await (supabase as any).rpc("get_lead_sources_data", {
         p_date_from: filters?.dateRange?.from?.toISOString() || null,
         p_date_to: filters?.dateRange?.to?.toISOString() || null,
         p_team_id: filters?.teamId || null,

@@ -5,7 +5,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeadVisibility, applyVisibilityFilter } from './use-lead-visibility';
 import { DatePreset } from './use-dashboard-filters';
-import { useTags } from './use-tags';
 import { applyLeadIdFilter, fetchDashboardTeamLeadIds } from './use-dashboard-team-leads';
 
 export interface SharedFilters {
@@ -45,10 +44,11 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
   const [dealStatus, setDealStatus] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const shouldLoadDynamicOptions = options?.loadDynamicOptions ?? true;
+  const visibilityUserId = userId && userId !== 'all' ? userId : null;
 
   // Dynamic Sources
   const { data: dynamicSources = [], isLoading: isLoadingSources } = useQuery({
-    queryKey: ['shared-source-options', organization?.id, dateRange, visibility, userId, teamId],
+    queryKey: ['shared-source-options', organization?.id, dateRange, visibility, visibilityUserId, teamId],
     enabled: shouldLoadDynamicOptions && !!organization?.id && !!visibility,
     queryFn: async () => {
       let query = supabase
@@ -75,7 +75,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
 
   // Dynamic Campaigns
   const { data: campaigns = [], isLoading: isLoadingCampaigns } = useQuery({
-    queryKey: ['shared-campaigns', organization?.id, dateRange, visibility, userId, teamId],
+    queryKey: ['shared-campaigns', organization?.id, dateRange, visibility, visibilityUserId, teamId],
     enabled: shouldLoadDynamicOptions && !!organization?.id && !!visibility,
     queryFn: async () => {
       let query = supabase
@@ -85,7 +85,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
         .gte('created_at', dateRange.from.toISOString())
         .lte('created_at', dateRange.to.toISOString());
       
-      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', userId);
+      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
       const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
       query = applyLeadIdFilter(query, teamLeadIds);
 
@@ -106,7 +106,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
 
   // Dynamic AdSets
   const { data: adSets = [], isLoading: isLoadingAdSets } = useQuery({
-    queryKey: ['shared-adsets', organization?.id, dateRange, campaignId, visibility, userId, teamId],
+    queryKey: ['shared-adsets', organization?.id, dateRange, campaignId, visibility, visibilityUserId, teamId],
     enabled: shouldLoadDynamicOptions && !!campaignId && !!organization?.id && !!visibility,
     queryFn: async () => {
       let query = supabase
@@ -118,7 +118,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
         .or(`campaign_id.eq.${campaignId},campaign_name.eq.${campaignId}`, { foreignTable: 'lead_meta' })
         .not('adset_id', 'is', null, { foreignTable: 'lead_meta' });
 
-      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', userId);
+      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
       const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
       query = applyLeadIdFilter(query, teamLeadIds);
 
@@ -138,7 +138,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
 
   // Dynamic Ads
   const { data: ads = [], isLoading: isLoadingAds } = useQuery({
-    queryKey: ['shared-ads', organization?.id, dateRange, adSetId, visibility, userId, teamId],
+    queryKey: ['shared-ads', organization?.id, dateRange, adSetId, visibility, visibilityUserId, teamId],
     enabled: shouldLoadDynamicOptions && !!adSetId && !!organization?.id && !!visibility,
     queryFn: async () => {
       let query = supabase
@@ -150,7 +150,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
         .or(`adset_id.eq.${adSetId},adset_name.eq.${adSetId}`, { foreignTable: 'lead_meta' })
         .not('ad_id', 'is', null, { foreignTable: 'lead_meta' });
 
-      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', userId);
+      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
       const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
       query = applyLeadIdFilter(query, teamLeadIds);
 
@@ -168,8 +168,78 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
     }
   });
 
-  // Tags
-  const { data: tags = [] } = useTags({ enabled: shouldLoadDynamicOptions });
+  // Tags in use for the current filter context. Do not list unused tag records.
+  const { data: tags = [] } = useQuery({
+    queryKey: [
+      'shared-used-tags',
+      organization?.id,
+      dateRange,
+      visibility,
+      visibilityUserId,
+      teamId,
+      source,
+      campaignId,
+      adSetId,
+      adId,
+      dealStatus,
+      searchQuery,
+    ],
+    enabled: shouldLoadDynamicOptions && !!organization?.id && !!visibility,
+    queryFn: async () => {
+      const hasMetaFilter = !!(campaignId || adSetId || adId);
+      let select = 'id, assigned_user_id, lead_tags!inner(tag:tags(id, name, color))';
+      if (hasMetaFilter) {
+        select += ', lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)';
+      }
+
+      let query = (supabase as any)
+        .from('leads')
+        .select(select)
+        .eq('organization_id', organization?.id)
+        .gte('created_at', dateRange.from.toISOString())
+        .lte('created_at', dateRange.to.toISOString());
+
+      if (source) query = query.eq('source', source);
+      if (dealStatus) query = query.eq('deal_status', dealStatus);
+      if (campaignId) {
+        query = /^\d+$/.test(campaignId)
+          ? query.eq('lead_meta.campaign_id', campaignId)
+          : query.eq('lead_meta.campaign_name', campaignId);
+      }
+      if (adSetId) {
+        query = /^\d+$/.test(adSetId)
+          ? query.eq('lead_meta.adset_id', adSetId)
+          : query.eq('lead_meta.adset_name', adSetId);
+      }
+      if (adId) {
+        query = /^\d+$/.test(adId)
+          ? query.eq('lead_meta.ad_id', adId)
+          : query.eq('lead_meta.ad_name', adId);
+      }
+      if (searchQuery.trim()) {
+        const q = `%${searchQuery.trim()}%`;
+        query = query.or(`name.ilike.${q},email.ilike.${q},phone.ilike.${q}`);
+      }
+
+      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
+      const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
+      query = applyLeadIdFilter(query, teamLeadIds);
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const unique = new Map<string, { id: string; name: string; color: string }>();
+      (data || []).forEach((lead: any) => {
+        const rows = Array.isArray(lead.lead_tags) ? lead.lead_tags : [];
+        rows.forEach((row: any) => {
+          const tag = row.tag;
+          if (tag?.id) unique.set(tag.id, tag);
+        });
+      });
+
+      return Array.from(unique.values()).sort((a, b) => a.name.localeCompare(b.name));
+    },
+  });
 
   // Cascading resets
   useEffect(() => {

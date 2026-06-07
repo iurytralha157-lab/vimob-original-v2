@@ -130,9 +130,6 @@ export function EventSheet({
   const [isAllDay, setIsAllDay] = useState(false);
   const durationTouched = useRef(false);
   const [recurrenceRule, setRecurrenceRule] = useState<"none" | "weekly" | "monthly" | "yearly">("none");
-  const [recurrenceMode, setRecurrenceMode] = useState<"count" | "until">("count");
-  const [recurrenceCount, setRecurrenceCount] = useState(4);
-  const [recurrenceUntil, setRecurrenceUntil] = useState<Date | undefined>(undefined);
 
   const [leadSearch, setLeadSearch] = useState("");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
@@ -516,43 +513,6 @@ export function EventSheet({
                     </SelectContent>
                   </Select>
                 </div>
-
-                {false && recurrenceRule !== "none" && (
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Select value={recurrenceMode} onValueChange={(value: any) => setRecurrenceMode(value)}>
-                      <SelectTrigger className="h-10 border-0 bg-white/10 text-sm text-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="count">Por quantidade</SelectItem>
-                        <SelectItem value="until">Até uma data</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    {recurrenceMode === "count" ? (
-                      <Input
-                        type="number"
-                        min={2}
-                        max={52}
-                        value={recurrenceCount}
-                        onChange={(event) => setRecurrenceCount(Math.max(2, Math.min(52, Number(event.target.value) || 2)))}
-                        className="h-10 border-0 bg-white/10 text-sm text-white"
-                        aria-label="Quantidade de ocorrências"
-                      />
-                    ) : (
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button variant="ghost" className="h-10 justify-start bg-white/10 text-sm text-white hover:bg-white/15">
-                            {recurrenceUntil ? format(recurrenceUntil, "dd/MM/yyyy") : "Repetir até"}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar mode="single" selected={recurrenceUntil} onSelect={setRecurrenceUntil} locale={ptBR} />
-                        </PopoverContent>
-                      </Popover>
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </AgendaRow>

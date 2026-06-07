@@ -11,6 +11,9 @@ interface ExportFilters {
   unassigned?: boolean;
   tagId?: string;
   source?: string;
+  campaignId?: string;
+  adSetId?: string;
+  adId?: string;
   dealStatus?: string;
   createdFrom?: string;
   createdTo?: string;

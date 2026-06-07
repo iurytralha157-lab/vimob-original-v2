@@ -256,7 +256,7 @@ export function PropertyPreviewDialog({
 
   const content = isLoading ? (
     <div className="flex h-full min-h-0 flex-col lg:flex-row gap-4 lg:gap-5">
-      <div className="lg:w-[52%] min-h-0 lg:overflow-y-auto lg:pr-2">
+      <div className="lg:w-[52%] min-h-0 lg:overflow-y-auto">
         <Skeleton className={cn("w-full rounded-xl", isMobile ? "aspect-[16/10] mx-auto w-[95%]" : "aspect-video")} />
         <div className="flex gap-2 mt-3">
           {[1, 2, 3, 4].map(i => (
@@ -278,10 +278,10 @@ export function PropertyPreviewDialog({
   ) : property ? (
     <div className="flex h-full min-h-0 flex-col lg:flex-row gap-4 lg:gap-5">
       {/* Left Side - Image Gallery */}
-      <div className="lg:w-[52%] min-h-0 flex flex-col lg:overflow-y-auto lg:pr-2">
+      <div className="lg:w-[52%] min-h-0 flex flex-col lg:overflow-y-auto">
         {/* Main Image with Embla Carousel */}
         <div className={cn(
-          "relative rounded-xl overflow-hidden bg-muted group",
+          "relative shrink-0 rounded-xl overflow-hidden bg-muted group",
           isMobile ? "aspect-[16/10] mx-auto w-[95%] shadow-sm" : "aspect-video"
         )}>
           {allImages.length > 0 ? (
@@ -347,13 +347,13 @@ export function PropertyPreviewDialog({
 
         {/* Thumbnail Grid */}
         {allImages.length > 1 && (
-          <div className={cn("grid grid-cols-5 gap-2 mt-3 sm:grid-cols-8", isMobile && "px-4")}>
+          <div className={cn("mt-3 flex items-center gap-2 overflow-x-auto overflow-y-hidden pb-1 [scrollbar-width:thin]", isMobile && "mx-4")}>
             {allImages.slice(0, 8).map((img, index) => (
               <button
                 key={index}
                 type="button"
                 className={cn(
-                  "aspect-square w-full rounded-lg overflow-hidden border-2 transition-all duration-200",
+                  "h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-all duration-200",
                   index === currentImageIndex 
                     ? 'border-primary ring-2 ring-primary/30 scale-105' 
                     : 'border-transparent hover:border-muted-foreground/40'
@@ -367,7 +367,7 @@ export function PropertyPreviewDialog({
               </button>
             ))}
             {allImages.length > 8 && (
-              <div className="aspect-square w-full rounded-lg bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-medium text-muted-foreground">
                 +{allImages.length - 8}
               </div>
             )}
@@ -714,7 +714,7 @@ export function PropertyPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[80vw] max-w-[80vw] max-h-[80vh] overflow-hidden p-0 gap-0">
+      <DialogContent className="h-[80vh] w-[80vw] max-w-[80vw] max-h-[80vh] overflow-hidden p-0 gap-0">
         <DialogHeader className="border-b px-5 py-4">
           <DialogTitle>Visualizar Imóvel</DialogTitle>
         </DialogHeader>
