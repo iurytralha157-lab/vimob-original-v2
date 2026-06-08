@@ -12,7 +12,9 @@ FROM alpine:3.20
 
 WORKDIR /app
 
-RUN adduser -D -H -u 10001 appuser
+RUN adduser -D -H -u 10001 appuser && \
+    mkdir -p /app/data && \
+    chown -R appuser:appuser /app
 COPY --from=build /out/vimob-chatbot-backend /usr/local/bin/vimob-chatbot-backend
 
 ENV VIMOB_BACKEND_ADDR=:8088
