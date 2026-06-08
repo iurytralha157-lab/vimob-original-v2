@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
-// VAPID public key - confirm this matches your server-side VAPID_PUBLIC_KEY
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || 'BEQcTiHMHjQUgY_z4Dqd_rXDszAWINm5AaKy3rDOEDqISjT8T_1wXwlzanhwiIQBoS222rwRGC2yOet0bz3HejM'; 
+// VAPID public key - must match VAPID_PRIVATE_KEY configured in Supabase Edge Function secrets.
+const VAPID_PUBLIC_KEY = 'BC7q4HGKxwbHnzRl0uBTyTOm59GcEyxqM8fgSTGiSfNoxwYIIy8-HnbbpzQghQUzpzPmmifvn9t01EoTJaFa3uQ';
 
 
 // Converte base64 URL-safe para Uint8Array (necessário para applicationServerKey)

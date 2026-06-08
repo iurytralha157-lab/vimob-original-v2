@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const DEFAULT_VAPID_PUBLIC_KEY = "BEQcTiHMHjQUgY_z4Dqd_rXDszAWINm5AaKy3rDOEDqISjT8T_1wXwlzanhwiIQBoS222rwRGC2yOet0bz3HejM";
+const DEFAULT_VAPID_PUBLIC_KEY = "BC7q4HGKxwbHnzRl0uBTyTOm59GcEyxqM8fgSTGiSfNoxwYIIy8-HnbbpzQghQUzpzPmmifvn9t01EoTJaFa3uQ";
 
 interface PushPayload {
   user_id: string;

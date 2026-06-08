@@ -27,7 +27,7 @@ window.addEventListener('error', handleChunkError);
 window.addEventListener('unhandledrejection', handleChunkError);
 
 // Aggressive version management and cache busting
-const CACHE_BUST_VERSION = '2.1.7-agenda-visibility-20260608';
+const CACHE_BUST_VERSION = '2.1.8-push-vapid-20260608';
 const BUST_KEY = 'lovable_app_version';
 const BUST_RELOAD_KEY = 'lovable_app_version_reload_at';
 

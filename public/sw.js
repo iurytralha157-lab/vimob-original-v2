@@ -1,4 +1,4 @@
-const SW_VERSION = "2.1.7-agenda-visibility-20260608";
+const SW_VERSION = "2.1.8-push-vapid-20260608";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
