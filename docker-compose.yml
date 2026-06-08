@@ -32,11 +32,14 @@ services:
     environment:
       VIMOB_BACKEND_ADDR: ":8088"
       DATABASE_URL: ${DATABASE_URL}
+      SUPABASE_URL: ${SUPABASE_URL:-https://iemalzlfnbouobyjwlwi.supabase.co}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       BUNTDB_PATH: /app/data/chatbot-cache.db
       WORKER_COUNT: ${WORKER_COUNT:-4}
       VIMOB_WEBHOOK_SECRET: ${VIMOB_WEBHOOK_SECRET}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_DEFAULT_MODEL: ${OPENAI_DEFAULT_MODEL:-gpt-4.1-nano}
+      AI_AUTO_ORGANIZATION_IDS: ${AI_AUTO_ORGANIZATION_IDS:-cd868dbb-924d-4e14-9bc8-5d3e67f44c3d}
     volumes:
       - vimob_backend_go_data:/app/data
     networks:

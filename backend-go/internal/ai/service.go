@@ -40,6 +40,16 @@ type PreviewResponse struct {
 	SkippedOpenAI    bool   `json:"skipped_openai"`
 }
 
+type AutoReplyResult struct {
+	Reply            string
+	Model            string
+	Mode             string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	LatencyMS        int
+}
+
 func NewService(store *store.Store, logger *slog.Logger, openAIKey string, defaultModel string) *Service {
 	if defaultModel == "" {
 		defaultModel = "gpt-4.1-nano"
@@ -126,23 +136,99 @@ func (s *Service) Preview(ctx context.Context, input PreviewRequest) (PreviewRes
 	result.TotalTokens = usage.TotalTokens
 
 	_ = s.store.CreateAIInteractionLog(ctx, store.AIInteractionLog{
-		OrganizationID:     input.OrganizationID,
-		AgentID:            cfg.AgentID,
-		Mode:               "preview",
-		EventType:          "preview_response",
-		Model:              cfg.Model,
-		PromptTokens:       usage.InputTokens,
-		CompletionTokens:   usage.OutputTokens,
-		TotalTokens:        usage.TotalTokens,
-		EstimatedCostUSD:   estimateCostUSD(cfg.Model, usage.InputTokens, usage.OutputTokens),
-		LatencyMS:          result.LatencyMS,
-		Success:            true,
-		InputPreview:       truncate(input.Message, 500),
-		OutputPreview:      truncate(reply, 500),
-		Metadata:           []byte(`{"provider":"openai"}`),
+		OrganizationID:   input.OrganizationID,
+		AgentID:          cfg.AgentID,
+		Mode:             "preview",
+		EventType:        "preview_response",
+		Model:            cfg.Model,
+		PromptTokens:     usage.InputTokens,
+		CompletionTokens: usage.OutputTokens,
+		TotalTokens:      usage.TotalTokens,
+		EstimatedCostUSD: estimateCostUSD(cfg.Model, usage.InputTokens, usage.OutputTokens),
+		LatencyMS:        result.LatencyMS,
+		Success:          true,
+		InputPreview:     truncate(input.Message, 500),
+		OutputPreview:    truncate(reply, 500),
+		Metadata:         []byte(`{"provider":"openai"}`),
 	})
 
 	return result, nil
+}
+
+func (s *Service) AutoReply(ctx context.Context, organizationID string, conversationID string, message string) (AutoReplyResult, error) {
+	organizationID = strings.TrimSpace(organizationID)
+	message = strings.TrimSpace(message)
+	if organizationID == "" {
+		return AutoReplyResult{}, errors.New("missing_organization_id")
+	}
+	if message == "" {
+		return AutoReplyResult{}, errors.New("missing_message")
+	}
+	if s.openAIKey == "" {
+		return AutoReplyResult{}, errors.New("openai_key_not_configured")
+	}
+
+	cfg, err := s.store.GetAIResolvedConfig(ctx, organizationID, s.defaultModel)
+	if err != nil {
+		return AutoReplyResult{}, err
+	}
+	if !cfg.IsEnabled || cfg.Mode != "auto" {
+		return AutoReplyResult{}, errors.New("ai_not_enabled_for_auto")
+	}
+	if cfg.RequireApproval {
+		return AutoReplyResult{}, errors.New("human_approval_required")
+	}
+	if matchesHandoffKeyword(message, cfg.HandoffKeywords) {
+		return AutoReplyResult{}, errors.New("handoff_keyword_detected")
+	}
+
+	started := time.Now()
+	reply, usage, err := s.callOpenAI(ctx, cfg, message)
+	latencyMS := int(time.Since(started).Milliseconds())
+	if err != nil {
+		_ = s.store.CreateAIInteractionLog(ctx, store.AIInteractionLog{
+			OrganizationID: organizationID,
+			ConversationID: conversationID,
+			AgentID:        cfg.AgentID,
+			Mode:           "auto",
+			EventType:      "auto_reply_error",
+			Model:          cfg.Model,
+			LatencyMS:      latencyMS,
+			Success:        false,
+			ErrorMessage:   err.Error(),
+			InputPreview:   truncate(message, 500),
+			Metadata:       []byte(`{"provider":"openai"}`),
+		})
+		return AutoReplyResult{}, err
+	}
+
+	_ = s.store.CreateAIInteractionLog(ctx, store.AIInteractionLog{
+		OrganizationID:   organizationID,
+		ConversationID:   conversationID,
+		AgentID:          cfg.AgentID,
+		Mode:             "auto",
+		EventType:        "auto_reply_generated",
+		Model:            cfg.Model,
+		PromptTokens:     usage.InputTokens,
+		CompletionTokens: usage.OutputTokens,
+		TotalTokens:      usage.TotalTokens,
+		EstimatedCostUSD: estimateCostUSD(cfg.Model, usage.InputTokens, usage.OutputTokens),
+		LatencyMS:        latencyMS,
+		Success:          true,
+		InputPreview:     truncate(message, 500),
+		OutputPreview:    truncate(reply, 500),
+		Metadata:         []byte(`{"provider":"openai"}`),
+	})
+
+	return AutoReplyResult{
+		Reply:            reply,
+		Model:            cfg.Model,
+		Mode:             cfg.Mode,
+		PromptTokens:     usage.InputTokens,
+		CompletionTokens: usage.OutputTokens,
+		TotalTokens:      usage.TotalTokens,
+		LatencyMS:        latencyMS,
+	}, nil
 }
 
 func (s *Service) dryRunReply(cfg store.AIResolvedConfig, message string) string {
@@ -151,6 +237,20 @@ func (s *Service) dryRunReply(cfg store.AIResolvedConfig, message string) string
 		orgRule = " Vou considerar as regras especificas configuradas para esta organizacao."
 	}
 	return fmt.Sprintf("Preview sem custo da Jenny: recebi %q.%s Quando a chave OpenAI estiver ativa e o modo permitir, eu responderei usando apenas o contexto autorizado desta organizacao.", truncate(message, 120), orgRule)
+}
+
+func matchesHandoffKeyword(message string, keywords []string) bool {
+	normalizedMessage := strings.ToLower(strings.TrimSpace(message))
+	if normalizedMessage == "" {
+		return false
+	}
+	for _, keyword := range keywords {
+		normalizedKeyword := strings.ToLower(strings.TrimSpace(keyword))
+		if normalizedKeyword != "" && strings.Contains(normalizedMessage, normalizedKeyword) {
+			return true
+		}
+	}
+	return false
 }
 
 type openAIUsage struct {

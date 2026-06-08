@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,37 +37,49 @@ type ConversationState struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+type WhatsAppConversation struct {
+	ID             string
+	OrganizationID string
+	SessionID      string
+	RemoteJID      string
+	ContactPhone   string
+	IsGroup        bool
+}
+
 type AIResolvedConfig struct {
 	AgentID            string
+	IsEnabled          bool
 	Model              string
 	Mode               string
 	SystemPrompt       string
 	SafetyPrompt       string
 	OrganizationPrompt string
 	BusinessRules      string
+	RequireApproval    bool
+	HandoffKeywords    []string
 	Temperature        float64
 	MaxOutputTokens    int
 	MaxContextMessages int
 }
 
 type AIInteractionLog struct {
-	OrganizationID     string
-	ConversationID     string
-	AgentID            string
-	JobID              string
-	Mode               string
-	EventType          string
-	Model              string
-	PromptTokens       int
-	CompletionTokens   int
-	TotalTokens        int
-	EstimatedCostUSD   float64
-	LatencyMS          int
-	Success            bool
-	ErrorMessage       string
-	InputPreview       string
-	OutputPreview      string
-	Metadata           []byte
+	OrganizationID   string
+	ConversationID   string
+	AgentID          string
+	JobID            string
+	Mode             string
+	EventType        string
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	EstimatedCostUSD float64
+	LatencyMS        int
+	Success          bool
+	ErrorMessage     string
+	InputPreview     string
+	OutputPreview    string
+	Metadata         []byte
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
@@ -144,17 +157,73 @@ func (s *Store) GetConversationState(ctx context.Context, conversationID string)
 	return state, true, nil
 }
 
+func (s *Store) GetWhatsAppConversation(ctx context.Context, conversationID string) (WhatsAppConversation, bool, error) {
+	var conv WhatsAppConversation
+	err := s.pool.QueryRow(ctx, `
+		select
+			id,
+			organization_id,
+			session_id,
+			coalesce(remote_jid, ''),
+			coalesce(contact_phone, ''),
+			coalesce(is_group, false)
+		from whatsapp_conversations
+		where id = $1
+		  and deleted_at is null
+	`, conversationID).Scan(
+		&conv.ID,
+		&conv.OrganizationID,
+		&conv.SessionID,
+		&conv.RemoteJID,
+		&conv.ContactPhone,
+		&conv.IsGroup,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return WhatsAppConversation{}, false, nil
+		}
+		return WhatsAppConversation{}, false, err
+	}
+	return conv, true, nil
+}
+
+func (s *Store) IsInboundWhatsAppMessage(ctx context.Context, conversationID string, messageID string) (bool, error) {
+	if strings.TrimSpace(messageID) == "" {
+		return true, nil
+	}
+
+	var fromMe bool
+	err := s.pool.QueryRow(ctx, `
+		select coalesce(from_me, false)
+		from whatsapp_messages
+		where conversation_id = $1
+		  and message_id = $2
+		order by sent_at desc nulls last
+		limit 1
+	`, conversationID, messageID).Scan(&fromMe)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return true, nil
+		}
+		return false, err
+	}
+	return !fromMe, nil
+}
+
 func (s *Store) GetAIResolvedConfig(ctx context.Context, organizationID string, fallbackModel string) (AIResolvedConfig, error) {
 	var cfg AIResolvedConfig
 	err := s.pool.QueryRow(ctx, `
 		select
 			a.id,
+			coalesce(os.is_enabled, false),
 			coalesce(nullif(a.default_model, ''), $2),
 			coalesce(os.mode, 'preview'),
 			a.system_prompt,
 			a.safety_prompt,
 			coalesce(os.organization_prompt, ''),
 			coalesce(os.business_rules, ''),
+			coalesce(os.require_human_approval, true),
+			coalesce(os.handoff_keywords, array[]::text[]),
 			a.temperature::float8,
 			coalesce(os.max_output_tokens, a.max_output_tokens),
 			coalesce(os.max_context_messages, a.max_context_messages)
@@ -165,12 +234,15 @@ func (s *Store) GetAIResolvedConfig(ctx context.Context, organizationID string, 
 		limit 1
 	`, organizationID, fallbackModel).Scan(
 		&cfg.AgentID,
+		&cfg.IsEnabled,
 		&cfg.Model,
 		&cfg.Mode,
 		&cfg.SystemPrompt,
 		&cfg.SafetyPrompt,
 		&cfg.OrganizationPrompt,
 		&cfg.BusinessRules,
+		&cfg.RequireApproval,
+		&cfg.HandoffKeywords,
 		&cfg.Temperature,
 		&cfg.MaxOutputTokens,
 		&cfg.MaxContextMessages,

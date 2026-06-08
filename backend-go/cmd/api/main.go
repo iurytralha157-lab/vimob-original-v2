@@ -43,10 +43,19 @@ func main() {
 	}
 	defer localCache.Close()
 
-	pool := worker.NewPool(cfg.WorkerCount, db, localCache, logger)
+	aiService := ai.NewService(db, logger, cfg.OpenAIKey, cfg.DefaultModel)
+	pool := worker.NewPool(
+		cfg.WorkerCount,
+		db,
+		localCache,
+		aiService,
+		logger,
+		cfg.SupabaseURL,
+		cfg.SupabaseServiceRoleKey,
+		cfg.AIAutoOrganizationIDs,
+	)
 	pool.Start(ctx)
 
-	aiService := ai.NewService(db, logger, cfg.OpenAIKey, cfg.DefaultModel)
 	api := httpapi.NewServer(db, localCache, pool, aiService, logger, cfg.WebhookSecret)
 	server := &http.Server{
 		Addr:              cfg.Addr,
