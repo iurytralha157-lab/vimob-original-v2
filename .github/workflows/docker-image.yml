@@ -28,7 +28,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push frontend
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -41,4 +41,14 @@ jobs:
             VITE_SUPABASE_PROJECT_ID=iemalzlfnbouobyjwlwi
             VITE_SUPABASE_URL=https://iemalzlfnbouobyjwlwi.supabase.co
             VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImllbWFsemxmbmJvdW9ieWp3bHdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc5MjQ1ODYsImV4cCI6MjA4MzUwMDU4Nn0.81N4uCUaIFOm7DHMaHa9Rhh-OoY06j6Ig4AFibzXuQU
-            VITE_VAPID_PUBLIC_KEY=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWjUfBw5nc02KFFL6pr1jM51bHv0CllEuy5ypnldeYLMhYSbQbKlWHK7T9VK1CF2xVgH_9HOc3tavj0iuT1mEzA
+            VITE_VAPID_PUBLIC_KEY=BC7q4HGKxwbHnzRl0uBTyTOm59GcEyxqM8fgSTGiSfNoxwYIIy8-HnbbpzQghQUzpzPmmifvn9t01EoTJaFa3uQ
+
+      - name: Build and push Go backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend-go
+          file: ./backend-go/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/iurytralha157-lab/vimob-backend-go:latest
+            ghcr.io/iurytralha157-lab/vimob-backend-go:${{ github.sha }}

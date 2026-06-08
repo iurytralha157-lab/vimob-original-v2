@@ -27,7 +27,46 @@ services:
         failure_action: rollback
     restart: unless-stopped
 
+  vimob-backend-go:
+    image: ghcr.io/iurytralha157-lab/vimob-backend-go:latest
+    environment:
+      VIMOB_BACKEND_ADDR: ":8088"
+      DATABASE_URL: ${DATABASE_URL}
+      BUNTDB_PATH: /app/data/chatbot-cache.db
+      WORKER_COUNT: ${WORKER_COUNT:-4}
+      VIMOB_WEBHOOK_SECRET: ${VIMOB_WEBHOOK_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_DEFAULT_MODEL: ${OPENAI_DEFAULT_MODEL:-gpt-4.1-nano}
+    volumes:
+      - vimob_backend_go_data:/app/data
+    networks:
+      - network_swarm_public
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.vimob-backend-go.rule=Host(`api2.vettercompany.com.br`)
+        - traefik.http.routers.vimob-backend-go.entrypoints=websecure
+        - traefik.http.routers.vimob-backend-go.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.vimob-backend-go.priority=10
+        - traefik.http.routers.vimob-backend-go.service=vimob-backend-go
+        - traefik.http.services.vimob-backend-go.loadbalancer.server.port=8088
+        - traefik.http.services.vimob-backend-go.loadbalancer.passHostHeader=true
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+        failure_action: rollback
+    restart: unless-stopped
+
 networks:
   network_swarm_public:
     name: network_swarm_public
     external: true
+
+volumes:
+  vimob_backend_go_data:
