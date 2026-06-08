@@ -77,6 +77,7 @@ interface KPICardItemProps {
   onClick?: () => void;
   interactive?: boolean;
   tourTarget?: string;
+  className?: string;
 }
 
 function formatValue(value: string | number, format: string): string {
@@ -114,6 +115,7 @@ function KPICardItem({
   onClick,
   interactive = false,
   tourTarget,
+  className,
   isHighlighted = false,
 }: KPICardItemProps & { isHighlighted?: boolean }) {
   const hasTrend = trend !== undefined && trend !== 0;
@@ -135,7 +137,7 @@ function KPICardItem({
   };
   
   return (
-    <div data-tour={tourTarget} className="h-full">
+    <div data-tour={tourTarget} className={cn("h-full", className)}>
       <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -152,22 +154,22 @@ function KPICardItem({
             onClick={onClick}
             onKeyDown={handleKeyDown}
           >
-            <CardContent className={cn("p-4", isHighlighted && "py-5")}>
-              <div className="flex flex-col gap-1">
+            <CardContent className={cn("p-3 sm:p-4", isHighlighted && "sm:py-5")}>
+              <div className="flex min-h-[72px] flex-col gap-1 sm:min-h-0">
                 <div className="flex items-center justify-between">
                   <p className={cn(
                     "text-muted-foreground font-medium uppercase tracking-wider",
-                    isHighlighted ? "text-xs sm:text-sm" : "text-[10px] sm:text-xs"
+                    isHighlighted ? "text-[10px] sm:text-sm" : "text-[9px] sm:text-xs"
                   )}>
                     {title}
                   </p>
                   <div className={cn(
                     "rounded-lg flex items-center justify-center flex-shrink-0",
-                    isHighlighted ? "h-10 w-10 sm:h-12 sm:w-12" : "h-8 w-8 sm:h-9 sm:w-9"
+                    isHighlighted ? "h-8 w-8 sm:h-12 sm:w-12" : "h-7 w-7 sm:h-9 sm:w-9"
                   )} style={{ backgroundColor: iconBgColor || `hsl(var(--${accentColor}) / 0.1)` }}>
                     <Icon 
                       className={cn(
-                        isHighlighted ? "h-5 w-5 sm:h-6 sm:w-6" : "h-4 w-4 sm:h-5 sm:w-5"
+                        isHighlighted ? "h-4 w-4 sm:h-6 sm:w-6" : "h-3.5 w-3.5 sm:h-5 sm:w-5"
                       )} 
                       style={{ color: iconColor || `hsl(var(--${accentColor}))` }} 
                     />
@@ -177,7 +179,7 @@ function KPICardItem({
                 <div className="flex flex-col">
                   <p className={cn(
                     "font-bold leading-tight break-words",
-                    isHighlighted ? "text-2xl sm:text-3xl" : "text-xl sm:text-2xl"
+                    isHighlighted ? "text-xl sm:text-3xl" : "text-lg sm:text-2xl"
                   )}>
                     {formatValue(value, format)}
                   </p>
@@ -198,7 +200,7 @@ function KPICardItem({
                     </div>
                   )}
                   {rate !== undefined && (
-                    <div className={cn('mt-1 text-[10px] sm:text-xs font-semibold', rateColorClass)}>
+                    <div className={cn('mt-1 text-[9px] sm:text-xs font-semibold', rateColorClass)}>
                       {formatValue(rate, 'percent')} {rateLabel}
                     </div>
                   )}
@@ -324,6 +326,7 @@ export function KPICards({ data, isLoading, periodLabel = 'Últimos 30 dias', sc
       format: 'currency',
       accentColor: 'chart-5',
       tourTarget: 'dashboard-kpi-vgv',
+      className: 'col-span-2',
     },
     {
       title: '1º Contato',
@@ -355,15 +358,16 @@ export function KPICards({ data, isLoading, periodLabel = 'Últimos 30 dias', sc
   ];
 
   return (
-    <div className="space-y-3">
-      {/* Mobile: Grid de 2 colunas para manter legibilidade */}
+    <div className="space-y-2 sm:space-y-3">
       <div className="grid grid-cols-2 gap-2">
-        {kpis.map((kpi) => (
+        {kpis.slice(0, 4).map((kpi) => (
           <KPICardItem key={kpi.title} {...kpi} />
         ))}
       </div>
       <div className="grid grid-cols-2 gap-2">
-        {bottomKpis.map((kpi) => (
+        <KPICardItem key={bottomKpis[0].title} {...bottomKpis[0]} />
+        <KPICardItem key={kpis[4].title} {...kpis[4]} />
+        {bottomKpis.slice(1).map((kpi) => (
           <KPICardItem key={kpi.title} {...kpi} />
         ))}
       </div>
