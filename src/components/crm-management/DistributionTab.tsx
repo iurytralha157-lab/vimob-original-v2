@@ -40,6 +40,7 @@ import { useCreateQueueAdvanced, useUpdateQueueAdvanced } from '@/hooks/use-crea
 import { DistributionQueueEditor } from '@/components/round-robin/DistributionQueueEditor';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 
 const matchTypeLabels: Record<string, string> = {
   campaign: 'Campanha',
@@ -90,20 +91,43 @@ export function DistributionTab() {
   const deleteRoundRobin = useDeleteRoundRobin();
   const createQueue = useCreateQueueAdvanced();
   const updateQueue = useUpdateQueueAdvanced();
+  const accessScope = useUserAccessScope();
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingQueue, setEditingQueue] = useState<RoundRobinType | null>(null);
   const [ruleProperties, setRuleProperties] = useState<any[]>([]);
+  const visibleRoundRobins = useMemo(() => {
+    if (accessScope.isAdmin) return roundRobins;
+    const ledTeamIds = new Set(accessScope.ledTeamIds);
+    const ledUserIds = new Set(accessScope.ledUserIds);
+    return roundRobins.filter((queue) =>
+      queue.members.some((member) =>
+        (member.team_id && ledTeamIds.has(member.team_id)) ||
+        (!member.team_id && member.user_id && ledUserIds.has(member.user_id))
+      )
+    );
+  }, [accessScope.isAdmin, accessScope.ledTeamIds, accessScope.ledUserIds, roundRobins]);
+
+  const effectiveAllowedPipelineIds = useMemo(() => {
+    if (accessScope.isAdmin) return undefined;
+
+    return Array.from(new Set([
+      ...accessScope.ledPipelineIds,
+      ...visibleRoundRobins
+        .map((queue) => queue.target_pipeline_id)
+        .filter((pipelineId): pipelineId is string => Boolean(pipelineId)),
+    ]));
+  }, [accessScope.isAdmin, accessScope.ledPipelineIds, visibleRoundRobins]);
 
   const propertyRuleIds = useMemo(() => {
-    const ids = roundRobins
+    const ids = visibleRoundRobins
       .flatMap(queue => queue.rules)
       .filter(rule => rule.match_type === 'interest_property' || rule.match_type === 'property')
       .map(rule => rule.match_value)
       .filter((value): value is string => !!value?.trim());
 
     return [...new Set(ids)];
-  }, [roundRobins]);
+  }, [visibleRoundRobins]);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,8 +261,8 @@ export function DistributionTab() {
     );
   }
 
-  const activeQueues = roundRobins.filter(rr => rr.is_active).length;
-  const totalLeadsDistributed = roundRobins.reduce((acc, rr) => acc + (rr.leads_distributed || 0), 0);
+  const activeQueues = visibleRoundRobins.filter(rr => rr.is_active).length;
+  const totalLeadsDistributed = visibleRoundRobins.reduce((acc, rr) => acc + (rr.leads_distributed || 0), 0);
 
   return (
     <TooltipProvider>
@@ -247,7 +271,7 @@ export function DistributionTab() {
           <div>
             <h2 className="text-xl font-semibold">Distribuição de Leads</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              {roundRobins.length} {roundRobins.length === 1 ? 'fila' : 'filas'} · {activeQueues} {activeQueues === 1 ? 'ativa' : 'ativas'} · {totalLeadsDistributed} leads distribuídos
+              {visibleRoundRobins.length} {visibleRoundRobins.length === 1 ? 'fila' : 'filas'} · {activeQueues} {activeQueues === 1 ? 'ativa' : 'ativas'} · {totalLeadsDistributed} leads distribuídos
             </p>
           </div>
           <Button data-tour="distribution-new-queue" onClick={() => openEditor()} className="gap-2">
@@ -256,7 +280,7 @@ export function DistributionTab() {
           </Button>
         </div>
 
-        {roundRobins.length === 0 ? (
+        {visibleRoundRobins.length === 0 ? (
           <div className="rounded-xl border border-dashed py-16 text-center">
             <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
               <Shuffle className="h-8 w-8 text-primary" />
@@ -271,12 +295,12 @@ export function DistributionTab() {
             </Button>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border bg-card">
-            <Table>
+          <div className="overflow-hidden rounded-xl border bg-card [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden md:[&_td:nth-child(n+4)]:table-cell md:[&_th:nth-child(n+4)]:table-cell">
+            <Table className="table-fixed md:table-auto">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[72px]">Status</TableHead>
-                  <TableHead>Nome da fila</TableHead>
+                  <TableHead className="w-[62px] px-3 md:w-[72px] md:px-4">Status</TableHead>
+                  <TableHead className="w-[34%] md:w-auto">Nome da fila</TableHead>
                   <TableHead>Critério</TableHead>
                   <TableHead>Pipeline</TableHead>
                   <TableHead>Usuários ou equipes</TableHead>
@@ -286,7 +310,7 @@ export function DistributionTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {roundRobins.map((queue) => {
+                {visibleRoundRobins.map((queue) => {
                   const creator = queue.created_by_user?.name || queue.created_by_user?.email || 'Não informado';
                   const createdAt = format(new Date(queue.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR });
                   const members = queue.members.slice(0, 5);
@@ -303,15 +327,15 @@ export function DistributionTab() {
                       className="cursor-pointer"
                       onClick={() => openEditor(queue)}
                     >
-                      <TableCell onClick={(event) => event.stopPropagation()}>
+                      <TableCell className="px-3 md:px-4" onClick={(event) => event.stopPropagation()}>
                         <Switch
                           checked={queue.is_active || false}
                           onCheckedChange={() => toggleActive(queue)}
                           aria-label={queue.is_active ? 'Desativar fila' : 'Ativar fila'}
                         />
                       </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{queue.name}</div>
+                      <TableCell className="min-w-0">
+                        <div className="truncate font-medium">{queue.name}</div>
                         <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                           <span>{queue.strategy === 'weighted' ? 'Ponderada' : 'Sequencial'}</span>
                           {queue.settings?.enable_redistribution && (
@@ -321,7 +345,7 @@ export function DistributionTab() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="max-w-[260px]">
+                      <TableCell className="min-w-0 max-w-[150px] md:max-w-[260px]">
                         <p className="truncate text-sm">{formatRules(queue)}</p>
                         {queue.rules.length > 1 && (
                           <p className="text-xs text-muted-foreground">{queue.rules.length} critérios</p>
@@ -397,14 +421,16 @@ export function DistributionTab() {
                           <Button variant="ghost" size="icon" onClick={() => openEditor(queue)}>
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => handleDeleteRR(queue.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {accessScope.isAdmin && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteRR(queue.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -423,6 +449,9 @@ export function DistributionTab() {
           }}
           queue={editingQueue}
           onSave={handleSaveQueue}
+          allowedTeamIds={accessScope.isAdmin ? undefined : accessScope.ledTeamIds}
+          allowedUserIds={accessScope.isAdmin ? undefined : accessScope.ledUserIds}
+          allowedPipelineIds={effectiveAllowedPipelineIds}
         />
       </div>
     </TooltipProvider>

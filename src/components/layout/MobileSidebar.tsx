@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useOrganizationModules } from '@/hooks/use-organization-modules';
 import { useUserPermissions } from '@/hooks/use-user-permissions';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 import { useSystemSettings } from '@/hooks/use-system-settings';
 import {
   Menu,
@@ -63,11 +64,7 @@ const allNavItems: NavItem[] = [
   { 
     icon: LayoutDashboard, 
     labelKey: 'dashboard', 
-    path: '/dashboard',
-    children: [
-      { icon: LayoutDashboard, labelKey: 'summary', path: '/dashboard' },
-      { icon: BarChart3, labelKey: 'campaigns', path: '/dashboard/campaigns', module: 'campaigns' },
-    ]
+    path: '/dashboard'
   },
 
   { icon: Kanban, labelKey: 'pipelines', path: '/crm/pipelines', module: 'crm' },
@@ -130,6 +127,7 @@ export function MobileSidebar({ externalOpen, onExternalOpenChange }: MobileSide
   const { t } = useLanguage();
   const { hasModule, isLoading: modulesLoading } = useOrganizationModules();
   const { hasPermission } = useUserPermissions();
+  const { isTeamLeader } = useUserAccessScope();
   const { data: systemSettings } = useSystemSettings();
   const { resolvedTheme } = useTheme();
 
@@ -158,7 +156,9 @@ export function MobileSidebar({ externalOpen, onExternalOpenChange }: MobileSide
         
         // Permission check
         if (item.permission && !hasPermission(item.permission)) return false;
-        if (item.anyPermissions && !item.anyPermissions.some(permission => hasPermission(permission))) return false;
+        if (item.anyPermissions && !item.anyPermissions.some(permission => hasPermission(permission))) {
+          if (!(item.path === '/crm/management' && isTeamLeader)) return false;
+        }
         
         // Segment specific rules
         if (item.path === '/crm/contacts' && organization?.segment === 'telecom') return false;
@@ -178,7 +178,7 @@ export function MobileSidebar({ externalOpen, onExternalOpenChange }: MobileSide
     };
 
     return filterItems(allNavItems);
-  }, [hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, modulesLoading]);
+  }, [hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, modulesLoading, isTeamLeader]);
 
 
   // Filter bottom items based on user role and modules

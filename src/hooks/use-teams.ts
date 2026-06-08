@@ -154,6 +154,7 @@ export function useUpdateTeam() {
       members,
       logo_url,
       is_active,
+      preserveLeadership,
     }: {
       id: string;
       name?: string;
@@ -161,6 +162,7 @@ export function useUpdateTeam() {
       members?: TeamMemberInput[];
       logo_url?: string | null;
       is_active?: boolean;
+      preserveLeadership?: boolean;
     }) => {
       const teamUpdates: Record<string, unknown> = {};
       if (name !== undefined) teamUpdates.name = name;
@@ -210,7 +212,7 @@ export function useUpdateTeam() {
           const membersToInsert = membersToAdd.map((userId) => ({
             team_id: id,
             user_id: userId,
-            is_leader: memberLeadershipByUserId.get(userId) ?? false,
+            is_leader: preserveLeadership ? false : memberLeadershipByUserId.get(userId) ?? false,
           }));
 
           const { error: insertError } = await supabase
@@ -220,14 +222,16 @@ export function useUpdateTeam() {
           if (insertError) throw insertError;
         }
 
-        for (const [userId, isLeader] of memberLeadershipByUserId.entries()) {
-          const { error: leaderError } = await supabase
-            .from('team_members')
-            .update({ is_leader: isLeader } as any)
-            .eq('team_id', id)
-            .eq('user_id', userId);
+        if (!preserveLeadership) {
+          for (const [userId, isLeader] of memberLeadershipByUserId.entries()) {
+            const { error: leaderError } = await supabase
+              .from('team_members')
+              .update({ is_leader: isLeader } as any)
+              .eq('team_id', id)
+              .eq('user_id', userId);
 
-          if (leaderError) throw leaderError;
+            if (leaderError) throw leaderError;
+          }
         }
 
         await syncRoundRobinWithTeam(id, normalizedMemberIds);

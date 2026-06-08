@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 
 interface SdrDistributionButtonProps {
   lead: any;
@@ -45,14 +46,21 @@ export function SdrDistributionButton({ lead, refetchStages }: SdrDistributionBu
   const { data: teams = [] } = useTeams();
   const { data: stages = [] } = useStages(selectedPipelineId || undefined);
   const updateLead = useUpdateLead();
+  const accessScope = useUserAccessScope();
+
+  const allowedTeamIds = accessScope.isAdmin ? null : new Set(accessScope.ledTeamIds);
+  const allowedPipelineIds = accessScope.isAdmin ? null : new Set(accessScope.ledPipelineIds);
 
   const selectedPipeline = pipelines.find(p => p.id === selectedPipelineId);
+  const visiblePipelines = accessScope.isAdmin
+    ? pipelines
+    : pipelines.filter((pipeline) => allowedPipelineIds?.has(pipeline.id));
   
   // Find teams associated with the selected pipeline
   const pipelineTeams = allTeamPipelines
     .filter(tp => tp.pipeline_id === selectedPipelineId)
     .map(tp => teams.find(t => t.id === tp.team_id))
-    .filter(Boolean);
+    .filter((team) => !!team && (accessScope.isAdmin || allowedTeamIds?.has(team.id)));
 
   // Get all members of those teams
   const teamMembers = pipelineTeams.flatMap(t => t?.members || []);
@@ -68,12 +76,18 @@ export function SdrDistributionButton({ lead, refetchStages }: SdrDistributionBu
   );
 
   const handlePipelineSelect = (id: string) => {
+    if (!accessScope.isAdmin && !allowedPipelineIds?.has(id)) return;
     setSelectedPipelineId(id);
     setStep('mode');
   };
 
   const handleManualAssign = async (userId: string) => {
     if (!selectedPipelineId || isProcessing) return;
+    if (!accessScope.isAdmin && !allowedPipelineIds?.has(selectedPipelineId)) return;
+    if (!availableUsers.some((user) => user.id === userId)) {
+      toast.error('Você só pode distribuir para membros da sua equipe');
+      return;
+    }
     setIsProcessing(true);
     
     try {
@@ -104,6 +118,7 @@ export function SdrDistributionButton({ lead, refetchStages }: SdrDistributionBu
 
   const handleAutomaticDistribute = async () => {
     if (!selectedPipelineId || isProcessing) return;
+    if (!accessScope.isAdmin && !allowedPipelineIds?.has(selectedPipelineId)) return;
     setIsProcessing(true);
     
     try {
@@ -181,7 +196,7 @@ export function SdrDistributionButton({ lead, refetchStages }: SdrDistributionBu
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                pipelines.map(p => (
+                visiblePipelines.map(p => (
                   <button
                     key={p.id}
                     onClick={() => handlePipelineSelect(p.id)}
@@ -197,6 +212,11 @@ export function SdrDistributionButton({ lead, refetchStages }: SdrDistributionBu
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </button>
                 ))
+              )}
+              {!pipelinesLoading && visiblePipelines.length === 0 && (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  Nenhuma pipeline liberada para sua equipe.
+                </div>
               )}
             </div>
           )}

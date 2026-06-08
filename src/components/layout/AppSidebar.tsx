@@ -15,6 +15,7 @@ import React, { useState, useMemo } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useOrganizationModules } from '@/hooks/use-organization-modules';
 import { useUserPermissions } from '@/hooks/use-user-permissions';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useSystemSettings } from '@/hooks/use-system-settings';
 import { useTheme } from 'next-themes';
@@ -36,18 +37,7 @@ interface NavItem {
 const allNavItems: NavItem[] = [{
   icon: LayoutDashboard,
   labelKey: 'dashboard',
-  path: '/dashboard',
-  children: [{
-    icon: LayoutDashboard,
-    labelKey: 'summary',
-    path: '/dashboard'
-  }, {
-    icon: BarChart3,
-    labelKey: 'campaigns',
-    path: '/dashboard/campaigns',
-    module: 'campaigns',
-    permission: 'module_campaigns'
-  }]
+  path: '/dashboard'
 }, {
   icon: Kanban,
   labelKey: 'pipelines',
@@ -245,6 +235,7 @@ export const AppSidebar = React.memo(function AppSidebar() {
   const {
     hasPermission
   } = useUserPermissions();
+  const { isTeamLeader } = useUserAccessScope();
   const {
     collapsed,
     toggleCollapsed
@@ -301,7 +292,9 @@ export const AppSidebar = React.memo(function AppSidebar() {
         
         // Permission check
         if (item.permission && !hasPermission(item.permission)) return false;
-        if (item.anyPermissions && !item.anyPermissions.some(permission => hasPermission(permission))) return false;
+        if (item.anyPermissions && !item.anyPermissions.some(permission => hasPermission(permission))) {
+          if (!(item.path === '/crm/management' && isTeamLeader)) return false;
+        }
         
         // Segment specific rules
         if (item.path === '/crm/contacts' && organization?.segment === 'telecom') return false;
@@ -321,7 +314,7 @@ export const AppSidebar = React.memo(function AppSidebar() {
     };
 
     return filterItems(allNavItems);
-  }, [hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, organization?.subscription_status, modulesLoading, isBillingBlocked]);
+  }, [hasModule, hasPermission, profile?.role, isSuperAdmin, organization?.segment, organization?.subscription_status, modulesLoading, isBillingBlocked, isTeamLeader]);
 
 
   // Filter bottom items based on user role and modules

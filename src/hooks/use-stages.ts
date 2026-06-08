@@ -20,6 +20,7 @@ interface FilteredStageCountsParams {
   filterAdSet?: string;
   filterAd?: string;
   filterSource?: string;
+  filterUserIds?: string[];
 }
 
 // Limite de leads por estágio para paginação inicial (otimizado para performance)
@@ -150,6 +151,7 @@ export interface PipelineQueryFilters {
   filterAdSet?: string;
   filterAd?: string;
   filterSource?: string;
+  filterUserIds?: string[];
 }
 
 export async function buildPipelineLeadQueryFilters(params: {
@@ -175,6 +177,10 @@ export async function buildPipelineLeadQueryFilters(params: {
 
     if (filterUserId && filterUserId !== 'all') {
       query = query.eq('assigned_user_id', filterUserId);
+    } else if (Array.isArray(filters.filterUserIds)) {
+      query = filters.filterUserIds.length > 0
+        ? query.in('assigned_user_id', filters.filterUserIds)
+        : query.eq('id', '00000000-0000-0000-0000-000000000000');
     }
     if (filters.filterDealStatus && filters.filterDealStatus !== 'all') {
       query = query.eq('deal_status', filters.filterDealStatus);
@@ -253,6 +259,7 @@ export function useStagesWithLeads(
 ) {
   const dateFromISO = filters?.dateRange?.from?.toISOString();
   const dateToISO = filters?.dateRange?.to?.toISOString();
+  const filterUserIdsKey = filters?.filterUserIds?.join(',');
   
   return useQuery({
     queryKey: [
@@ -267,7 +274,8 @@ export function useStagesWithLeads(
       filters?.filterCampaign, 
       filters?.filterAdSet, 
       filters?.filterAd,
-      filters?.filterSource
+      filters?.filterSource,
+      filterUserIdsKey
     ],
     staleTime: 30000,
     gcTime: 1000 * 60 * 15,
@@ -518,6 +526,7 @@ export function useFilteredStageCounts({
   filterAdSet,
   filterAd,
   filterSource,
+  filterUserIds,
 }: FilteredStageCountsParams) {
   return useQuery({
     queryKey: [
@@ -534,6 +543,7 @@ export function useFilteredStageCounts({
       filterAdSet,
       filterAd,
       filterSource,
+      filterUserIds?.join(','),
     ],
     enabled: !!pipelineId && stageIds.length > 0,
     staleTime: 30_000,
@@ -552,6 +562,7 @@ export function useFilteredStageCounts({
             filterAdSet,
             filterAd,
             filterSource,
+            filterUserIds,
           },
         });
 
@@ -767,6 +778,7 @@ export function useLoadMoreLeads() {
         filterAdSet?: string;
         filterAd?: string;
         filterSource?: string;
+        filterUserIds?: string[];
       };
     }) => {
       try {
@@ -801,7 +813,7 @@ export function useLoadMoreLeads() {
     onSuccess: ({ stageId, leads }, { pipelineId, filterUserId, filters }) => {
       const dateFromISO = filters?.dateRange?.from?.toISOString();
       const dateToISO = filters?.dateRange?.to?.toISOString();
-      const cacheKey = ['stages-with-leads', pipelineId, filterUserId, dateFromISO, dateToISO, filters?.filterTag, filters?.filterDealStatus, filters?.searchQuery, filters?.filterCampaign, filters?.filterAdSet, filters?.filterAd, filters?.filterSource];
+      const cacheKey = ['stages-with-leads', pipelineId, filterUserId, dateFromISO, dateToISO, filters?.filterTag, filters?.filterDealStatus, filters?.searchQuery, filters?.filterCampaign, filters?.filterAdSet, filters?.filterAd, filters?.filterSource, filters?.filterUserIds?.join(',')];
       
       queryClient.setQueryData(cacheKey, (old: any[] | undefined) => {
         if (!old) return old;

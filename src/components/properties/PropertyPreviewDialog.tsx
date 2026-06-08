@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Property, useProperty, useUpdateProperty } from '@/hooks/use-properties';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
@@ -64,22 +65,25 @@ export function PropertyPreviewDialog({
   
   // Use full property if available, otherwise fallback to list property
   const property = fullProperty || propertyFromList;
-  const showLegacyDetails = false;
+  const cadastroUserId = property?.cadastrado_por && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(property.cadastrado_por)
+    ? property.cadastrado_por
+    : null;
+  const captorUserId = property?.corretor_id || cadastroUserId;
   const { data: captorUser } = useQuery({
-    queryKey: ['property-captor', property?.corretor_id],
+    queryKey: ['property-captor', captorUserId],
     queryFn: async () => {
-      if (!property?.corretor_id) return null;
+      if (!captorUserId) return null;
 
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, phone, whatsapp')
-        .eq('id', property.corretor_id)
+        .select('id, name, email, phone, whatsapp, avatar_url')
+        .eq('id', captorUserId)
         .maybeSingle();
 
       if (error) throw error;
       return data;
     },
-    enabled: open && !!property?.corretor_id,
+    enabled: open && !!captorUserId,
   });
 
   // Sync embla with currentIndex
@@ -133,7 +137,7 @@ export function PropertyPreviewDialog({
   const displayArea = isLand ? property?.area_total : (property?.area_util || property?.area_total);
   const cleanDescription = cleanPropertyDescription(property?.descricao);
   const ownerPhone = property?.owner_cellphone || property?.owner_phone_commercial || property?.owner_phone_residential || null;
-  const captorName = captorUser?.name || property?.cadastrado_por || null;
+  const captorName = captorUser?.name || (cadastroUserId ? null : property?.cadastrado_por) || null;
   const captorContact = captorUser?.whatsapp || captorUser?.phone || captorUser?.email || null;
   const hasOwnerInfo = !!(property?.owner_name || ownerPhone || property?.owner_email);
   const hasCaptorInfo = !!(captorName || captorContact);
@@ -254,15 +258,200 @@ export function PropertyPreviewDialog({
     </div>
   ) : null;
 
+  const monthlyCostsSection = property && (property.condominio || property.iptu || property.seguro_incendio || property.taxa_de_servico) ? (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+        Custos Mensais
+      </h3>
+      <div className="grid grid-cols-1 gap-1.5 text-sm sm:grid-cols-2">
+        {property.condominio && (
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-2.5 py-2">
+            <span className="text-xs text-muted-foreground block">Condomínio</span>
+            <span className="font-semibold text-primary">
+              R$ {property.condominio.toLocaleString('pt-BR')}
+            </span>
+          </div>
+        )}
+        {property.iptu && (
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-2.5 py-2">
+            <span className="text-xs text-muted-foreground block">IPTU</span>
+            <span className="font-semibold text-primary">
+              R$ {property.iptu.toLocaleString('pt-BR')}
+            </span>
+          </div>
+        )}
+        {property.seguro_incendio && (
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-2.5 py-2">
+            <span className="text-xs text-muted-foreground block">Seguro incêndio</span>
+            <span className="font-semibold text-primary">
+              R$ {property.seguro_incendio.toLocaleString('pt-BR')}
+            </span>
+          </div>
+        )}
+        {property.taxa_de_servico && (
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-2.5 py-2">
+            <span className="text-xs text-muted-foreground block">Taxa de serviço</span>
+            <span className="font-semibold text-primary">
+              R$ {property.taxa_de_servico.toLocaleString('pt-BR')}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  const propertySummarySection = property ? (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="font-mono text-xs">
+              {property.code}
+            </Badge>
+            <Badge variant={property.tipo_de_negocio === 'Venda' ? 'default' : 'secondary'}>
+              {property.tipo_de_negocio}
+            </Badge>
+            {property.destaque && (
+              <Badge className="bg-amber-500 text-white">
+                <Star className="h-3 w-3 mr-1 fill-current" />
+                Destaque
+              </Badge>
+            )}
+          </div>
+          <h2 className="text-base font-bold leading-tight lg:text-lg">
+            {property.title || `${property.tipo_de_imovel} em ${property.bairro || 'Localização'}`}
+          </h2>
+        </div>
+
+        <div className="shrink-0 pt-1">
+          <Switch
+            checked={isActive}
+            onCheckedChange={handleToggleStatus}
+            disabled={updateProperty.isPending}
+          />
+        </div>
+      </div>
+
+      {(property.endereco || property.bairro || property.cidade) && (
+        <div className="flex items-start gap-2 text-muted-foreground">
+          <MapPin className="h-4 w-4 mt-0.5 shrink-0" />
+          <span className="text-sm">
+            {[property.endereco, property.numero, property.bairro, property.cidade, property.uf]
+              .filter(Boolean)
+              .join(', ')}
+            {property.cep && <span className="text-xs ml-1">- CEP: {property.cep}</span>}
+          </span>
+        </div>
+      )}
+
+      <div>
+        <p className="text-xl font-bold text-primary lg:text-2xl">
+          {formatPrice(displayPrice, property.tipo_de_negocio)}
+        </p>
+        {property.tipo_de_negocio === 'Aluguel' && (
+          <p className="text-sm text-muted-foreground">por mês</p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+        {property.quartos !== null && property.quartos !== undefined && property.quartos > 0 && (
+          <div className="flex min-h-[54px] items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-2">
+            <Bed className="h-5 w-5 shrink-0 text-primary" />
+            <div className="text-right leading-tight">
+              <span className="block font-bold">{property.quartos}</span>
+              <span className="block text-[10px] text-muted-foreground">Quartos</span>
+            </div>
+          </div>
+        )}
+        {property.banheiros !== null && property.banheiros !== undefined && property.banheiros > 0 && (
+          <div className="flex min-h-[54px] items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-2">
+            <Bath className="h-5 w-5 shrink-0 text-primary" />
+            <div className="text-right leading-tight">
+              <span className="block font-bold">{property.banheiros}</span>
+              <span className="block text-[10px] text-muted-foreground">Banheiros</span>
+            </div>
+          </div>
+        )}
+        {property.vagas !== null && property.vagas !== undefined && property.vagas > 0 && (
+          <div className="flex min-h-[54px] items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-2">
+            <Car className="h-5 w-5 shrink-0 text-primary" />
+            <div className="text-right leading-tight">
+              <span className="block font-bold">{property.vagas}</span>
+              <span className="block text-[10px] text-muted-foreground">Vagas</span>
+            </div>
+          </div>
+        )}
+        {displayArea && (
+          <div className="flex min-h-[54px] items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-2">
+            <Ruler className="h-5 w-5 shrink-0 text-primary" />
+            <div className="text-right leading-tight">
+              <span className="block font-bold">{displayArea}</span>
+              <span className="block text-[10px] text-muted-foreground">{isLand ? 'm² total' : 'm²'}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {monthlyCostsSection}
+    </div>
+  ) : null;
+
+  const responsibleSection = property && (hasOwnerInfo || hasCaptorInfo) ? (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+        Responsáveis
+      </h3>
+      <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+        {hasOwnerInfo && (
+          <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+            <div className="flex items-center gap-2 font-medium">
+              <User className="h-4 w-4 text-primary" />
+              Proprietário
+            </div>
+            {property.owner_name && <p className="text-foreground">{property.owner_name}</p>}
+            {ownerPhone && (
+              <p className="flex items-center gap-2 text-muted-foreground">
+                <Phone className="h-3.5 w-3.5" />
+                {ownerPhone}
+              </p>
+            )}
+            {property.owner_email && (
+              <p className="flex items-center gap-2 break-all text-muted-foreground">
+                <Mail className="h-3.5 w-3.5" />
+                {property.owner_email}
+              </p>
+            )}
+          </div>
+        )}
+
+        {hasCaptorInfo && (
+          <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+            <div className="flex items-center gap-2 font-medium">
+              <Avatar className="h-7 w-7">
+                <AvatarImage src={captorUser?.avatar_url || undefined} />
+                <AvatarFallback className="bg-primary text-xs text-primary-foreground">
+                  {(captorName || 'C').slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              Captador
+            </div>
+            {captorName && <p className="text-foreground">{captorName}</p>}
+            {captorContact && (
+              <p className="flex items-center gap-2 break-all text-muted-foreground">
+                {captorContact.includes('@') ? <Mail className="h-3.5 w-3.5" /> : <Phone className="h-3.5 w-3.5" />}
+                {captorContact}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   const content = isLoading ? (
     <div className="flex h-full min-h-0 flex-col lg:flex-row gap-4 lg:gap-5">
       <div className="lg:w-[52%] min-h-0 lg:overflow-y-auto">
-        <Skeleton className={cn("w-full rounded-xl", isMobile ? "aspect-[16/10] mx-auto w-[95%]" : "aspect-video")} />
-        <div className="flex gap-2 mt-3">
-          {[1, 2, 3, 4].map(i => (
-            <Skeleton key={i} className="w-16 h-16 rounded-lg" />
-          ))}
-        </div>
+        <Skeleton className={cn("w-full rounded-xl", isMobile ? "aspect-[16/10]" : "aspect-video")} />
       </div>
       <div className="lg:w-[48%] min-h-0 space-y-4">
         <Skeleton className="h-8 w-3/4" />
@@ -278,11 +467,11 @@ export function PropertyPreviewDialog({
   ) : property ? (
     <div className="flex h-full min-h-0 flex-col lg:flex-row gap-4 lg:gap-5">
       {/* Left Side - Image Gallery */}
-      <div className="lg:w-[52%] min-h-0 flex flex-col lg:overflow-y-auto">
+      <div className="lg:w-[52%] min-h-0 flex flex-col lg:overflow-y-auto lg:pr-1">
         {/* Main Image with Embla Carousel */}
         <div className={cn(
           "relative shrink-0 rounded-xl overflow-hidden bg-muted group",
-          isMobile ? "aspect-[16/10] mx-auto w-[95%] shadow-sm" : "aspect-video"
+          isMobile ? "aspect-[16/10] w-full shadow-sm" : "aspect-video"
         )}>
           {allImages.length > 0 ? (
             <>
@@ -345,288 +534,22 @@ export function PropertyPreviewDialog({
           )}
         </div>
 
-        {/* Thumbnail Grid */}
-        {allImages.length > 1 && (
-          <div className={cn("mt-3 flex items-center gap-2 overflow-x-auto overflow-y-hidden pb-1 [scrollbar-width:thin]", isMobile && "mx-4")}>
-            {allImages.slice(0, 8).map((img, index) => (
-              <button
-                key={index}
-                type="button"
-                className={cn(
-                  "h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-all duration-200",
-                  index === currentImageIndex 
-                    ? 'border-primary ring-2 ring-primary/30 scale-105' 
-                    : 'border-transparent hover:border-muted-foreground/40'
-                )}
-                onClick={() => {
-                  setCurrentImageIndex(index);
-                  emblaApi?.scrollTo(index);
-                }}
-              >
-                <img src={img} alt="" className="w-full h-full object-cover" />
-              </button>
-            ))}
-            {allImages.length > 8 && (
-              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-medium text-muted-foreground">
-                +{allImages.length - 8}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className={cn("mt-5", isMobile && "px-4")}>
-          {propertyDetailsSection}
-          {extraDetailsSection}
+        <div className="mt-5 hidden space-y-5 lg:block">
+          {propertySummarySection}
         </div>
       </div>
 
       {/* Right Side - Property Details */}
       <div className="lg:w-[48%] min-h-0">
-        <ScrollArea className="h-auto lg:h-full pr-3">
+        <ScrollArea className="h-auto pr-0 lg:h-full lg:pr-3">
           <div className="space-y-5">
-            {/* Header with Status Toggle */}
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <Badge variant="outline" className="font-mono text-xs">
-                    {property.code}
-                  </Badge>
-                  <Badge variant={property.tipo_de_negocio === 'Venda' ? 'default' : 'secondary'}>
-                    {property.tipo_de_negocio}
-                  </Badge>
-                  {property.destaque && (
-                    <Badge className="bg-amber-500 text-white">
-                      <Star className="h-3 w-3 mr-1 fill-current" />
-                      Destaque
-                    </Badge>
-                  )}
-                </div>
-                <h2 className="text-base lg:text-lg font-bold leading-tight">
-                  {property.title || `${property.tipo_de_imovel} em ${property.bairro || 'Localização'}`}
-                </h2>
-              </div>
-              
-              {/* Status Toggle */}
-              <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-muted/50 border flex-shrink-0">
-                <Switch
-                  checked={isActive}
-                  onCheckedChange={handleToggleStatus}
-                  disabled={updateProperty.isPending}
-                />
-                <span className={`text-xs font-medium ${isActive ? 'text-green-600' : 'text-muted-foreground'}`}>
-                  {isActive ? 'Ativo' : 'Inativo'}
-                </span>
-              </div>
+            <div className="lg:hidden">
+              {propertySummarySection}
             </div>
 
-            {/* Location */}
-            {(property.endereco || property.bairro || property.cidade) && (
-              <div className="flex items-start gap-2 text-muted-foreground">
-                <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span className="text-sm">
-                  {[property.endereco, property.numero, property.bairro, property.cidade, property.uf]
-                    .filter(Boolean)
-                    .join(', ')}
-                  {property.cep && <span className="text-xs ml-1">- CEP: {property.cep}</span>}
-                </span>
-              </div>
-            )}
-
-            {/* Price */}
-            <div className="bg-primary/5 border border-primary/20 rounded-xl p-3">
-              <p className="text-lg lg:text-xl font-bold text-primary">
-                {formatPrice(displayPrice, property.tipo_de_negocio)}
-              </p>
-              {property.tipo_de_negocio === 'Aluguel' && (
-                <p className="text-sm text-muted-foreground">por mês</p>
-              )}
-            </div>
-
-            {/* Key Features */}
-            <div className="grid grid-cols-4 gap-2">
-              {property.quartos !== null && property.quartos !== undefined && property.quartos > 0 && (
-                <div className="flex flex-col items-center p-2 rounded-xl bg-muted/50 border text-center">
-                  <Bed className="h-5 w-5 text-primary mb-1" />
-                  <span className="font-bold">{property.quartos}</span>
-                  <span className="text-[10px] text-muted-foreground">Quartos</span>
-                </div>
-              )}
-              {property.banheiros !== null && property.banheiros !== undefined && property.banheiros > 0 && (
-                <div className="flex flex-col items-center p-3 rounded-xl bg-muted/50 border text-center">
-                  <Bath className="h-5 w-5 text-primary mb-1" />
-                  <span className="font-bold">{property.banheiros}</span>
-                  <span className="text-[10px] text-muted-foreground">Banheiros</span>
-                </div>
-              )}
-              {property.vagas !== null && property.vagas !== undefined && property.vagas > 0 && (
-                <div className="flex flex-col items-center p-3 rounded-xl bg-muted/50 border text-center">
-                  <Car className="h-5 w-5 text-primary mb-1" />
-                  <span className="font-bold">{property.vagas}</span>
-                  <span className="text-[10px] text-muted-foreground">Vagas</span>
-                </div>
-              )}
-              {displayArea && (
-                <div className="flex flex-col items-center p-3 rounded-xl bg-muted/50 border text-center">
-                  <Ruler className="h-5 w-5 text-primary mb-1" />
-                  <span className="font-bold">{displayArea}</span>
-                  <span className="text-[10px] text-muted-foreground">{isLand ? 'm² total' : 'm²'}</span>
-                </div>
-              )}
-            </div>
-
-            {showLegacyDetails && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                Detalhes do Imóvel
-              </h3>
-
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                {property.tipo_de_imovel && (
-                  <div className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30">
-                    <Home className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Tipo:</span>
-                    <span className="font-medium ml-auto">{property.tipo_de_imovel}</span>
-                  </div>
-                )}
-                {property.suites !== null && property.suites !== undefined && property.suites > 0 && (
-                  <div className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30">
-                    <Bed className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Suítes:</span>
-                    <span className="font-medium ml-auto">{property.suites}</span>
-                  </div>
-                )}
-                {property.andar && (
-                  <div className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30">
-                    <Layers className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Andar:</span>
-                    <span className="font-medium ml-auto">{property.andar}º</span>
-                  </div>
-                )}
-                {property.area_total && (
-                  <div className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30">
-                    <Maximize2 className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Área Total:</span>
-                    <span className="font-medium ml-auto">{property.area_total}m²</span>
-                  </div>
-                )}
-                {property.ano_construcao && (
-                  <div className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Ano:</span>
-                    <span className="font-medium ml-auto">{property.ano_construcao}</span>
-                  </div>
-                )}
-                {property.mobilia && (
-                  <div className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30">
-                    <Sofa className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Mobília:</span>
-                    <span className="font-medium ml-auto">{property.mobilia}</span>
-                  </div>
-                )}
-                {property.regra_pet !== null && property.regra_pet !== undefined && (
-                  <div className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30">
-                    <PawPrint className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Pet:</span>
-                    <span className={`font-medium ml-auto flex items-center gap-1 ${property.regra_pet ? 'text-green-600' : ''}`}>
-                      {property.regra_pet ? <Check className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                      {property.regra_pet ? 'Sim' : 'Não'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-            )}
-
-            {/* Monthly Costs */}
-            {(property.condominio || property.iptu || property.seguro_incendio || property.taxa_de_servico) && (
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                  Custos Mensais
-                </h3>
-                
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  {property.condominio && (
-                    <div className="p-2 rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-900/40">
-                      <span className="text-xs text-muted-foreground block">Condomínio</span>
-                      <span className="font-semibold text-orange-600 dark:text-orange-400">
-                        R$ {property.condominio.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                  )}
-                  {property.iptu && (
-                    <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40">
-                      <span className="text-xs text-muted-foreground block">IPTU</span>
-                      <span className="font-semibold text-blue-600 dark:text-blue-400">
-                        R$ {property.iptu.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                  )}
-                  {property.seguro_incendio && (
-                    <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40">
-                      <span className="text-xs text-muted-foreground block">Seguro Incêndio</span>
-                      <span className="font-semibold text-red-600 dark:text-red-400">
-                        R$ {property.seguro_incendio.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                  )}
-                  {property.taxa_de_servico && (
-                    <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/40">
-                      <span className="text-xs text-muted-foreground block">Taxa Serviço</span>
-                      <span className="font-semibold text-purple-600 dark:text-purple-400">
-                        R$ {property.taxa_de_servico.toLocaleString('pt-BR')}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {(hasOwnerInfo || hasCaptorInfo) && (
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                  Responsáveis
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                  {hasOwnerInfo && (
-                    <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                      <div className="flex items-center gap-2 font-medium">
-                        <User className="h-4 w-4 text-primary" />
-                        Proprietário
-                      </div>
-                      {property.owner_name && <p className="text-foreground">{property.owner_name}</p>}
-                      {ownerPhone && (
-                        <p className="flex items-center gap-2 text-muted-foreground">
-                          <Phone className="h-3.5 w-3.5" />
-                          {ownerPhone}
-                        </p>
-                      )}
-                      {property.owner_email && (
-                        <p className="flex items-center gap-2 text-muted-foreground break-all">
-                          <Mail className="h-3.5 w-3.5" />
-                          {property.owner_email}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {hasCaptorInfo && (
-                    <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                      <div className="flex items-center gap-2 font-medium">
-                        <User className="h-4 w-4 text-primary" />
-                        Captador
-                      </div>
-                      {captorName && <p className="text-foreground">{captorName}</p>}
-                      {captorContact && (
-                        <p className="flex items-center gap-2 text-muted-foreground break-all">
-                          {captorContact.includes('@') ? <Mail className="h-3.5 w-3.5" /> : <Phone className="h-3.5 w-3.5" />}
-                          {captorContact}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+            {responsibleSection}
+            {propertyDetailsSection}
+            {extraDetailsSection}
 
             {/* Description */}
             {cleanDescription && (
@@ -700,11 +623,11 @@ export function PropertyPreviewDialog({
   if (isMobile) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="left-3 right-3 bottom-3 h-[88vh] w-auto rounded-t-[1.5rem] border p-4">
-          <SheetHeader className="pb-4">
+        <SheetContent side="bottom" className="left-2 right-2 bottom-2 h-[90vh] w-auto overflow-hidden rounded-t-[1.5rem] border p-0">
+          <SheetHeader className="px-4 pb-3 pt-4">
             <SheetTitle>Visualizar Imóvel</SheetTitle>
           </SheetHeader>
-          <ScrollArea className="h-[calc(90vh-80px)]">
+          <ScrollArea className="h-[calc(90vh-72px)] px-4 pb-4">
             {content}
           </ScrollArea>
         </SheetContent>

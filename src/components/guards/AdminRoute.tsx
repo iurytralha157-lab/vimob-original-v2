@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserPermissions } from '@/hooks/use-user-permissions';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 
 interface AdminRouteProps {
   children: React.ReactNode;
@@ -14,8 +15,9 @@ interface AdminRouteProps {
 export function AdminRoute({ children, allowedPermissions = [] }: AdminRouteProps) {
   const { profile, loading, isSuperAdmin } = useAuth();
   const { hasPermission, isLoading: permissionsLoading } = useUserPermissions();
+  const accessScope = useUserAccessScope();
 
-  if (loading || permissionsLoading) {
+  if (loading || permissionsLoading || accessScope.isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-pulse text-muted-foreground">Carregando...</div>
@@ -31,7 +33,11 @@ export function AdminRoute({ children, allowedPermissions = [] }: AdminRouteProp
   // Only admins have access
   if (profile?.role !== 'admin') {
     const hasAllowedPermission = allowedPermissions.some((permission) => hasPermission(permission));
-    if (!hasAllowedPermission) {
+    const canAccessAsTeamLeader =
+      accessScope.isTeamLeader &&
+      allowedPermissions.some((permission) => ['settings_teams', 'settings_users', 'settings_pipelines'].includes(permission));
+
+    if (!hasAllowedPermission && !canAccessAsTeamLeader) {
       return <Navigate to="/dashboard" replace />;
     }
   }

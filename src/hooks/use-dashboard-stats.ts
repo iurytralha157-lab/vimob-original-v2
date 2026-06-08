@@ -37,12 +37,19 @@ export interface DashboardStats {
 
 export interface EnhancedDashboardStats {
   totalLeads: number;
+  openLeads: number;
+  lostLeads: number;
   conversionRate: number;
   closedLeads: number;
+  wonAverageConversionDays: number | null;
+  wonConversionBuckets: WonConversionBucket[];
+  wonDeals: WonDealDetail[];
   avgResponseTime: string;
   totalSalesValue: number;
   pendingCommissions: number;
   leadsTrend: number;
+  openTrend: number;
+  lostTrend: number;
   conversionTrend: number;
   closedTrend: number;
   totalReceivables: number;
@@ -50,6 +57,27 @@ export interface EnhancedDashboardStats {
   overdueReceivables: number;
   overduePayables: number;
   paidCommissions: number;
+}
+
+export interface WonConversionBucket {
+  key: string;
+  label: string;
+  count: number;
+  percentage: number;
+  value: number;
+  color: string;
+}
+
+export interface WonDealDetail {
+  id: string;
+  name: string;
+  phone: string | null;
+  source: string | null;
+  value: number;
+  createdAt: string | null;
+  wonAt: string | null;
+  conversionDays: number | null;
+  assignedUserName: string;
 }
 
 export interface ChartDataPoint {
@@ -83,6 +111,11 @@ export interface TopBroker {
 export interface TopBrokersResult {
   brokers: TopBroker[];
   isFallbackMode: boolean;
+}
+
+function applyLeadMetaOptionFilter(query: any, idColumn: string, nameColumn: string, value?: string | null) {
+  if (!value) return query;
+  return query.or(`${idColumn}.eq.${value},${nameColumn}.eq.${value}`, { foreignTable: "lead_meta" });
 }
 
 export interface UpcomingTask {
@@ -157,7 +190,7 @@ export function useEnhancedDashboardStats(filters?: DashboardFilters) {
         const teamLeadIds = await fetchDashboardTeamLeadIds(filters?.teamId, null);
 
         let currentSelect = "id, deal_status, first_response_seconds, valor_interesse";
-        if (hasMetaFilter) currentSelect += ", lead_meta!inner(campaign_id, adset_id, ad_id)";
+        if (hasMetaFilter) currentSelect += ", lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)";
         if (hasTagFilter) currentSelect += ", lead_tags!inner(tag_id)";
 
         let query = supabase
@@ -167,9 +200,9 @@ export function useEnhancedDashboardStats(filters?: DashboardFilters) {
           .gte("created_at", currentFrom.toISOString())
           .lte("created_at", currentTo.toISOString());
 
-        if (filters?.campaignId) query = query.eq("lead_meta.campaign_id", filters.campaignId);
-        if (filters?.adSetId) query = query.eq("lead_meta.adset_id", filters.adSetId);
-        if (filters?.adId) query = query.eq("lead_meta.ad_id", filters.adId);
+        query = applyLeadMetaOptionFilter(query, "campaign_id", "campaign_name", filters?.campaignId);
+        query = applyLeadMetaOptionFilter(query, "adset_id", "adset_name", filters?.adSetId);
+        query = applyLeadMetaOptionFilter(query, "ad_id", "ad_name", filters?.adId);
         if (filters?.tagId) query = query.eq("lead_tags.tag_id", filters.tagId);
         if (filters?.source) query = query.eq("source", filters.source);
         if (filters?.dealStatus) query = query.eq("deal_status", filters.dealStatus);
@@ -182,8 +215,8 @@ export function useEnhancedDashboardStats(filters?: DashboardFilters) {
         query = applyVisibilityFilter(query, visibility, "assigned_user_id", filters?.userId);
         query = applyLeadIdFilter(query, teamLeadIds);
 
-        let wonSelect = "id, valor_interesse, assigned_user_id, source";
-        if (hasMetaFilter) wonSelect += ", lead_meta!inner(campaign_id, adset_id, ad_id)";
+        let wonSelect = "id, name, phone, created_at, won_at, valor_interesse, assigned_user_id, source, user:users!leads_assigned_user_id_fkey(id, name, avatar_url)";
+        if (hasMetaFilter) wonSelect += ", lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)";
         if (hasTagFilter) wonSelect += ", lead_tags!inner(tag_id)";
 
         let wonQuery = supabase
@@ -194,9 +227,9 @@ export function useEnhancedDashboardStats(filters?: DashboardFilters) {
           .gte("won_at", currentFrom.toISOString())
           .lte("won_at", currentTo.toISOString());
 
-        if (filters?.campaignId) wonQuery = wonQuery.eq("lead_meta.campaign_id", filters.campaignId);
-        if (filters?.adSetId) wonQuery = wonQuery.eq("lead_meta.adset_id", filters.adSetId);
-        if (filters?.adId) wonQuery = wonQuery.eq("lead_meta.ad_id", filters.adId);
+        wonQuery = applyLeadMetaOptionFilter(wonQuery, "campaign_id", "campaign_name", filters?.campaignId);
+        wonQuery = applyLeadMetaOptionFilter(wonQuery, "adset_id", "adset_name", filters?.adSetId);
+        wonQuery = applyLeadMetaOptionFilter(wonQuery, "ad_id", "ad_name", filters?.adId);
         if (filters?.tagId) wonQuery = wonQuery.eq("lead_tags.tag_id", filters.tagId);
         if (filters?.source) wonQuery = wonQuery.eq("source", filters.source);
         if (filters?.dealStatus) wonQuery = wonQuery.eq("deal_status", filters.dealStatus);
@@ -210,19 +243,19 @@ export function useEnhancedDashboardStats(filters?: DashboardFilters) {
         wonQuery = applyLeadIdFilter(wonQuery, teamLeadIds);
 
         let prevSelect = "id, deal_status";
-        if (hasMetaFilter) prevSelect += ", lead_meta!inner(campaign_id, adset_id, ad_id)";
+        if (hasMetaFilter) prevSelect += ", lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)";
         if (hasTagFilter) prevSelect += ", lead_tags!inner(tag_id)";
 
         let prevQuery = supabase
           .from("leads")
-          .select(prevSelect, { count: "exact", head: true })
+          .select(prevSelect, { count: "exact" })
           .eq("organization_id", organizationId)
           .gte("created_at", prevFrom.toISOString())
           .lt("created_at", currentFrom.toISOString());
 
-        if (filters?.campaignId) prevQuery = prevQuery.eq("lead_meta.campaign_id", filters.campaignId);
-        if (filters?.adSetId) prevQuery = prevQuery.eq("lead_meta.adset_id", filters.adSetId);
-        if (filters?.adId) prevQuery = prevQuery.eq("lead_meta.ad_id", filters.adId);
+        prevQuery = applyLeadMetaOptionFilter(prevQuery, "campaign_id", "campaign_name", filters?.campaignId);
+        prevQuery = applyLeadMetaOptionFilter(prevQuery, "adset_id", "adset_name", filters?.adSetId);
+        prevQuery = applyLeadMetaOptionFilter(prevQuery, "ad_id", "ad_name", filters?.adId);
         if (filters?.tagId) prevQuery = prevQuery.eq("lead_tags.tag_id", filters.tagId);
         if (filters?.source) prevQuery = prevQuery.eq("source", filters.source);
         if (filters?.dealStatus) prevQuery = prevQuery.eq("deal_status", filters.dealStatus);
@@ -230,17 +263,42 @@ export function useEnhancedDashboardStats(filters?: DashboardFilters) {
         prevQuery = applyVisibilityFilter(prevQuery, visibility, "assigned_user_id", filters?.userId);
         prevQuery = applyLeadIdFilter(prevQuery, teamLeadIds);
 
-        const [leadsResult, wonResult, prevResult] = await Promise.all([query, wonQuery, prevQuery]);
+        let prevWonQuery = supabase
+          .from("leads")
+          .select(wonSelect)
+          .eq("organization_id", organizationId)
+          .eq("deal_status", "won")
+          .gte("won_at", prevFrom.toISOString())
+          .lt("won_at", currentFrom.toISOString());
+
+        prevWonQuery = applyLeadMetaOptionFilter(prevWonQuery, "campaign_id", "campaign_name", filters?.campaignId);
+        prevWonQuery = applyLeadMetaOptionFilter(prevWonQuery, "adset_id", "adset_name", filters?.adSetId);
+        prevWonQuery = applyLeadMetaOptionFilter(prevWonQuery, "ad_id", "ad_name", filters?.adId);
+        if (filters?.tagId) prevWonQuery = prevWonQuery.eq("lead_tags.tag_id", filters.tagId);
+        if (filters?.source) prevWonQuery = prevWonQuery.eq("source", filters.source);
+        if (filters?.dealStatus) prevWonQuery = prevWonQuery.eq("deal_status", filters.dealStatus);
+
+        if (filters?.searchQuery) {
+          const q = `%${filters.searchQuery}%`;
+          prevWonQuery = (prevWonQuery as any).or(`name.ilike.${q},email.ilike.${q},phone.ilike.${q}`);
+        }
+
+        prevWonQuery = applyVisibilityFilter(prevWonQuery, visibility, "assigned_user_id", filters?.userId);
+        prevWonQuery = applyLeadIdFilter(prevWonQuery, teamLeadIds);
+
+        const [leadsResult, wonResult, prevResult, prevWonResult] = await Promise.all([
+          query,
+          wonQuery,
+          prevQuery,
+          prevWonQuery,
+        ]);
 
         const totalLeads = leadsResult.count || 0;
         const leads = leadsResult.data || [];
         const wonLeads = wonResult.data || [];
-        const closedLeads = wonLeads.length;
         const prevTotal = prevResult.count || 0;
-
-        const totalSalesValue = wonLeads.reduce((sum, lead: any) => {
-          return sum + (Number(lead.valor_interesse) || 0);
-        }, 0);
+        const prevLeads = prevResult.data || [];
+        const prevWonLeads = prevWonResult.data || [];
 
         const respTimes = leads
           .filter((lead: any) => lead.first_response_seconds != null)
@@ -255,20 +313,86 @@ export function useEnhancedDashboardStats(filters?: DashboardFilters) {
           return `${Math.round(seconds / 3600)}h`;
         };
 
-        const wonFromPeriod = leads.filter((lead: any) => lead.deal_status === "won").length;
-        const conversionRate = totalLeads > 0 ? (wonFromPeriod / totalLeads) * 100 : 0;
-        const leadsTrend = prevTotal > 0 ? Math.round(((totalLeads - prevTotal) / prevTotal) * 100) : 0;
+        const closedLeads = wonLeads.length;
+        const lostLeads = leads.filter((lead: any) => lead.deal_status === "lost").length;
+        const openLeads = leads.filter((lead: any) => !["won", "lost"].includes(lead.deal_status)).length;
+        const totalSalesValue = wonLeads.reduce((sum, lead: any) => sum + (Number(lead.valor_interesse) || 0), 0);
+        const wonDeals: WonDealDetail[] = wonLeads.map((lead: any) => {
+          const hasDates = lead.created_at && lead.won_at;
+          const conversionDays = hasDates
+            ? Math.max(0, differenceInDays(new Date(lead.won_at), new Date(lead.created_at)))
+            : null;
+
+          return {
+            id: lead.id,
+            name: lead.name || "Lead sem nome",
+            phone: lead.phone || null,
+            source: lead.source || null,
+            value: Number(lead.valor_interesse) || 0,
+            createdAt: lead.created_at || null,
+            wonAt: lead.won_at || null,
+            conversionDays,
+            assignedUserName: lead.user?.name || "Sem responsavel",
+          };
+        });
+
+        const bucketDefinitions = [
+          { key: "up_to_7", label: "Ate 7 dias", min: 0, max: 7, color: "#10b981" },
+          { key: "7_to_14", label: "De 7 a 14 dias", min: 8, max: 14, color: "#22c55e" },
+          { key: "15_to_30", label: "15 a 30 dias", min: 15, max: 30, color: "#84cc16" },
+          { key: "1_to_2_months", label: "Entre 1 e 2 meses", min: 31, max: 60, color: "#eab308" },
+          { key: "2_to_4_months", label: "De 2 a 4 meses", min: 61, max: 120, color: "#f97316" },
+          { key: "4_to_6_months", label: "De 4 a 6 meses", min: 121, max: 180, color: "#fb6f24" },
+          { key: "over_6_months", label: "Acima de 6 meses", min: 181, max: Number.POSITIVE_INFINITY, color: "#ef4444" },
+        ];
+
+        const wonConversionBuckets: WonConversionBucket[] = bucketDefinitions.map((bucket) => {
+          const deals = wonDeals.filter((deal) => {
+            if (deal.conversionDays === null) return false;
+            return deal.conversionDays >= bucket.min && deal.conversionDays <= bucket.max;
+          });
+
+          return {
+            key: bucket.key,
+            label: bucket.label,
+            count: deals.length,
+            percentage: closedLeads > 0 ? (deals.length / closedLeads) * 100 : 0,
+            value: deals.reduce((sum, deal) => sum + deal.value, 0),
+            color: bucket.color,
+          };
+        });
+
+        const conversionDays = wonDeals
+          .map((deal) => deal.conversionDays)
+          .filter((days): days is number => days !== null);
+        const wonAverageConversionDays =
+          conversionDays.length > 0
+            ? Math.round(conversionDays.reduce((sum, days) => sum + days, 0) / conversionDays.length)
+            : null;
+        const prevLostLeads = prevLeads.filter((lead: any) => lead.deal_status === "lost").length;
+        const prevOpenLeads = prevLeads.filter((lead: any) => !["won", "lost"].includes(lead.deal_status)).length;
+        const calculateTrend = (current: number, previous: number) =>
+          previous > 0 ? Math.round(((current - previous) / previous) * 100) : 0;
+        const conversionRate = totalLeads > 0 ? (closedLeads / totalLeads) * 100 : 0;
+        const leadsTrend = calculateTrend(totalLeads, prevTotal);
 
         return {
           totalLeads,
+          openLeads,
+          lostLeads,
           conversionRate,
           closedLeads,
+          wonAverageConversionDays,
+          wonConversionBuckets,
+          wonDeals,
           avgResponseTime: formatAvgTime(avgRespSec),
           totalSalesValue,
           pendingCommissions: 0,
           leadsTrend,
+          openTrend: calculateTrend(openLeads, prevOpenLeads),
+          lostTrend: calculateTrend(lostLeads, prevLostLeads),
           conversionTrend: 0,
-          closedTrend: 0,
+          closedTrend: calculateTrend(closedLeads, prevWonLeads.length),
           totalReceivables: 0,
           totalPayables: 0,
           overdueReceivables: 0,
@@ -329,11 +453,13 @@ export function useLeadsChartData() {
 }
 
 export function useFunnelData(filters?: DashboardFilters, pipelineId?: string | null) {
-  const { user } = useAuth();
+  const { user, organization } = useAuth();
+  const organizationId = organization?.id;
 
   return useQuery({
     queryKey: [
       "funnel-data",
+      organizationId,
       filters?.dateRange?.from?.toISOString(),
       filters?.dateRange?.to?.toISOString(),
       filters?.teamId,
@@ -344,9 +470,11 @@ export function useFunnelData(filters?: DashboardFilters, pipelineId?: string | 
       filters?.adId,
       filters?.tagId,
       filters?.dealStatus,
+      filters?.searchQuery,
       pipelineId,
       user?.id,
     ],
+    enabled: !!user?.id && !!organizationId,
     queryFn: async () => {
       const visibility = user?.id ? await checkLeadVisibility(user.id) : { canViewAll: false, userId: undefined };
       const hasMetaFilter = !!(filters?.campaignId || filters?.adSetId || filters?.adId);
@@ -363,6 +491,7 @@ export function useFunnelData(filters?: DashboardFilters, pipelineId?: string | 
           const { data: pipeline } = await supabase
             .from("pipelines")
             .select("id")
+            .eq("organization_id", organizationId)
             .order("is_default", { ascending: false })
             .order("created_at", { ascending: true })
             .limit(1)
@@ -390,6 +519,7 @@ export function useFunnelData(filters?: DashboardFilters, pipelineId?: string | 
         let query = (supabase as any)
           .from("leads")
           .select(selectString)
+          .eq("organization_id", organizationId)
           .in("stage_id", stageIds);
 
         if (filters?.dateRange?.from) query = query.gte("created_at", filters.dateRange.from.toISOString());
@@ -397,21 +527,9 @@ export function useFunnelData(filters?: DashboardFilters, pipelineId?: string | 
         if (filters?.source) query = query.eq("source", filters.source);
         if (filters?.dealStatus) query = query.eq("deal_status", filters.dealStatus);
         if (filters?.tagId) query = query.eq("lead_tags.tag_id", filters.tagId);
-        if (filters?.campaignId) {
-          query = /^\d+$/.test(filters.campaignId)
-            ? query.eq("lead_meta.campaign_id", filters.campaignId)
-            : query.eq("lead_meta.campaign_name", filters.campaignId);
-        }
-        if (filters?.adSetId) {
-          query = /^\d+$/.test(filters.adSetId)
-            ? query.eq("lead_meta.adset_id", filters.adSetId)
-            : query.eq("lead_meta.adset_name", filters.adSetId);
-        }
-        if (filters?.adId) {
-          query = /^\d+$/.test(filters.adId)
-            ? query.eq("lead_meta.ad_id", filters.adId)
-            : query.eq("lead_meta.ad_name", filters.adId);
-        }
+        query = applyLeadMetaOptionFilter(query, "campaign_id", "campaign_name", filters?.campaignId);
+        query = applyLeadMetaOptionFilter(query, "adset_id", "adset_name", filters?.adSetId);
+        query = applyLeadMetaOptionFilter(query, "ad_id", "ad_name", filters?.adId);
         if (filters?.searchQuery) {
           const q = `%${filters.searchQuery}%`;
           query = query.or(`name.ilike.${q},email.ilike.${q},phone.ilike.${q}`);
@@ -481,11 +599,13 @@ export function useFunnelData(filters?: DashboardFilters, pipelineId?: string | 
 }
 
 export function useLeadSourcesData(filters?: DashboardFilters, pipelineId?: string | null) {
-  const { user } = useAuth();
+  const { user, organization } = useAuth();
+  const organizationId = organization?.id;
 
   return useQuery({
     queryKey: [
       "lead-sources-data",
+      organizationId,
       filters?.dateRange?.from?.toISOString(),
       filters?.dateRange?.to?.toISOString(),
       filters?.teamId,
@@ -496,9 +616,11 @@ export function useLeadSourcesData(filters?: DashboardFilters, pipelineId?: stri
       filters?.adId,
       filters?.tagId,
       filters?.dealStatus,
+      filters?.searchQuery,
       pipelineId,
       user?.id,
     ],
+    enabled: !!user?.id && !!organizationId,
     queryFn: async () => {
       const visibility = user?.id ? await checkLeadVisibility(user.id) : { canViewAll: false, userId: undefined };
       const hasMetaFilter = !!(filters?.campaignId || filters?.adSetId || filters?.adId);
@@ -527,7 +649,8 @@ export function useLeadSourcesData(filters?: DashboardFilters, pipelineId?: stri
 
         let query = (supabase as any)
           .from("leads")
-          .select(selectString);
+          .select(selectString)
+          .eq("organization_id", organizationId);
 
         if (stageIds) query = query.in("stage_id", stageIds);
         if (filters?.dateRange?.from) query = query.gte("created_at", filters.dateRange.from.toISOString());
@@ -535,21 +658,9 @@ export function useLeadSourcesData(filters?: DashboardFilters, pipelineId?: stri
         if (filters?.source) query = query.eq("source", filters.source);
         if (filters?.dealStatus) query = query.eq("deal_status", filters.dealStatus);
         if (filters?.tagId) query = query.eq("lead_tags.tag_id", filters.tagId);
-        if (filters?.campaignId) {
-          query = /^\d+$/.test(filters.campaignId)
-            ? query.eq("lead_meta.campaign_id", filters.campaignId)
-            : query.eq("lead_meta.campaign_name", filters.campaignId);
-        }
-        if (filters?.adSetId) {
-          query = /^\d+$/.test(filters.adSetId)
-            ? query.eq("lead_meta.adset_id", filters.adSetId)
-            : query.eq("lead_meta.adset_name", filters.adSetId);
-        }
-        if (filters?.adId) {
-          query = /^\d+$/.test(filters.adId)
-            ? query.eq("lead_meta.ad_id", filters.adId)
-            : query.eq("lead_meta.ad_name", filters.adId);
-        }
+        query = applyLeadMetaOptionFilter(query, "campaign_id", "campaign_name", filters?.campaignId);
+        query = applyLeadMetaOptionFilter(query, "adset_id", "adset_name", filters?.adSetId);
+        query = applyLeadMetaOptionFilter(query, "ad_id", "ad_name", filters?.adId);
         if (filters?.searchQuery) {
           const q = `%${filters.searchQuery}%`;
           query = query.or(`name.ilike.${q},email.ilike.${q},phone.ilike.${q}`);
@@ -662,7 +773,7 @@ export function useTopBrokers(filters?: DashboardFilters) {
         `;
 
       if (filters?.campaignId || filters?.adSetId || filters?.adId) {
-        selectString += ", lead_meta!inner(campaign_id, adset_id, ad_id)";
+        selectString += ", lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)";
       }
 
       let query = supabase
@@ -672,9 +783,9 @@ export function useTopBrokers(filters?: DashboardFilters) {
         .not("assigned_user_id", "is", null)
         .eq("deal_status", "won");
 
-      if (filters?.campaignId) query = query.eq("lead_meta.campaign_id", filters.campaignId);
-      if (filters?.adSetId) query = query.eq("lead_meta.adset_id", filters.adSetId);
-      if (filters?.adId) query = query.eq("lead_meta.ad_id", filters.adId);
+      query = applyLeadMetaOptionFilter(query, "campaign_id", "campaign_name", filters?.campaignId);
+      query = applyLeadMetaOptionFilter(query, "adset_id", "adset_name", filters?.adSetId);
+      query = applyLeadMetaOptionFilter(query, "ad_id", "ad_name", filters?.adId);
 
       if (visibility.teamMemberIds) {
         query = query.in("assigned_user_id", visibility.teamMemberIds);
@@ -750,15 +861,15 @@ export function useTopBrokers(filters?: DashboardFilters) {
         `;
 
       if (filters?.campaignId || filters?.adSetId || filters?.adId) {
-        fallbackSelectString += ", lead_meta!inner(campaign_id, adset_id, ad_id)";
+        fallbackSelectString += ", lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)";
       }
 
       let fallbackQuery = supabase.from("leads").select(fallbackSelectString).not("assigned_user_id", "is", null);
       fallbackQuery = applyLeadIdFilter(fallbackQuery, teamLeadIds);
 
-      if (filters?.campaignId) fallbackQuery = fallbackQuery.eq("lead_meta.campaign_id", filters.campaignId);
-      if (filters?.adSetId) fallbackQuery = fallbackQuery.eq("lead_meta.adset_id", filters.adSetId);
-      if (filters?.adId) fallbackQuery = fallbackQuery.eq("lead_meta.ad_id", filters.adId);
+      fallbackQuery = applyLeadMetaOptionFilter(fallbackQuery, "campaign_id", "campaign_name", filters?.campaignId);
+      fallbackQuery = applyLeadMetaOptionFilter(fallbackQuery, "adset_id", "adset_name", filters?.adSetId);
+      fallbackQuery = applyLeadMetaOptionFilter(fallbackQuery, "ad_id", "ad_name", filters?.adId);
 
       if (filters?.dateRange) {
         fallbackQuery = fallbackQuery
@@ -914,7 +1025,7 @@ export function useDealsEvolutionData(filters?: DashboardFilters) {
 
         let selectString = "id, created_at, won_at, lost_at, deal_status, assigned_user_id, source";
         if (filters?.campaignId || filters?.adSetId || filters?.adId) {
-          selectString += ", lead_meta!inner(campaign_id, adset_id, ad_id)";
+          selectString += ", lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name)";
         }
         if (filters?.tagId) {
           selectString += ", lead_tags!inner(tag_id)";
@@ -926,13 +1037,12 @@ export function useDealsEvolutionData(filters?: DashboardFilters) {
           .eq("organization_id", organizationId)
           .or(
             `and(created_at.gte.${dateFrom.toISOString()},created_at.lte.${dateTo.toISOString()}),` +
-              `and(won_at.gte.${dateFrom.toISOString()},won_at.lte.${dateTo.toISOString()}),` +
-              `and(lost_at.gte.${dateFrom.toISOString()},lost_at.lte.${dateTo.toISOString()})`,
+              `and(won_at.gte.${dateFrom.toISOString()},won_at.lte.${dateTo.toISOString()})`,
           );
 
-        if (filters?.campaignId) query = query.eq("lead_meta.campaign_id", filters.campaignId);
-        if (filters?.adSetId) query = query.eq("lead_meta.adset_id", filters.adSetId);
-        if (filters?.adId) query = query.eq("lead_meta.ad_id", filters.adId);
+        query = applyLeadMetaOptionFilter(query, "campaign_id", "campaign_name", filters?.campaignId);
+        query = applyLeadMetaOptionFilter(query, "adset_id", "adset_name", filters?.adSetId);
+        query = applyLeadMetaOptionFilter(query, "ad_id", "ad_name", filters?.adId);
         if (filters?.tagId) query = query.eq("lead_tags.tag_id", filters.tagId);
 
         query = applyVisibilityFilter(query, visibility, "assigned_user_id", filters?.userId);
@@ -1009,7 +1119,7 @@ export function useDealsEvolutionData(filters?: DashboardFilters) {
           ).length;
 
           const perdas = leads.filter(
-            (lead: any) => lead.deal_status === "lost" && inRange(lead.lost_at, intervalStart, intervalEnd),
+            (lead: any) => lead.deal_status === "lost" && inRange(lead.created_at, intervalStart, intervalEnd),
           ).length;
 
           const abertos = leads.filter(

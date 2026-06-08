@@ -172,15 +172,13 @@ export function useUpdateRoundRobin() {
       delete updateData.members;
       delete updateData.leads_distributed;
       
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('round_robins')
         .update(updateData)
-        .eq('id', id)
-        .select()
-        .single();
+        .eq('id', id);
       
       if (error) throw error;
-      return data;
+      return { id, ...updateData };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['round-robins'] });

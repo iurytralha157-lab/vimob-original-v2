@@ -22,6 +22,7 @@ import { TeamDialog } from '@/components/teams/TeamDialog';
 import { MemberAvailabilityDialog } from '@/components/teams/MemberAvailabilityDialog';
 import { useTeams, useDeleteTeam, useUpdateTeamStatus, Team } from '@/hooks/use-teams';
 import { useTeamMembersAvailability, formatAvailabilitySummary } from '@/hooks/use-member-availability';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 
 export function TeamsTab() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -37,8 +38,10 @@ export function TeamsTab() {
   const { data: teams = [], isLoading } = useTeams({ includeInactive: true });
   const deleteTeam = useDeleteTeam();
   const updateTeamStatus = useUpdateTeamStatus();
+  const accessScope = useUserAccessScope();
+  const visibleTeams = accessScope.isAdmin ? teams : teams.filter((team) => accessScope.ledTeamIds.includes(team.id));
 
-  const allMemberIds = teams.flatMap((team) => team.members?.map((member) => member.id) || []);
+  const allMemberIds = visibleTeams.flatMap((team) => team.members?.map((member) => member.id) || []);
   const { data: allAvailability = [] } = useTeamMembersAvailability(allMemberIds);
 
   const getMemberAvailability = (memberId: string) => {
@@ -101,8 +104,8 @@ export function TeamsTab() {
     );
   }
 
-  const totalMembers = teams.reduce((acc, team) => acc + (team.members?.length || 0), 0);
-  const activeTeams = teams.filter((team) => team.is_active !== false).length;
+  const totalMembers = visibleTeams.reduce((acc, team) => acc + (team.members?.length || 0), 0);
+  const activeTeams = visibleTeams.filter((team) => team.is_active !== false).length;
 
   return (
     <TooltipProvider>
@@ -111,17 +114,19 @@ export function TeamsTab() {
           <div>
             <h2 className="text-xl font-semibold">Equipes</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              {teams.length} {teams.length === 1 ? 'equipe' : 'equipes'} · {activeTeams}{' '}
+              {visibleTeams.length} {visibleTeams.length === 1 ? 'equipe' : 'equipes'} · {activeTeams}{' '}
               {activeTeams === 1 ? 'ativa' : 'ativas'} · {totalMembers} {totalMembers === 1 ? 'membro' : 'membros'}
             </p>
           </div>
-          <Button onClick={handleNewTeam} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Nova Equipe
-          </Button>
+          {accessScope.isAdmin && (
+            <Button onClick={handleNewTeam} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Nova Equipe
+            </Button>
+          )}
         </div>
 
-        {teams.length === 0 ? (
+        {visibleTeams.length === 0 ? (
           <div className="rounded-xl border border-dashed py-16 text-center">
             <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
               <Users className="h-8 w-8 text-primary" />
@@ -130,49 +135,55 @@ export function TeamsTab() {
             <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
               Organize seus corretores em equipes e configure a disponibilidade de cada um.
             </p>
-            <Button onClick={handleNewTeam} size="lg" className="gap-2">
-              <Plus className="h-4 w-4" />
-              Nova Equipe
-            </Button>
+            {accessScope.isAdmin && (
+              <Button onClick={handleNewTeam} size="lg" className="gap-2">
+                <Plus className="h-4 w-4" />
+                Nova Equipe
+              </Button>
+            )}
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border bg-card">
-            <Table>
+          <div className="overflow-hidden rounded-xl border bg-card [&_td:nth-child(n+3)]:hidden [&_th:nth-child(n+3)]:hidden md:[&_td:nth-child(n+3)]:table-cell md:[&_th:nth-child(n+3)]:table-cell">
+            <Table className="table-fixed md:table-auto">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[72px]">Status</TableHead>
-                  <TableHead>Nome da equipe</TableHead>
+                  <TableHead className="w-[64px] px-3 md:w-[72px] md:px-4">Status</TableHead>
+                  <TableHead className="w-auto">Nome da equipe</TableHead>
                   <TableHead>Membros</TableHead>
                   <TableHead>Criada por</TableHead>
                   <TableHead className="w-[112px] text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {teams.map((team) => {
+                {visibleTeams.map((team) => {
                   const members = team.members || [];
                   const createdAt = format(new Date(team.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR });
                   const creator = team.created_by_user?.name || team.created_by_user?.email || 'Não informado';
 
                   return (
                     <TableRow key={team.id} className="cursor-pointer" onClick={() => handleEdit(team)}>
-                      <TableCell onClick={(event) => event.stopPropagation()}>
-                        <Switch
-                          checked={team.is_active !== false}
-                          onCheckedChange={(checked) => updateTeamStatus.mutate({ id: team.id, is_active: checked })}
-                          aria-label={team.is_active !== false ? 'Desativar equipe' : 'Ativar equipe'}
-                        />
+                      <TableCell className="px-3 md:px-4" onClick={(event) => event.stopPropagation()}>
+                        {accessScope.isAdmin ? (
+                          <Switch
+                            checked={team.is_active !== false}
+                            onCheckedChange={(checked) => updateTeamStatus.mutate({ id: team.id, is_active: checked })}
+                            aria-label={team.is_active !== false ? 'Desativar equipe' : 'Ativar equipe'}
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Ativa</span>
+                        )}
                       </TableCell>
 
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10 border-2 border-background">
+                      <TableCell className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2.5 md:gap-3">
+                          <Avatar className="h-9 w-9 shrink-0 border-2 border-background md:h-10 md:w-10">
                             <AvatarImage src={team.logo_url || undefined} />
                             <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                               {getInitials(team.name || 'EQ')}
                             </AvatarFallback>
                           </Avatar>
-                          <div>
-                            <div className="font-medium">{team.name}</div>
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{team.name}</div>
                             <div className="text-xs text-muted-foreground">
                               {members.length} {members.length === 1 ? 'membro' : 'membros'}
                             </div>
@@ -253,14 +264,16 @@ export function TeamsTab() {
                           <Button variant="ghost" size="icon" onClick={() => handleEdit(team)}>
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(team)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {accessScope.isAdmin && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => handleDelete(team)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -271,7 +284,12 @@ export function TeamsTab() {
           </div>
         )}
 
-        <TeamDialog open={teamDialogOpen} onOpenChange={setTeamDialogOpen} team={selectedTeam} />
+        <TeamDialog
+          open={teamDialogOpen}
+          onOpenChange={setTeamDialogOpen}
+          team={selectedTeam}
+          canEditLeadership={accessScope.isAdmin}
+        />
 
         {availabilityMember && (
           <MemberAvailabilityDialog

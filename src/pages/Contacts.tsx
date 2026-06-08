@@ -323,6 +323,7 @@ export default function Contacts() {
         {isMobile ? (
           <div className="flex gap-2 items-center w-full">
             <Button
+              data-tour="contacts-new"
               size="icon"
               onClick={() => setIsCreateDialogOpen(true)}
               className="shrink-0"
@@ -330,47 +331,50 @@ export default function Contacts() {
             >
               <Plus className="h-4 w-4" />
             </Button>
-            <SharedFilters
-              datePreset={datePreset}
-              onDatePresetChange={setDatePreset}
-              customDateRange={customDateRange}
-              onCustomDateRangeChange={setCustomDateRange}
-              teamId={sharedFilters.teamId}
-              onTeamChange={setTeamId}
-              userId={selectedAssignee}
-              onUserChange={setSelectedAssignee}
-              source={selectedSource}
-              onSourceChange={setSelectedSource}
-              campaignId={sharedFilters.campaignId}
-              onCampaignChange={setCampaignId}
-              adSetId={sharedFilters.adSetId}
-              onAdSetChange={setAdSetId}
-              adId={sharedFilters.adId}
-              onAdChange={setAdId}
-              tagId={selectedTag}
-              onTagChange={setSelectedTag}
-              dealStatus={effectiveDealStatus}
-              onDealStatusChange={(value) => {
-                setLostLeadsView(false);
-                setSelectedDealStatus(value);
-              }}
-              searchQuery={search}
-              onSearchChange={setSearch}
-              onClear={handleClearFilters}
-              hasActiveFilters={hasSharedActiveFilters || selectedPipeline !== "all" || selectedStage !== "all" || lostLeadsView}
-              dynamicSources={dynamicSources}
-              campaigns={campaigns}
-              adSets={adSets}
-              ads={ads}
-              tags={allTagsFromHook}
-              isLoadingSources={isLoadingSources}
-              isLoadingCampaigns={isLoadingCampaigns}
-              isLoadingAdSets={isLoadingAdSets}
-              isLoadingAds={isLoadingAds}
-              datePosition="end"
-            />
+            <div data-tour="contacts-filters" className="min-w-0 flex-1">
+              <SharedFilters
+                datePreset={datePreset}
+                onDatePresetChange={setDatePreset}
+                customDateRange={customDateRange}
+                onCustomDateRangeChange={setCustomDateRange}
+                teamId={sharedFilters.teamId}
+                onTeamChange={setTeamId}
+                userId={selectedAssignee}
+                onUserChange={setSelectedAssignee}
+                source={selectedSource}
+                onSourceChange={setSelectedSource}
+                campaignId={sharedFilters.campaignId}
+                onCampaignChange={setCampaignId}
+                adSetId={sharedFilters.adSetId}
+                onAdSetChange={setAdSetId}
+                adId={sharedFilters.adId}
+                onAdChange={setAdId}
+                tagId={selectedTag}
+                onTagChange={setSelectedTag}
+                dealStatus={effectiveDealStatus}
+                onDealStatusChange={(value) => {
+                  setLostLeadsView(false);
+                  setSelectedDealStatus(value);
+                }}
+                searchQuery={search}
+                onSearchChange={setSearch}
+                onClear={handleClearFilters}
+                hasActiveFilters={hasSharedActiveFilters || selectedPipeline !== "all" || selectedStage !== "all" || lostLeadsView}
+                dynamicSources={dynamicSources}
+                campaigns={campaigns}
+                adSets={adSets}
+                ads={ads}
+                tags={allTagsFromHook}
+                isLoadingSources={isLoadingSources}
+                isLoadingCampaigns={isLoadingCampaigns}
+                isLoadingAdSets={isLoadingAdSets}
+                isLoadingAds={isLoadingAds}
+                datePosition="end"
+              />
+            </div>
 
             <Button
+              data-tour="contacts-lost"
               variant={lostLeadsView ? "destructive" : "outline"}
               size="icon"
               className="shrink-0"
@@ -382,7 +386,7 @@ export default function Contacts() {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="shrink-0">
+                <Button data-tour="contacts-import" variant="outline" size="icon" className="shrink-0">
                   <Upload className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -404,7 +408,7 @@ export default function Contacts() {
               <div className="flex items-center gap-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-9 gap-2 font-medium border-none hover:bg-muted">
+                    <Button data-tour="contacts-import" variant="outline" size="sm" className="h-9 gap-2 font-medium border-none hover:bg-muted">
                       <Upload className="h-4 w-4" />
                       <span className="hidden xl:inline">Importar / Exportar</span>
                       <ChevronDown className="h-4 w-4 opacity-50" />
@@ -427,6 +431,7 @@ export default function Contacts() {
                 </DropdownMenu>
 
                 <Button
+                  data-tour="contacts-lost"
                   variant={lostLeadsView ? "destructive" : "outline"}
                   size="sm"
                   onClick={handleToggleLostLeadsView}
@@ -439,6 +444,7 @@ export default function Contacts() {
 
               <div className="flex min-w-0 items-center justify-end gap-2">
                 <Button
+                  data-tour="contacts-new"
                   size="sm"
                   onClick={() => setIsCreateDialogOpen(true)}
                   className="h-9 gap-2 shadow-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
@@ -447,48 +453,50 @@ export default function Contacts() {
                   <span>Novo Lead</span>
                 </Button>
 
-                <SharedFilters
-                  datePreset={datePreset || "last30days"}
-                  onDatePresetChange={handleFilterChange(setDatePreset)}
-                  customDateRange={customDateRange}
-                  onCustomDateRangeChange={handleFilterChange(setCustomDateRange)}
-                  teamId={sharedFilters.teamId}
-                  onTeamChange={handleFilterChange(setTeamId)}
-                  userId={selectedAssignee}
-                  onUserChange={handleFilterChange(setSelectedAssignee)}
-                  source={selectedSource}
-                  onSourceChange={handleFilterChange(setSelectedSource)}
-                  campaignId={sharedFilters.campaignId}
-                  onCampaignChange={handleFilterChange(setCampaignId)}
-                  adSetId={sharedFilters.adSetId}
-                  onAdSetChange={handleFilterChange(setAdSetId)}
-                  adId={sharedFilters.adId}
-                  onAdChange={handleFilterChange(setAdId)}
-                  tagId={selectedTag}
-                  onTagChange={handleFilterChange(setSelectedTag)}
-                  dealStatus={effectiveDealStatus}
-                  onDealStatusChange={(value) => {
-                    setLostLeadsView(false);
-                    handleFilterChange(setSelectedDealStatus)(value);
-                  }}
-                  searchQuery={search}
-                  onSearchChange={(value) => {
-                    setSearch(value);
-                    setPage(1);
-                  }}
-                  onClear={handleClearFilters}
-                  hasActiveFilters={hasSharedActiveFilters || selectedPipeline !== "all" || selectedStage !== "all" || lostLeadsView}
-                  dynamicSources={dynamicSources}
-                  campaigns={campaigns}
-                  adSets={adSets}
-                  ads={ads}
-                  tags={allTagsFromHook}
-                  isLoadingSources={isLoadingSources}
-                  isLoadingCampaigns={isLoadingCampaigns}
-                  isLoadingAdSets={isLoadingAdSets}
-                  isLoadingAds={isLoadingAds}
-                  datePosition="end"
-                />
+                <div data-tour="contacts-filters">
+                  <SharedFilters
+                    datePreset={datePreset || "last30days"}
+                    onDatePresetChange={handleFilterChange(setDatePreset)}
+                    customDateRange={customDateRange}
+                    onCustomDateRangeChange={handleFilterChange(setCustomDateRange)}
+                    teamId={sharedFilters.teamId}
+                    onTeamChange={handleFilterChange(setTeamId)}
+                    userId={selectedAssignee}
+                    onUserChange={handleFilterChange(setSelectedAssignee)}
+                    source={selectedSource}
+                    onSourceChange={handleFilterChange(setSelectedSource)}
+                    campaignId={sharedFilters.campaignId}
+                    onCampaignChange={handleFilterChange(setCampaignId)}
+                    adSetId={sharedFilters.adSetId}
+                    onAdSetChange={handleFilterChange(setAdSetId)}
+                    adId={sharedFilters.adId}
+                    onAdChange={handleFilterChange(setAdId)}
+                    tagId={selectedTag}
+                    onTagChange={handleFilterChange(setSelectedTag)}
+                    dealStatus={effectiveDealStatus}
+                    onDealStatusChange={(value) => {
+                      setLostLeadsView(false);
+                      handleFilterChange(setSelectedDealStatus)(value);
+                    }}
+                    searchQuery={search}
+                    onSearchChange={(value) => {
+                      setSearch(value);
+                      setPage(1);
+                    }}
+                    onClear={handleClearFilters}
+                    hasActiveFilters={hasSharedActiveFilters || selectedPipeline !== "all" || selectedStage !== "all" || lostLeadsView}
+                    dynamicSources={dynamicSources}
+                    campaigns={campaigns}
+                    adSets={adSets}
+                    ads={ads}
+                    tags={allTagsFromHook}
+                    isLoadingSources={isLoadingSources}
+                    isLoadingCampaigns={isLoadingCampaigns}
+                    isLoadingAdSets={isLoadingAdSets}
+                    isLoadingAds={isLoadingAds}
+                    datePosition="end"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -515,7 +523,7 @@ export default function Contacts() {
           </div>
         )}
 
-        <Card>
+        <Card data-tour="contacts-list">
           {isMobile ? (
             <div>
               {isLoading ? (

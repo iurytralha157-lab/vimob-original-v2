@@ -21,6 +21,10 @@ export interface SharedFilters {
   searchQuery: string;
 }
 
+function applyLeadMetaOptionFilter(query: any, idColumn: string, nameColumn: string, value?: string | null) {
+  if (!value) return query;
+  return query.or(`${idColumn}.eq.${value},${nameColumn}.eq.${value}`, { foreignTable: 'lead_meta' });
+}
 
 export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
   const { user, organization } = useAuth();
@@ -111,12 +115,10 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
     queryFn: async () => {
       let query = supabase
         .from('leads')
-        .select('id, assigned_user_id, lead_meta!inner(campaign_id, campaign_name, adset_id, adset_name)')
+        .select('id, assigned_user_id, lead_meta(campaign_id, campaign_name, adset_id, adset_name)')
         .eq('organization_id', organization?.id)
         .gte('created_at', dateRange.from.toISOString())
-        .lte('created_at', dateRange.to.toISOString())
-        .or(`campaign_id.eq.${campaignId},campaign_name.eq.${campaignId}`, { foreignTable: 'lead_meta' })
-        .not('adset_id', 'is', null, { foreignTable: 'lead_meta' });
+        .lte('created_at', dateRange.to.toISOString());
 
       query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
       const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
@@ -128,6 +130,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
       data?.forEach((lead: any) => {
         const metaRows = Array.isArray(lead.lead_meta) ? lead.lead_meta : [];
         metaRows.forEach((item: any) => {
+          if (item.campaign_id !== campaignId && item.campaign_name !== campaignId) return;
           const id = item.adset_id || item.adset_name;
           if (id) unique.set(id, item.adset_name || item.adset_id || id);
         });
@@ -143,12 +146,10 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
     queryFn: async () => {
       let query = supabase
         .from('leads')
-        .select('id, assigned_user_id, lead_meta!inner(adset_id, adset_name, ad_id, ad_name)')
+        .select('id, assigned_user_id, lead_meta(adset_id, adset_name, ad_id, ad_name)')
         .eq('organization_id', organization?.id)
         .gte('created_at', dateRange.from.toISOString())
-        .lte('created_at', dateRange.to.toISOString())
-        .or(`adset_id.eq.${adSetId},adset_name.eq.${adSetId}`, { foreignTable: 'lead_meta' })
-        .not('ad_id', 'is', null, { foreignTable: 'lead_meta' });
+        .lte('created_at', dateRange.to.toISOString());
 
       query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
       const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
@@ -160,6 +161,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
       data?.forEach((lead: any) => {
         const metaRows = Array.isArray(lead.lead_meta) ? lead.lead_meta : [];
         metaRows.forEach((item: any) => {
+          if (item.adset_id !== adSetId && item.adset_name !== adSetId) return;
           const id = item.ad_id || item.ad_name;
           if (id) unique.set(id, item.ad_name || item.ad_id || id);
         });
@@ -201,21 +203,9 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
 
       if (source) query = query.eq('source', source);
       if (dealStatus) query = query.eq('deal_status', dealStatus);
-      if (campaignId) {
-        query = /^\d+$/.test(campaignId)
-          ? query.eq('lead_meta.campaign_id', campaignId)
-          : query.eq('lead_meta.campaign_name', campaignId);
-      }
-      if (adSetId) {
-        query = /^\d+$/.test(adSetId)
-          ? query.eq('lead_meta.adset_id', adSetId)
-          : query.eq('lead_meta.adset_name', adSetId);
-      }
-      if (adId) {
-        query = /^\d+$/.test(adId)
-          ? query.eq('lead_meta.ad_id', adId)
-          : query.eq('lead_meta.ad_name', adId);
-      }
+      query = applyLeadMetaOptionFilter(query, 'campaign_id', 'campaign_name', campaignId);
+      query = applyLeadMetaOptionFilter(query, 'adset_id', 'adset_name', adSetId);
+      query = applyLeadMetaOptionFilter(query, 'ad_id', 'ad_name', adId);
       if (searchQuery.trim()) {
         const q = `%${searchQuery.trim()}%`;
         query = query.or(`name.ilike.${q},email.ilike.${q},phone.ilike.${q}`);

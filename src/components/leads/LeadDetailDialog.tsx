@@ -77,6 +77,7 @@ import { useCreateCall } from '@/hooks/use-telephony';
 import { useRecordFirstResponseOnAction } from '@/hooks/use-first-response';
 import { useTelecomCustomerByLead } from '@/hooks/use-telecom-customer-by-lead';
 import { TelecomSummaryCard } from '@/components/leads/TelecomSummaryCard';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 const sourceLabels: Record<string, string> = {
   meta: 'Meta Ads',
   site: 'Site',
@@ -327,6 +328,7 @@ export function LeadDetailDialog({
   const dealStatusChange = useDealStatusChange();
   const { recordFirstResponse } = useRecordFirstResponseOnAction();
   const { profile, organization, user } = useAuth();
+  const accessScope = useUserAccessScope();
   const createCallMutation = useCreateCall();
   const createActivityMutation = useCreateActivity();
   const { data: servicePlans = [] } = useServicePlans();
@@ -477,6 +479,18 @@ export function LeadDetailDialog({
   const leadTags = Array.isArray(lead.tags) ? lead.tags : [];
   const safeAllTags = Array.isArray(allTags) ? allTags.filter(Boolean) : [];
   const safeAllUsers = Array.isArray(allUsers) ? allUsers.filter(Boolean) : [];
+  const canTransferLead = accessScope.canTransferAnyLead || (
+    accessScope.isTeamLeader &&
+    (
+      accessScope.ledPipelineIds.includes(localLead.pipeline_id) ||
+      (!!localLead.assigned_user_id && accessScope.ledUserIds.includes(localLead.assigned_user_id))
+    )
+  );
+  const assignableUsers = accessScope.canTransferAnyLead
+    ? safeAllUsers
+    : accessScope.isTeamLeader
+      ? safeAllUsers.filter((candidate) => accessScope.ledUserIds.includes(candidate.id))
+      : [];
   const safeLeadTasks = Array.isArray(leadTasks) ? leadTasks.filter(Boolean) : [];
   const safeCadenceTemplates = Array.isArray(cadenceTemplates) ? cadenceTemplates.filter(Boolean) : [];
   const originLabels = {
@@ -594,9 +608,18 @@ export function LeadDetailDialog({
   };
 
   const handleAssignUser = async (userId: string | null) => {
+    if (!canTransferLead) {
+      toast.error('Você não tem permissão para trocar o responsável deste lead');
+      return;
+    }
+    if (userId && !assignableUsers.some((candidate) => candidate.id === userId)) {
+      toast.error('Você só pode transferir leads para usuários permitidos');
+      return;
+    }
+
     // UI Otimista
     const previousLead = { ...localLead };
-    const selectedUser = userId ? safeAllUsers.find(u => u.id === userId) : null;
+    const selectedUser = userId ? assignableUsers.find(u => u.id === userId) : null;
     
     const updatedLead = {
       ...localLead,
@@ -1566,7 +1589,10 @@ export function LeadDetailDialog({
                 </Label>
                 <Popover open={assigneePopoverOpen} onOpenChange={setAssigneePopoverOpen}>
                   <PopoverTrigger asChild>
-                    <button className="w-full flex items-center gap-3 p-3 rounded-xl border hover:border-primary/30 hover:bg-accent/30 transition-all">
+                    <button
+                      disabled={!canTransferLead}
+                      className="w-full flex items-center gap-3 p-3 rounded-xl border hover:border-primary/30 hover:bg-accent/30 transition-all disabled:cursor-default disabled:hover:border-border disabled:hover:bg-transparent"
+                    >
                       <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center relative overflow-hidden">
                         {assigneeName ? (
                           <>
@@ -1617,7 +1643,7 @@ export function LeadDetailDialog({
                         </CommandGroup>
                         
                         <CommandGroup heading="Usu?rios">
-                          {safeAllUsers.map(user => {
+                          {assignableUsers.map(user => {
                             const displayName = user.name || user.email || 'Usuário';
                             const initials = displayName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
 
@@ -1664,9 +1690,11 @@ export function LeadDetailDialog({
                     </Command>
                   </PopoverContent>
                 </Popover>
-                <div className="mt-2">
-                  <SdrDistributionButton lead={lead} refetchStages={refetchStages} />
-                </div>
+                {canTransferLead && (
+                  <div className="mt-2">
+                    <SdrDistributionButton lead={lead} refetchStages={refetchStages} />
+                  </div>
+                )}
               </div>
 
               {/* Origem */}
@@ -2048,7 +2076,10 @@ export function LeadDetailDialog({
                 {/* Assignee Selector */}
                 <Popover open={assigneePopoverOpen} onOpenChange={setAssigneePopoverOpen}>
                   <PopoverTrigger asChild>
-                    <button className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-accent relative overflow-hidden">
+                    <button
+                      disabled={!canTransferLead}
+                      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-accent relative overflow-hidden disabled:cursor-default disabled:hover:bg-transparent"
+                    >
                       <User className="h-3.5 w-3.5" />
                       <span>{assigneeName || 'Sem responsável'}</span>
                       {isUpdatingAssignee ? (
@@ -2084,7 +2115,7 @@ export function LeadDetailDialog({
                             </div>
                             <span className="text-muted-foreground text-sm font-medium">Sem responsável</span>
                           </CommandItem>
-                          {safeAllUsers.map((user: any) => {
+                          {assignableUsers.map((user: any) => {
                             const displayName = user.name || user.email || 'Usuário';
                             const initial = displayName[0]?.toUpperCase() || 'U';
 
@@ -2121,7 +2152,7 @@ export function LeadDetailDialog({
                   </PopoverContent>
                 </Popover>
 
-                <SdrDistributionButton lead={lead} refetchStages={refetchStages} />
+                {canTransferLead && <SdrDistributionButton lead={lead} refetchStages={refetchStages} />}
               </div>
             </div>
             

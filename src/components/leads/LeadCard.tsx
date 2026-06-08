@@ -42,6 +42,7 @@ interface LeadCardProps {
   index: number;
   onAssignNow: (leadId: string) => void;
   isDragDisabled: boolean;
+  tourTarget?: string;
 }
 
 // Formata tempo sempre em horas (ex: "30min", "2h", "72h")
@@ -61,6 +62,7 @@ export const LeadCard = memo(function LeadCard({
   index,
   onAssignNow,
   isDragDisabled = false,
+  tourTarget,
 }: LeadCardProps) {
   const { openNewChat } = useFloatingChat();
   const { profile } = useAuth();
@@ -159,7 +161,7 @@ export const LeadCard = memo(function LeadCard({
   
   return <>
     <Draggable draggableId={lead.id} index={index} isDragDisabled={isDragDisabled}>
-      {(provided, snapshot) => <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} className={cn("bg-card border-border rounded-lg p-3 transition-all duration-200 group hover:shadow-lg hover:shadow-primary/10 hover:border-primary/30 hover:-translate-y-0.5 border-0 relative", isDragDisabled ? "cursor-default" : "cursor-pointer", snapshot.isDragging && "shadow-xl rotate-1 scale-[1.02] border-primary", isLost && "bg-destructive/5 border-destructive/30 hover:bg-destructive/10", isWon && "bg-emerald-500/5 border-emerald-500/30")} onClick={onClick}>
+      {(provided, snapshot) => <div data-tour={tourTarget} ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} className={cn("bg-card border-border rounded-lg p-3 transition-all duration-200 group hover:shadow-lg hover:shadow-primary/10 hover:border-primary/30 hover:-translate-y-0.5 border-0 relative", isDragDisabled ? "cursor-default" : "cursor-pointer", snapshot.isDragging && "shadow-xl rotate-1 scale-[1.02] border-primary", isLost && "bg-destructive/5 border-destructive/30 hover:bg-destructive/10", isWon && "bg-emerald-500/5 border-emerald-500/30")} onClick={onClick}>
           {/* Deal Status Badge + Tags */}
           <div className="flex items-center gap-1 mb-2 flex-wrap">
             {/* Deal Status Badge */}

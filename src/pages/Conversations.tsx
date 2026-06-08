@@ -593,7 +593,7 @@ export default function Conversations() {
               {/* Mobile Header with Filters */}
               <div className="p-3 border-b space-y-2 bg-card shrink-0">
                 <div className="flex flex-col gap-2">
-                  <div className="flex gap-1 bg-muted/50 p-1 rounded-lg">
+                  <div data-tour="conversations-channel" className="flex gap-1 bg-muted/50 p-1 rounded-lg">
                     <Button 
                       variant={activePlatform === 'whatsapp' ? 'secondary' : 'ghost'} 
                       size="sm" 
@@ -642,7 +642,7 @@ export default function Conversations() {
                   )}
                 </div>
 
-                <div className="relative">
+                <div data-tour="conversations-search" className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input 
                     placeholder={activePlatform === 'whatsapp' ? "Buscar conversas..." : "Buscar no Instagram/Meta..."} 
@@ -654,11 +654,11 @@ export default function Conversations() {
 
                 {activePlatform === 'whatsapp' && (
                   <div className="flex items-center justify-between gap-2">
-                    <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <label data-tour="conversations-hide-groups" className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                       <Checkbox checked={hideGroups} onCheckedChange={checked => setHideGroups(checked === true)} />
                       <span>Ocultar grupos</span>
                     </label>
-                    <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <label data-tour="conversations-archived" className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                       <Checkbox checked={showArchived} onCheckedChange={checked => setShowArchived(checked === true)} />
                       <span>Arquivadas</span>
                     </label>
@@ -667,7 +667,7 @@ export default function Conversations() {
               </div>
 
               {/* Mobile Conversation List */}
-              <ScrollArea className="flex-1">
+              <ScrollArea data-tour="conversations-list" className="flex-1">
                 <div className="divide-y">
                   {loadingConversations ? (
                     <div className="flex items-center justify-center py-12">
@@ -740,11 +740,11 @@ export default function Conversations() {
   return <AppLayout title="Conversas">
       <div className="flex h-[calc(100vh-7rem)] gap-3 overflow-hidden">
         {/* Sidebar */}
-        <aside className="w-[350px] min-w-[350px] max-w-[350px] bg-card flex flex-col overflow-hidden rounded-2xl border shadow-sm">
+        <aside data-tour="conversations-overview" className="w-[350px] min-w-[350px] max-w-[350px] bg-card flex flex-col overflow-hidden rounded-2xl border shadow-sm">
           {/* Header com filtros */}
           <div className="p-3 border-b space-y-2 bg-card">
             <div className="flex flex-col gap-2">
-              <div className="flex gap-1 bg-muted/50 p-1 rounded-lg">
+              <div data-tour="conversations-channel" className="flex gap-1 bg-muted/50 p-1 rounded-lg">
                 <Button 
                   variant={activePlatform === 'whatsapp' ? 'secondary' : 'ghost'} 
                   size="sm" 
@@ -793,7 +793,7 @@ export default function Conversations() {
               )}
             </div>
 
-            <div className="relative">
+            <div data-tour="conversations-search" className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input 
                 placeholder={activePlatform === 'whatsapp' ? "Buscar conversas..." : "Buscar no Instagram/Meta..."} 
@@ -805,11 +805,11 @@ export default function Conversations() {
 
             {activePlatform === 'whatsapp' && (
               <div className="flex items-center justify-between gap-2">
-                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <label data-tour="conversations-hide-groups" className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                   <Checkbox checked={hideGroups} onCheckedChange={checked => setHideGroups(checked === true)} />
                   <span>Ocultar grupos</span>
                 </label>
-                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <label data-tour="conversations-archived" className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                   <Checkbox checked={showArchived} onCheckedChange={checked => setShowArchived(checked === true)} />
                   <span>Arquivadas</span>
                 </label>
@@ -817,7 +817,7 @@ export default function Conversations() {
             )}
           </div>
           {/* Lista de conversas */}
-          <ScrollArea className="flex-1">
+          <ScrollArea data-tour="conversations-list" className="flex-1">
             <div className="divide-y">
               {activePlatform === 'whatsapp' ? (
                 loadingConversations ? (

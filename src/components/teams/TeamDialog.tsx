@@ -16,6 +16,7 @@ interface TeamDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   team?: Team | null;
+  canEditLeadership?: boolean;
 }
 
 interface MemberSelection {
@@ -23,7 +24,7 @@ interface MemberSelection {
   isLeader: boolean;
 }
 
-export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
+export function TeamDialog({ open, onOpenChange, team, canEditLeadership = true }: TeamDialogProps) {
   const [name, setName] = useState('');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -80,6 +81,9 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
   const getSavedTeamMember = (userId: string) => team?.members?.find((member) => member.user_id === userId);
 
   const toggleMember = (userId: string) => {
+    const savedMember = getSavedTeamMember(userId);
+    if (!canEditLeadership && savedMember?.is_leader) return;
+
     setSelectedMembers((prev) => {
       const exists = prev.find((member) => member.userId === userId);
       if (exists) return prev.filter((member) => member.userId !== userId);
@@ -88,6 +92,7 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
   };
 
   const toggleLeader = (userId: string) => {
+    if (!canEditLeadership) return;
     setSelectedMembers((prev) =>
       prev.map((member) => (member.userId === userId ? { ...member, isLeader: !member.isLeader } : member))
     );
@@ -144,6 +149,15 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
 
     try {
       const finalLogoUrl = await uploadLogo();
+      const leadershipByUserId = new Map(
+        (team?.members || []).map((member) => [member.user_id, member.is_leader || false])
+      );
+      const membersToSave = canEditLeadership
+        ? selectedMembers
+        : selectedMembers.map((member) => ({
+            ...member,
+            isLeader: leadershipByUserId.get(member.userId) ?? false,
+          }));
 
       if (team) {
         await updateTeam.mutateAsync({
@@ -151,14 +165,15 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
           name: name.trim(),
           logo_url: finalLogoUrl || null,
           is_active: team.is_active ?? true,
-          members: selectedMembers,
+          members: membersToSave,
+          preserveLeadership: !canEditLeadership,
         });
       } else {
         await createTeam.mutateAsync({
           name: name.trim(),
           logo_url: finalLogoUrl || null,
           is_active: true,
-          members: selectedMembers,
+          members: membersToSave,
         });
       }
 
@@ -175,7 +190,7 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
   const displayLogo = logoPreview || logoUrl || undefined;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88vh] max-w-[560px] overflow-hidden border-0 bg-black/82 p-0 text-white shadow-2xl backdrop-blur-xl sm:rounded-[20px] [&>button]:hidden">
+      <DialogContent className="max-h-[88vh] w-[calc(100vw-16px)] max-w-[560px] overflow-hidden border-0 bg-black/82 p-0 text-white shadow-2xl backdrop-blur-xl sm:rounded-[20px] [&>button]:hidden">
         <div className="flex max-h-[88vh] flex-col p-4 sm:p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -192,10 +207,10 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col space-y-3">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
               <button
                 type="button"
-                className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-white/10"
+                className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-white/10 sm:h-14 sm:w-14"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Avatar className="h-full w-full">
@@ -228,7 +243,7 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
               </div>
             </div>
 
-            <ScrollArea className="min-h-[220px] flex-1 pr-2">
+            <ScrollArea className="min-h-[220px] flex-1 pr-1 sm:pr-2">
               <div className="space-y-0.5 pb-1">
                 {users.map((user) => {
                   const isSelected = isMemberSelected(user.id);
@@ -238,22 +253,27 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
                   return (
                     <div
                       key={user.id}
-                      className={`flex items-center gap-2 rounded-xl px-2.5 py-1 transition ${
+                      className={`flex min-w-0 items-center gap-1.5 rounded-xl px-2 py-1 transition sm:gap-2 sm:px-2.5 ${
                         isSelected ? 'bg-primary/14' : 'bg-white/8 hover:bg-white/12'
                       }`}
                     >
+                      {/*
+                        Team leaders can maintain members and schedules, but leadership
+                        changes stay admin-only.
+                      */}
                       <button
                         type="button"
-                        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-not-allowed disabled:opacity-75 sm:gap-2.5"
                         onClick={() => toggleMember(user.id)}
+                        disabled={!canEditLeadership && !!savedMember?.is_leader}
                       >
-                        <Avatar className="h-8 w-8">
+                        <Avatar className="h-8 w-8 shrink-0">
                           <AvatarImage src={user.avatar_url || undefined} />
                           <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">
                             {getInitials(user.name || '?')}
                           </AvatarFallback>
                         </Avatar>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0 flex-1 max-[380px]:hidden">
                           <p className="truncate text-sm font-semibold">{user.name}</p>
                           <p className="truncate text-xs text-white/45">{user.email}</p>
                         </div>
@@ -267,7 +287,7 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
                       </button>
 
                       {isSelected && (
-                        <div className="flex shrink-0 items-center gap-1.5 rounded-lg bg-black/20 px-2 py-1">
+                        <div className="flex shrink-0 items-center gap-1 rounded-lg bg-black/20 px-1.5 py-1 sm:gap-1.5 sm:px-2">
                           {savedMember && (
                             <button
                               type="button"
@@ -286,9 +306,13 @@ export function TeamDialog({ open, onOpenChange, team }: TeamDialogProps) {
                           )}
                           <div className="flex items-center gap-1.5 text-xs text-white/70">
                             <Crown className={`h-3.5 w-3.5 ${memberData?.isLeader ? 'text-amber-400' : 'text-white/35'}`} />
-                            Lider
+                            <span className="max-[440px]:hidden">Lider</span>
                           </div>
-                          <Switch checked={memberData?.isLeader || false} onCheckedChange={() => toggleLeader(user.id)} />
+                          <Switch
+                            checked={memberData?.isLeader || false}
+                            onCheckedChange={() => toggleLeader(user.id)}
+                            disabled={!canEditLeadership}
+                          />
                         </div>
                       )}
                     </div>

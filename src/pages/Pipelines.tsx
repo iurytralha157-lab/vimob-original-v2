@@ -86,6 +86,7 @@ import { useTags } from '@/hooks/use-tags';
 import { useAssignLeadRoundRobin } from '@/hooks/use-assign-lead-roundrobin';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCanEditCadences } from '@/hooks/use-can-edit-cadences';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 
 import { useHasPermission } from '@/hooks/use-organization-roles';
 import { notifyLeadMoved } from '@/hooks/use-lead-notifications';
@@ -260,20 +261,32 @@ export default function Pipelines() {
   
   // Check if user is a team leader (can edit cadences = is admin OR team leader)
   const isTeamLeader = useCanEditCadences();
+  const accessScope = useUserAccessScope();
+  const scopedTeamUserIds = !isAdmin && !hasLeadViewAll && accessScope.isTeamLeader
+    ? accessScope.ledUserIds
+    : undefined;
+  const hasTeamUserScope = Array.isArray(scopedTeamUserIds);
+  const selectedFilterUserId = filterUser === 'all' ? undefined : (filterUser || undefined);
+  const effectivePipelineFilterUser = hasTeamUserScope
+    ? (selectedFilterUserId && scopedTeamUserIds.includes(selectedFilterUserId) ? selectedFilterUserId : undefined)
+    : selectedFilterUserId;
   
   // Set initial filter based on user role, permissions, AND team leadership
   // Wait for permission to load before deciding the filter
   useEffect(() => {
-    if (filterUser === null && profile.id && !permissionLoading) {
-      // For admin, super_admin, users with lead_view_all permission, OR team leaders: show all
-      if (isAdmin || hasLeadViewAll || isTeamLeader) {
-        setFilterUser('all');
-      } else {
-        // For regular users without permission, pre-select their own name
-        setFilterUser(profile.id);
-      }
+    if (!profile.id || permissionLoading) return;
+
+    const canSeeExpandedScope = isAdmin || hasLeadViewAll || isTeamLeader;
+
+    if (canSeeExpandedScope && (filterUser === null || filterUser === profile.id)) {
+      setFilterUser('all');
+      return;
     }
-  }, [profile, isAdmin, filterUser, hasLeadViewAll, permissionLoading, isTeamLeader]);
+
+    if (!canSeeExpandedScope && (filterUser === null || filterUser === 'all')) {
+      setFilterUser(profile.id);
+    }
+  }, [profile.id, isAdmin, filterUser, hasLeadViewAll, permissionLoading, isTeamLeader]);
   
   // Date range is now handled by FilterContext
 
@@ -285,7 +298,7 @@ export default function Pipelines() {
 
   const { data: stagesWithLeads = [], isLoading: leadsLoading, refetch } = useStagesWithLeads(
     selectedPipelineId || undefined, 
-    filterUser === 'all' ? undefined : (filterUser || undefined),
+    effectivePipelineFilterUser,
     {
       dateRange,
       filterTag: filterTag && filterTag !== 'all' ? filterTag : undefined,
@@ -295,6 +308,7 @@ export default function Pipelines() {
       filterAdSet: filterAdSet && filterAdSet !== 'all' ? filterAdSet : undefined,
       filterAd: filterAd && filterAd !== 'all' ? filterAd : undefined,
       filterSource: filterSource && filterSource !== 'all' ? filterSource : undefined,
+      filterUserIds: scopedTeamUserIds,
     },
     { enabled: shouldLoadPipelineLeads }
   );
@@ -306,6 +320,9 @@ export default function Pipelines() {
   }, [baseStages, stagesWithLeads]);
 
   const { data: users = [] } = useOrganizationUsers();
+  const visibleUsers = hasTeamUserScope
+    ? users.filter((candidate) => scopedTeamUserIds.includes(candidate.id))
+    : users;
   const { data: allTags = [] } = useTags();
   // createLead agora ? gerenciado pelo CreateLeadDialog
   const assignLeadRoundRobin = useAssignLeadRoundRobin();
@@ -328,7 +345,7 @@ export default function Pipelines() {
       pipelineId: selectedPipelineId,
       stageId,
       offset: currentCount,
-      filterUserId: filterUser === 'all' ? undefined : (filterUser || undefined),
+      filterUserId: effectivePipelineFilterUser,
       filters: {
         dateRange,
         filterTag: filterTag && filterTag !== 'all' ? filterTag : undefined,
@@ -338,9 +355,10 @@ export default function Pipelines() {
         filterAdSet: filterAdSet && filterAdSet !== 'all' ? filterAdSet : undefined,
         filterAd: filterAd && filterAd !== 'all' ? filterAd : undefined,
         filterSource: filterSource && filterSource !== 'all' ? filterSource : undefined,
+        filterUserIds: scopedTeamUserIds,
       },
     });
-  }, [selectedPipelineId, stages, loadMoreLeads, filterUser, dateRange, filterTag, filterDealStatus, deferredSearchQuery, filterCampaign, filterAdSet, filterAd, filterSource]);
+  }, [selectedPipelineId, stages, loadMoreLeads, effectivePipelineFilterUser, dateRange, filterTag, filterDealStatus, deferredSearchQuery, filterCampaign, filterAdSet, filterAd, filterSource, scopedTeamUserIds]);
 
   // Real-time subscription for leads and tags updates
   useEffect(() => {
@@ -402,54 +420,113 @@ export default function Pipelines() {
     }
   }, [stages]);
 
-  // Open lead from URL query param (from notification click)
+  // Open lead from URL query param (from notification click or dashboard reports)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const leadId = params.get('lead_id') || params.get('lead');
-   const timestamp = params.get('t'); // Usar timestamp como depend?ncia para for?ar re-execu?o
-    
-    if (leadId && stages.length > 0) {
+    const activeOrganizationId = organization?.id || profile.organization_id;
+
+    if (!leadId || !activeOrganizationId) return;
+
+    const clearLeadParam = () => {
+      const cleanParams = new URLSearchParams(location.search);
+      cleanParams.delete('lead_id');
+      cleanParams.delete('lead');
+      cleanParams.delete('t');
+      const cleanSearch = cleanParams.toString();
+      navigate(`/crm/pipelines${cleanSearch ? `?${cleanSearch}` : ''}`, { replace: true });
+    };
+
+    if (stages.length > 0) {
       // Find lead in any stage
       for (const stage of stages) {
         const lead = stage.leads.find((l: any) => l.id === leadId);
         if (lead) {
+          if (lead.pipeline_id && lead.pipeline_id !== selectedPipelineId) {
+            setSelectedPipelineId(lead.pipeline_id);
+          }
           setSelectedLead(lead);
-          // Clear the URL param after opening
-          navigate('/crm/pipelines', { replace: true });
+          clearLeadParam();
           return;
         }
       }
-      // Lead n?o encontrado nos stages carregados - buscar diretamente no banco
-      const fetchLead = async () => {
-        try {
-          const { data: lead, error } = await supabase
-            .from('leads')
-            .select(`
-              *,
-              assigned_user:profiles!leads_assigned_user_id_fkey(id, name, avatar_url),
-              stage:stages(id, name, color),
-              tags:lead_tags(tag:tags(id, name, color))
-            `)
-            .eq('id', leadId)
-            .single();
-          
-          if (!error && lead) {
-            // Transformar tags para o formato esperado pelo LeadDetailDialog
-            const formattedLead = {
-              ...lead,
-              tags: lead.tags.map((lt: any) => lt.tag) || []
-            };
-            setSelectedLead(formattedLead);
-            navigate('/crm/pipelines', { replace: true });
-          }
-        } catch (err) {
-          console.error('Error fetching lead from URL:', err);
-        }
-      };
-      
-      fetchLead();
     }
-  }, [location.search, stages, navigate]); // timestamp impl?cito via location.search
+
+    // Lead nao encontrado nos stages carregados/filtros atuais: buscar direto no banco.
+    let cancelled = false;
+    const fetchLead = async () => {
+      try {
+        const { data: lead, error } = await supabase
+          .from('leads')
+          .select(`
+            id, name, phone, email, source, created_at, updated_at,
+            stage_id, assigned_user_id, pipeline_id, message,
+            stage_entered_at, organization_id, last_entry_at, reentry_count,
+            whatsapp_avatar_url,
+            deal_status, valor_interesse, property_id, lost_reason, won_at, lost_at,
+            interest_property_id, interest_plan_id,
+            first_response_at, first_response_seconds, first_response_is_automation
+          `)
+          .eq('id', leadId)
+          .eq('organization_id', activeOrganizationId)
+          .single();
+
+        if (cancelled) return;
+        if (error || !lead) {
+          console.error('Error fetching lead from URL:', error);
+          return;
+        }
+
+        const userIds = lead.assigned_user_id ? [lead.assigned_user_id] : [];
+        const propertyIds = lead.interest_property_id ? [lead.interest_property_id] : [];
+        const planIds = lead.interest_plan_id ? [lead.interest_plan_id] : [];
+
+        const [tagsResult, taskCountsResult, usersResult, propertiesResult, plansResult, metaResult] = await Promise.all([
+          supabase.from('lead_tags').select('lead_id, tag:tags(id, name, color)').eq('lead_id', lead.id),
+          supabase.from('lead_tasks').select('lead_id, is_done').eq('lead_id', lead.id),
+          userIds.length > 0
+            ? supabase.from('users').select('id, name, avatar_url').in('id', userIds)
+            : Promise.resolve({ data: [] } as any),
+          propertyIds.length > 0
+            ? supabase.from('properties').select('id, code, title, preco').in('id', propertyIds)
+            : Promise.resolve({ data: [] } as any),
+          planIds.length > 0
+            ? supabase.from('service_plans').select('id, code, name, price').in('id', planIds)
+            : Promise.resolve({ data: [] } as any),
+          supabase.from('lead_meta').select('lead_id, campaign_name, campaign_id, adset_name, adset_id, ad_name, ad_id, platform').eq('lead_id', lead.id),
+        ]);
+
+        if (cancelled) return;
+
+        const taskCounts = (taskCountsResult.data || []).reduce((acc: any, task: any) => {
+          if (task.is_done) acc.completed += 1;
+          else acc.pending += 1;
+          return acc;
+        }, { pending: 0, completed: 0 });
+
+        const formattedLead = {
+          ...lead,
+          assignee: (usersResult.data || [])[0] || null,
+          interest_property: (propertiesResult.data || [])[0] || null,
+          interest_plan: (plansResult.data || [])[0] || null,
+          lead_meta: metaResult.data || [],
+          tags: (tagsResult.data || []).map((lt: any) => lt.tag).filter(Boolean),
+          tasks_count: taskCounts,
+        };
+
+        if (formattedLead.pipeline_id && formattedLead.pipeline_id !== selectedPipelineId) {
+          setSelectedPipelineId(formattedLead.pipeline_id);
+        }
+        setSelectedLead(formattedLead);
+        clearLeadParam();
+      } catch (err) {
+        if (!cancelled) console.error('Error fetching lead from URL:', err);
+      }
+    };
+
+    fetchLead();
+    return () => { cancelled = true; };
+  }, [location.search, stages, navigate, organization?.id, profile.organization_id, selectedPipelineId]);
 
   const queryClient = useQueryClient();
 
@@ -534,7 +611,8 @@ export default function Pipelines() {
     const effectiveFilterAdSet = filterAdSet !== 'all' ? filterAdSet : undefined;
     const effectiveFilterAd = filterAd !== 'all' ? filterAd : undefined;
     const effectiveFilterSource = filterSource !== 'all' ? filterSource : undefined;
-    const effectiveFilterUser = filterUser === 'all' ? undefined : (filterUser || undefined);
+    const effectiveFilterUser = effectivePipelineFilterUser;
+    const effectiveScopedUserIds = scopedTeamUserIds?.join(',');
 
     const queryKey = [
       'stages-with-leads', 
@@ -548,7 +626,8 @@ export default function Pipelines() {
       effectiveFilterCampaign,
       effectiveFilterAdSet,
       effectiveFilterAd,
-      effectiveFilterSource
+      effectiveFilterSource,
+      effectiveScopedUserIds
     ];
     const previousData = queryClient.getQueryData(queryKey);
     
@@ -741,7 +820,7 @@ export default function Pipelines() {
         isDraggingRef.current = false;
       }, 500);
     }
-  }, [stages, dateRange, filterTag, filterDealStatus, searchQuery, filterCampaign, filterAdSet, filterAd, filterSource, selectedPipelineId, filterUser, queryClient, isTelecom, profile]);
+  }, [stages, dateRange, filterTag, filterDealStatus, searchQuery, filterCampaign, filterAdSet, filterAd, filterSource, selectedPipelineId, effectivePipelineFilterUser, scopedTeamUserIds, queryClient, isTelecom, profile]);
 
   // handleCreateLead agora ? gerenciado pelo CreateLeadDialog
 
@@ -759,6 +838,18 @@ export default function Pipelines() {
     setNewLeadStageId(stageId || null);
     setNewLeadDialogOpen(true);
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('new') !== 'lead') return;
+
+    setNewLeadStageId(null);
+    setNewLeadDialogOpen(true);
+
+    params.delete('new');
+    const cleanSearch = params.toString();
+    navigate(`/crm/pipelines${cleanSearch ? `?${cleanSearch}` : ''}`, { replace: true });
+  }, [location.search, navigate]);
 
   const handleStageName = async (stageId: string) => {
     if (!editingStageName.trim()) {
@@ -799,7 +890,7 @@ export default function Pipelines() {
       setIsServerSearching(true);
       try {
         // Search ALL leads in this pipeline matching the query
-        const query = (supabase as any)
+        let query = (supabase as any)
           .from('leads')
           .select(`
             id, name, phone, email, source, created_at,
@@ -815,6 +906,12 @@ export default function Pipelines() {
           .eq('pipeline_id', selectedPipelineId)
           .or(`name.ilike.%${deferredSearch}%,phone.ilike.%${deferredSearch}%`)
           .limit(50);
+
+        if (hasTeamUserScope) {
+          query = scopedTeamUserIds.length > 0
+            ? query.in('assigned_user_id', scopedTeamUserIds)
+            : query.eq('id', '00000000-0000-0000-0000-000000000000');
+        }
         
         const { data, error } = await query;
         if (error || cancelled) return;
@@ -850,7 +947,7 @@ export default function Pipelines() {
     
     doSearch();
     return () => { cancelled = true; };
-  }, [deferredSearch, hasMoreLeads, selectedPipelineId]);
+  }, [deferredSearch, hasMoreLeads, selectedPipelineId, hasTeamUserScope, scopedTeamUserIds]);
   
 
   
@@ -985,7 +1082,7 @@ export default function Pipelines() {
 
   return (
     <AppLayout title="Pipeline" disableMainScroll>
-      <div className={cn(
+      <div data-tour="pipeline-overview" className={cn(
         "flex flex-col h-full overflow-hidden",
         isMobile && "pb-4"
       )}>
@@ -994,7 +1091,7 @@ export default function Pipelines() {
             <div className="flex min-w-0 items-center gap-2">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="h-9 min-w-0 px-2 gap-2 hover:bg-muted font-bold text-base">
+                  <Button data-tour="pipeline-selector" variant="ghost" className="h-9 min-w-0 px-2 gap-2 hover:bg-muted font-bold text-base">
                     <LayoutGrid className="h-5 w-5 text-primary" />
                     <span className="truncate max-w-[96px] sm:max-w-[200px]">{currentPipeline?.name || 'Pipeline'}</span>
                     <ChevronDown className="h-4 w-4 opacity-50" />
@@ -1050,6 +1147,7 @@ export default function Pipelines() {
 
             <div className="flex shrink-0 items-center gap-2">
               <Button
+                data-tour="pipeline-refresh"
                 variant="outline"
                 size="icon"
                 className={cn(
@@ -1063,44 +1161,46 @@ export default function Pipelines() {
                 <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
               </Button>
 
-              <SharedFilters
-                datePreset={datePreset}
-                onDatePresetChange={setDatePreset}
-                customDateRange={customDateRange}
-                onCustomDateRangeChange={setCustomDateRange}
-                teamId={sharedFilters.teamId}
-                onTeamChange={(id) => setTeamId(id)}
-                userId={filterUser}
-                onUserChange={setFilterUser}
-                source={filterSource}
-                onSourceChange={setFilterSource}
-                campaignId={filterCampaign}
-                onCampaignChange={setFilterCampaign}
-                adSetId={filterAdSet}
-                onAdSetChange={setFilterAdSet}
-                adId={filterAd}
-                onAdChange={setFilterAd}
-                tagId={filterTag}
-                onTagChange={setFilterTag}
-                dealStatus={filterDealStatus}
-                onDealStatusChange={setFilterDealStatus}
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                onClear={clearFilters}
-                hasActiveFilters={hasSharedActiveFilters}
-                dynamicSources={dynamicSources}
-                campaigns={campaigns}
-                adSets={adSets}
-                ads={ads}
-                tags={allTagsFromHook}
-                isLoadingSources={isLoadingSources}
-                isLoadingCampaigns={isLoadingCampaigns}
-                isLoadingAdSets={isLoadingAdSets}
-                isLoadingAds={isLoadingAds}
-                onFiltersOpenChange={(open) => {
-                  if (open) setShouldLoadFilterOptions(true);
-                }}
-              />
+              <div data-tour="pipeline-filters">
+                <SharedFilters
+                  datePreset={datePreset}
+                  onDatePresetChange={setDatePreset}
+                  customDateRange={customDateRange}
+                  onCustomDateRangeChange={setCustomDateRange}
+                  teamId={sharedFilters.teamId}
+                  onTeamChange={(id) => setTeamId(id)}
+                  userId={filterUser}
+                  onUserChange={setFilterUser}
+                  source={filterSource}
+                  onSourceChange={setFilterSource}
+                  campaignId={filterCampaign}
+                  onCampaignChange={setFilterCampaign}
+                  adSetId={filterAdSet}
+                  onAdSetChange={setFilterAdSet}
+                  adId={filterAd}
+                  onAdChange={setFilterAd}
+                  tagId={filterTag}
+                  onTagChange={setFilterTag}
+                  dealStatus={filterDealStatus}
+                  onDealStatusChange={setFilterDealStatus}
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  onClear={clearFilters}
+                  hasActiveFilters={hasSharedActiveFilters}
+                  dynamicSources={dynamicSources}
+                  campaigns={campaigns}
+                  adSets={adSets}
+                  ads={ads}
+                  tags={allTagsFromHook}
+                  isLoadingSources={isLoadingSources}
+                  isLoadingCampaigns={isLoadingCampaigns}
+                  isLoadingAdSets={isLoadingAdSets}
+                  isLoadingAds={isLoadingAds}
+                  onFiltersOpenChange={(open) => {
+                    if (open) setShouldLoadFilterOptions(true);
+                  }}
+                />
+              </div>
 
               {!isMobile && (
                 <Button
@@ -1155,9 +1255,10 @@ export default function Pipelines() {
         <DragDropContext onDragEnd={handleDragEnd}>
           <div className={cn("flex-1 min-h-0 scrollbar-thin", isMobile ? "overflow-y-auto overflow-x-hidden pb-3" : "overflow-x-auto overflow-y-auto pb-2")}>
             <div className={cn("flex gap-3 h-full px-1", isMobile ? "min-w-0" : "min-w-max")}>
-              {visibleStages.map((stage: any) => (
+              {visibleStages.map((stage: any, stageIndex: number) => (
                 <div 
                   key={stage.id}
+                  data-tour={stageIndex === 0 ? "pipeline-column" : undefined}
                   className={cn(
                     "flex-shrink-0 flex flex-col rounded-lg overflow-hidden h-full",
                     isMobile ? "w-full min-w-0" : "w-[280px] sm:w-72"
@@ -1227,6 +1328,7 @@ export default function Pipelines() {
                     </div>
                     <div className="flex items-center gap-1">
                       <Button 
+                        data-tour={stageIndex === 0 ? "pipeline-column-settings" : undefined}
                         variant="ghost" 
                         size="icon" 
                         className="h-6 w-6 shrink-0"
@@ -1235,6 +1337,7 @@ export default function Pipelines() {
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
                       <Button 
+                        data-tour={stageIndex === 0 ? "pipeline-column-new-lead" : undefined}
                         variant="ghost" 
                         size="icon" 
                         className="h-6 w-6 shrink-0"
@@ -1263,9 +1366,10 @@ export default function Pipelines() {
                             ))
                           ) : (
                             stage.leads.map((lead: any, index: number) => (
-                              <LeadCard 
-                                key={lead.id} 
-                                lead={lead} 
+                              <LeadCard
+                                key={lead.id}
+                                tourTarget={stageIndex === 0 && index === 0 ? "pipeline-card" : undefined}
+                                lead={lead}
                                 index={index}
                                 onClick={() => setSelectedLead(lead)}
                                 onAssignNow={(leadId) => assignLeadRoundRobin.mutate(leadId)}
@@ -1324,7 +1428,7 @@ export default function Pipelines() {
             stages={stages}
             onClose={() => setSelectedLead(null)} 
             allTags={allTags}
-            allUsers={users}
+            allUsers={visibleUsers}
             refetchStages={refetch}
           />
         </LeadDialogErrorBoundary>

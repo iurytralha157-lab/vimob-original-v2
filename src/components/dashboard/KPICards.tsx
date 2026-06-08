@@ -1,7 +1,5 @@
 ﻿import { 
   Users, 
-  Target, 
-  CheckCircle2, 
   Clock,
   DollarSign,
   TrendingUp,
@@ -9,8 +7,12 @@
   CalendarCheck,
   Building2,
   Eye,
+  CircleDot,
+  XCircle,
+  Trophy,
   LucideIcon
 } from 'lucide-react';
+import type { KeyboardEvent } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,12 +25,19 @@ import {
 
 interface KPIData {
   totalLeads: number;
+  openLeads?: number;
+  lostLeads?: number;
   conversionRate: number;
   closedLeads: number;
+  wonAverageConversionDays?: number | null;
+  wonConversionBuckets?: any[];
+  wonDeals?: any[];
   avgResponseTime: string;
   totalSalesValue: number;
   pendingCommissions: number;
   leadsTrend: number;
+  openTrend?: number;
+  lostTrend?: number;
   conversionTrend: number;
   closedTrend: number;
   // Financial data
@@ -49,16 +58,25 @@ interface KPICardsProps {
   scheduledVisits?: number;
   propertyCount?: number;
   siteVisits?: number;
+  onWonClick?: () => void;
 }
 
 interface KPICardItemProps {
   title: string;
   value: string | number;
   trend?: number;
+  rate?: number;
+  rateVariant?: 'positive' | 'negative' | 'auto';
+  rateLabel?: string;
   icon: LucideIcon;
   tooltip: string;
   format?: 'number' | 'currency' | 'percent' | 'time';
   accentColor?: string;
+  iconColor?: string;
+  iconBgColor?: string;
+  onClick?: () => void;
+  interactive?: boolean;
+  tourTarget?: string;
 }
 
 function formatValue(value: string | number, format: string): string {
@@ -73,7 +91,7 @@ function formatValue(value: string | number, format: string): string {
         maximumFractionDigits: 0,
       }).format(value);
     case 'percent':
-      return `${value.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })}%`;
+      return `${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
     case 'number':
     default:
       return value.toLocaleString('pt-BR');
@@ -84,23 +102,56 @@ function KPICardItem({
   title, 
   value, 
   trend, 
+  rate,
+  rateVariant = 'positive',
+  rateLabel = 'dos leads',
   icon: Icon, 
   tooltip,
   format = 'number',
   accentColor = 'primary',
+  iconColor,
+  iconBgColor,
+  onClick,
+  interactive = false,
+  tourTarget,
   isHighlighted = false,
 }: KPICardItemProps & { isHighlighted?: boolean }) {
   const hasTrend = trend !== undefined && trend !== 0;
   const isPositive = (trend ?? 0) >= 0;
+  const rateColorClass =
+    rateVariant === 'negative'
+      ? 'text-destructive'
+      : rateVariant === 'auto'
+        ? rate > 0
+          ? 'text-emerald-500'
+          : 'text-destructive'
+        : 'text-emerald-500';
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onClick) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onClick();
+    }
+  };
   
   return (
-    <TooltipProvider>
+    <div data-tour={tourTarget} className="h-full">
+      <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Card className={cn(
-            "card-hover cursor-default overflow-hidden",
-            isHighlighted && "bg-gradient-to-r from-chart-5/10 to-chart-5/5 border-chart-5/30"
-          )}>
+          <Card
+            className={cn(
+              "card-hover overflow-hidden transition-colors",
+              interactive
+                ? "cursor-pointer hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                : "cursor-default",
+              isHighlighted && "bg-gradient-to-r from-chart-5/10 to-chart-5/5 border-chart-5/30"
+            )}
+            role={interactive ? 'button' : undefined}
+            tabIndex={interactive ? 0 : undefined}
+            onClick={onClick}
+            onKeyDown={handleKeyDown}
+          >
             <CardContent className={cn("p-4", isHighlighted && "py-5")}>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center justify-between">
@@ -113,12 +164,12 @@ function KPICardItem({
                   <div className={cn(
                     "rounded-lg flex items-center justify-center flex-shrink-0",
                     isHighlighted ? "h-10 w-10 sm:h-12 sm:w-12" : "h-8 w-8 sm:h-9 sm:w-9"
-                  )} style={{ backgroundColor: `hsl(var(--${accentColor}) / 0.1)` }}>
+                  )} style={{ backgroundColor: iconBgColor || `hsl(var(--${accentColor}) / 0.1)` }}>
                     <Icon 
                       className={cn(
                         isHighlighted ? "h-5 w-5 sm:h-6 sm:w-6" : "h-4 w-4 sm:h-5 sm:w-5"
                       )} 
-                      style={{ color: `hsl(var(--${accentColor}))` }} 
+                      style={{ color: iconColor || `hsl(var(--${accentColor}))` }} 
                     />
                   </div>
                 </div>
@@ -146,6 +197,11 @@ function KPICardItem({
                       </span>
                     </div>
                   )}
+                  {rate !== undefined && (
+                    <div className={cn('mt-1 text-[10px] sm:text-xs font-semibold', rateColorClass)}>
+                      {formatValue(rate, 'percent')} {rateLabel}
+                    </div>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -155,7 +211,8 @@ function KPICardItem({
           <p className="text-xs">{tooltip}</p>
         </TooltipContent>
       </Tooltip>
-    </TooltipProvider>
+      </TooltipProvider>
+    </div>
   );
 }
 
@@ -176,18 +233,22 @@ function KPICardSkeleton() {
   );
 }
 
-export function KPICards({ data, isLoading, periodLabel = 'Últimos 30 dias', scheduledVisits, propertyCount, siteVisits }: KPICardsProps) {
+export function KPICards({ data, isLoading, periodLabel = 'Últimos 30 dias', scheduledVisits, propertyCount, siteVisits, onWonClick }: KPICardsProps) {
   if (isLoading) {
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <KPICardSkeleton key={i} />
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} data-tour={["dashboard-kpi-leads", "dashboard-kpi-open", "dashboard-kpi-lost", "dashboard-kpi-won", "dashboard-kpi-visits"][i]}>
+              <KPICardSkeleton />
+            </div>
           ))}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <KPICardSkeleton key={i + 4} />
+            <div key={i + 4} data-tour={["dashboard-kpi-vgv", "dashboard-kpi-first-contact", "dashboard-kpi-properties", "dashboard-kpi-site-visits"][i]}>
+              <KPICardSkeleton />
+            </div>
           ))}
         </div>
       </div>
@@ -198,45 +259,80 @@ export function KPICards({ data, isLoading, periodLabel = 'Últimos 30 dias', sc
     {
       title: 'Leads',
       value: data.totalLeads,
-      trend: data.leadsTrend,
       icon: Users,
       tooltip: `Total de leads captados - ${periodLabel}`,
       format: 'number',
       accentColor: 'primary',
+      tourTarget: 'dashboard-kpi-leads',
     },
     {
-      title: 'Conversão',
-      value: data.conversionRate,
-      trend: data.conversionTrend,
-      icon: Target,
-      tooltip: 'Taxa de conversão (ganhos/total)',
-      format: 'percent',
-      accentColor: 'chart-2',
+      title: 'Em aberto',
+      value: data.openLeads ?? 0,
+      rate: data.totalLeads > 0 ? ((data.openLeads ?? 0) / data.totalLeads) * 100 : 0,
+      icon: CircleDot,
+      tooltip: `Percentual de leads em aberto dentro do total do período - ${periodLabel}`,
+      format: 'number',
+      accentColor: 'chart-1',
+      tourTarget: 'dashboard-kpi-open',
+    },
+    {
+      title: 'Perdidos',
+      value: data.lostLeads ?? 0,
+      rate: data.totalLeads > 0 ? ((data.lostLeads ?? 0) / data.totalLeads) * 100 : 0,
+      rateVariant: 'negative',
+      icon: XCircle,
+      tooltip: `Percentual de leads perdidos dentro do total do período - ${periodLabel}`,
+      format: 'number',
+      accentColor: 'destructive',
+      tourTarget: 'dashboard-kpi-lost',
     },
     {
       title: 'Ganhos',
       value: data.closedLeads,
-      trend: data.closedTrend,
-      icon: CheckCircle2,
-      tooltip: `Leads convertidos em vendas - ${periodLabel}`,
+      rate: data.conversionRate,
+      rateVariant: 'auto',
+      rateLabel: 'conversão',
+      icon: Trophy,
+      tooltip: `Ganhos fechados no período, independente da data de entrada do lead - ${periodLabel}`,
       format: 'number',
-      accentColor: 'chart-3',
+      accentColor: 'success',
+      iconColor: 'rgb(16, 185, 129)',
+      iconBgColor: 'rgba(16, 185, 129, 0.1)',
+      onClick: onWonClick,
+      interactive: Boolean(onWonClick),
+      tourTarget: 'dashboard-kpi-won',
+    },
+    {
+      title: 'Visitas',
+      value: scheduledVisits ?? 0,
+      rate: data.totalLeads > 0 ? ((scheduledVisits ?? 0) / data.totalLeads) * 100 : 0,
+      rateVariant: 'auto',
+      icon: CalendarCheck,
+      tooltip: `Visitas agendadas em relação ao total de leads - ${periodLabel}`,
+      format: 'number',
+      accentColor: 'chart-1',
+      tourTarget: 'dashboard-kpi-visits',
+    },
+  ];
+
+  const bottomKpis: KPICardItemProps[] = [
+    {
+      title: 'VGV',
+      value: data.totalSalesValue,
+      icon: DollarSign,
+      tooltip: `Valor total em vendas (VGV) - ${periodLabel}`,
+      format: 'currency',
+      accentColor: 'chart-5',
+      tourTarget: 'dashboard-kpi-vgv',
     },
     {
       title: '1º Contato',
       value: data.avgResponseTime,
       icon: Clock,
-      tooltip: 'Tempo medio ate a primeira ligacao ou mensagem',
+      tooltip: 'Tempo médio até a primeira ligação ou mensagem',
       format: 'time',
       accentColor: 'chart-4',
-    },
-    {
-      title: 'Visitas',
-      value: scheduledVisits ?? 0,
-      icon: CalendarCheck,
-      tooltip: `Visitas agendadas - ${periodLabel}`,
-      format: 'number',
-      accentColor: 'chart-1',
+      tourTarget: 'dashboard-kpi-first-contact',
     },
     {
       title: 'Imóveis',
@@ -245,25 +341,18 @@ export function KPICards({ data, isLoading, periodLabel = 'Últimos 30 dias', sc
       tooltip: 'Total de imóveis cadastrados',
       format: 'number',
       accentColor: 'chart-1',
+      tourTarget: 'dashboard-kpi-properties',
     },
     {
-      title: 'Site',
+      title: 'Visitas no site',
       value: siteVisits ?? 0,
       icon: Eye,
       tooltip: `Visitas ao site no período - ${periodLabel}`,
       format: 'number',
       accentColor: 'chart-2',
+      tourTarget: 'dashboard-kpi-site-visits',
     },
   ];
-
-  const salesKpi: KPICardItemProps = {
-    title: 'Vendas (VGV)',
-    value: data.totalSalesValue,
-    icon: DollarSign,
-    tooltip: `Valor total em vendas (VGV) - ${periodLabel}`,
-    format: 'currency',
-    accentColor: 'chart-5',
-  };
 
   return (
     <div className="space-y-3">
@@ -273,7 +362,11 @@ export function KPICards({ data, isLoading, periodLabel = 'Últimos 30 dias', sc
           <KPICardItem key={kpi.title} {...kpi} />
         ))}
       </div>
-      <KPICardItem {...salesKpi} isHighlighted />
+      <div className="grid grid-cols-2 gap-2">
+        {bottomKpis.map((kpi) => (
+          <KPICardItem key={kpi.title} {...kpi} />
+        ))}
+      </div>
     </div>
   );
 }

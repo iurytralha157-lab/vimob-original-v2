@@ -7,6 +7,7 @@ import { Shuffle, Users, Tags, GitBranch } from 'lucide-react';
 import { TeamPipelinesManager } from '@/components/teams/TeamPipelinesManager';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AnimatedTabNav, AnimatedTabItem } from '@/components/ui/animated-tab-nav';
+import { useUserAccessScope } from '@/hooks/use-user-access-scope';
 
 // Tab components
 import { DistributionTab } from '@/components/crm-management/DistributionTab';
@@ -22,6 +23,7 @@ export default function CRMManagement() {
     initialTab && VALID_TABS.includes(initialTab) ? initialTab : 'teams'
   );
   const isMobile = useIsMobile();
+  const accessScope = useUserAccessScope();
 
   // Sync URL ?tab= changes into state (e.g., from setup guide redirects)
   useEffect(() => {
@@ -32,12 +34,24 @@ export default function CRMManagement() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const managementTabs: AnimatedTabItem[] = useMemo(() => [
-    { value: 'teams', label: 'Equipes', icon: Users },
-    { value: 'distribution', label: 'Distribuição', icon: Shuffle },
-    { value: 'pipelines', label: 'Pipelines', icon: GitBranch },
-    { value: 'tags', label: 'Tags', icon: Tags },
-  ], []);
+  const managementTabs: AnimatedTabItem[] = useMemo(() => {
+    const tabs = [
+      { value: 'teams', label: 'Equipes', icon: Users },
+      { value: 'distribution', label: 'Distribuição', icon: Shuffle },
+      { value: 'pipelines', label: 'Pipelines', icon: GitBranch },
+      { value: 'tags', label: 'Tags', icon: Tags },
+    ];
+
+    if (accessScope.isAdmin) return tabs;
+    if (accessScope.isTeamLeader) return tabs.filter((tab) => ['teams', 'distribution'].includes(tab.value));
+    return [];
+  }, [accessScope.isAdmin, accessScope.isTeamLeader]);
+
+  useEffect(() => {
+    if (managementTabs.length > 0 && !managementTabs.some((tab) => tab.value === activeTab)) {
+      setActiveTab(managementTabs[0].value);
+    }
+  }, [activeTab, managementTabs]);
 
   const currentTab = managementTabs.find(tab => tab.value === activeTab);
   const CurrentIcon = currentTab?.icon;

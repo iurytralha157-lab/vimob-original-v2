@@ -5,6 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useMemo } from 'react';
 import { PropertyPickerDialog } from '@/components/properties/PropertyPickerDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -123,6 +124,9 @@ interface DistributionQueueEditorProps {
   onOpenChange: (open: boolean) => void;
   queue?: any; // existing queue for edit mode
   onSave: (data: QueueFormData) => Promise<void>;
+  allowedTeamIds?: string[];
+  allowedUserIds?: string[];
+  allowedPipelineIds?: string[];
 }
 
 const SOURCE_OPTIONS = [
@@ -254,7 +258,10 @@ export function DistributionQueueEditor({
   open, 
   onOpenChange, 
   queue, 
-  onSave 
+  onSave,
+  allowedTeamIds,
+  allowedUserIds,
+  allowedPipelineIds,
 }: DistributionQueueEditorProps) {
   const { data: pipelines = [] } = usePipelines();
   const { data: teams = [] } = useTeams();
@@ -267,6 +274,24 @@ export function DistributionQueueEditor({
   const { data: metaIntegrations = [] } = useMetaIntegrations();
   const activeMetaIntegration = metaIntegrations.find(i => i.is_connected);
   const { data: metaFormConfigs = [] } = useMetaFormConfigs(activeMetaIntegration?.id);
+  const hasTeamRestriction = Array.isArray(allowedTeamIds);
+  const hasUserRestriction = Array.isArray(allowedUserIds);
+  const hasPipelineRestriction = Array.isArray(allowedPipelineIds);
+  const visibleTeams = useMemo(() => (
+    hasTeamRestriction
+      ? teams.filter((team) => allowedTeamIds.includes(team.id))
+      : teams
+  ), [allowedTeamIds, hasTeamRestriction, teams]);
+  const visibleUsers = useMemo(() => (
+    hasUserRestriction
+      ? users.filter((user) => allowedUserIds.includes(user.id))
+      : users
+  ), [allowedUserIds, hasUserRestriction, users]);
+  const visiblePipelines = useMemo(() => (
+    hasPipelineRestriction
+      ? pipelines.filter((pipeline) => allowedPipelineIds.includes(pipeline.id))
+      : pipelines
+  ), [allowedPipelineIds, hasPipelineRestriction, pipelines]);
   
   const [saving, setSaving] = useState(false);
   const [openSections, setOpenSections] = useState<string[]>([]);
@@ -300,12 +325,14 @@ export function DistributionQueueEditor({
   // Get stages for selected pipeline
   const { data: stages = [] } = useStages(formData.target_pipeline_id || undefined);
 
-  // Initialize form when queue changes
   useEffect(() => {
     if (open) {
       setOpenSections([]);
     }
+  }, [open, queue?.id]);
 
+  // Initialize form when queue changes
+  useEffect(() => {
     if (queue) {
       const existingConditions: RuleCondition[] = (queue.rules || []).map((rule: any) => {
         const matchType = rule.match_type as RuleCondition['type'];
@@ -322,7 +349,7 @@ export function DistributionQueueEditor({
         if (m.team_id) {
           const key = `team_${m.team_id}`;
           if (!membersMap.has(key)) {
-            const team = teams.find(t => t.id === m.team_id);
+            const team = visibleTeams.find(t => t.id === m.team_id) || teams.find(t => t.id === m.team_id);
             membersMap.set(key, {
               id: m.id,
               type: 'team',
@@ -384,7 +411,10 @@ export function DistributionQueueEditor({
         members: [],
       });
     }
-  }, [queue, open, teams]);
+    // Intentionally initialize only when the dialog opens or switches queue.
+    // Team/user query refreshes must not reset in-progress edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, queue?.id]);
 
   const toggleSection = (section: string) => {
     setOpenSections(prev => 
@@ -421,10 +451,11 @@ export function DistributionQueueEditor({
   };
 
   const addMember = (type: 'user' | 'team', entityId: string, name: string) => {
-    if (formData.members.some(m => m.type === type && m.entityId === entityId)) return;
     setFormData(prev => ({
       ...prev,
-      members: [...prev.members, { type, entityId, weight: 10, name }],
+      members: prev.members.some(m => m.type === type && m.entityId === entityId)
+        ? prev.members
+        : [...prev.members, { type, entityId, weight: 10, name }],
     }));
   };
 
@@ -470,6 +501,21 @@ export function DistributionQueueEditor({
     if (!formData.target_stage_id) {
       toast.error('Estágio inicial é obrigatório');
       return;
+    }
+    if (hasPipelineRestriction && !allowedPipelineIds.includes(formData.target_pipeline_id)) {
+      toast.error('Você só pode criar filas para pipelines da sua equipe');
+      return;
+    }
+    if (hasTeamRestriction || hasUserRestriction) {
+      const invalidMember = formData.members.some((member) =>
+        member.type === 'team'
+          ? !allowedTeamIds.includes(member.entityId)
+          : !allowedUserIds.includes(member.entityId)
+      );
+      if (invalidMember) {
+        toast.error('Você só pode distribuir para sua equipe ou membros dela');
+        return;
+      }
     }
     const hasValidCriteria = formData.conditions.some(condition =>
       condition.values.some(value => value.trim())
@@ -740,7 +786,7 @@ export function DistributionQueueEditor({
                           <SelectValue placeholder="Selecione um pipeline..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {pipelines.map(p => (
+                          {visiblePipelines.map(p => (
                             <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                           ))}
                         </SelectContent>
@@ -877,20 +923,20 @@ export function DistributionQueueEditor({
                         <SelectValue placeholder="Adicionar corretor..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {users.filter(u => !formData.members.some(m => m.type === 'user' && m.entityId === u.id)).map(user => (
+                        {visibleUsers.filter(u => !formData.members.some(m => m.type === 'user' && m.entityId === u.id)).map(user => (
                           <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     <Select onValueChange={v => {
-                      const team = teams.find(t => t.id === v);
+                      const team = visibleTeams.find(t => t.id === v);
                       if (team) addMember('team', v, team.name);
                     }}>
                       <SelectTrigger className="flex-1">
                         <SelectValue placeholder="Adicionar equipe..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {teams.filter(t => !formData.members.some(m => m.type === 'team' && m.entityId === t.id)).map(team => (
+                        {visibleTeams.filter(t => !formData.members.some(m => m.type === 'team' && m.entityId === t.id)).map(team => (
                           <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
                         ))}
                       </SelectContent>

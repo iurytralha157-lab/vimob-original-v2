@@ -506,6 +506,7 @@ export function CreateLeadDialog({
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
+        data-tour="pipeline-new-lead"
         ref={dialogContentRef}
         side="right"
         className={leadDialogSurfaceClass}

@@ -435,7 +435,7 @@ export function AccountTab() {
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-6 items-start">
         <div className="space-y-6">
         {/* LEFT: Profile Card */}
-        <Card className="h-fit lg:col-start-1 lg:row-start-1">
+        <Card data-tour="account-profile" className="h-fit lg:col-start-1 lg:row-start-1">
           <CardHeader className="px-4 md:px-5 pt-5 pb-2">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -456,7 +456,7 @@ export function AccountTab() {
           <CardContent className="space-y-6 px-4 md:px-5 pb-5">
             {/* Avatar Upload */}
             <div className="flex items-center gap-4">
-              <div className="relative">
+              <div data-tour="account-avatar" className="relative">
                 <Avatar className="h-20 w-20">
                   <AvatarImage src={profile?.avatar_url || undefined} />
                   <AvatarFallback className="bg-primary text-primary-foreground text-xl">
@@ -634,7 +634,7 @@ export function AccountTab() {
           </CardContent>
         </Card>
 
-        <Card className="h-fit">
+        <Card data-tour="account-password" className="h-fit">
         <CardContent className="p-4 md:p-5">
           <div className="space-y-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
