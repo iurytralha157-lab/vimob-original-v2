@@ -838,7 +838,7 @@ export function useSendWhatsAppMessage() {
         status: "sent",
         sent_at: new Date().toISOString(),
         sender_name: profile?.name || null,
-      }, { onConflict: "session_id,message_id" });
+      }, { onConflict: "conversation_id,message_id" });
 
       if (insertError) {
         console.error("[useSendWhatsAppMessage] insert whatsapp_messages Error:", insertError);
