@@ -115,8 +115,9 @@ export function EventSheet({
 
   const isExisting = !!event;
   const isCompleted = event?.status === "completed";
+  const isMasked = Boolean(event?.is_masked);
   const [isEditing, setIsEditing] = useState(false);
-  const locked = isCompleted || (isExisting && !isEditing);
+  const locked = isMasked || isCompleted || (isExisting && !isEditing);
 
   const [selectedType, setSelectedType] = useState<EventType>("task");
   const [title, setTitle] = useState("");
@@ -150,7 +151,7 @@ export function EventSheet({
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [pendingAssigneeIds, setPendingAssigneeIds] = useState<string[]>([]);
   const { assignees, addAssignee, removeAssignee } = useScheduleEventAssignees(event?.id);
-  const { comments, addComment, isAdding } = useScheduleComments(event?.id);
+  const { comments, addComment, isAdding } = useScheduleComments(isMasked ? undefined : event?.id);
   const [commentText, setCommentText] = useState("");
 
   useEffect(() => {
@@ -281,6 +282,7 @@ export function EventSheet({
   };
 
   const handleSubmit = async () => {
+    if (isMasked) return;
     if (!title.trim() || !date || !primaryUserId) return;
     const [hh, mm] = time.split(":").map(Number);
     const start = new Date(date);
@@ -303,7 +305,7 @@ export function EventSheet({
       is_all_day: isAllDay,
       user_id: primaryUserId,
       lead_id: selectedLeadId,
-      property_id: selectedType === "visit" ? selectedPropertyId : null,
+      property_id: selectedPropertyId,
       location: location.trim() || undefined,
       visibility,
       recurrence_rule: !event ? recurrenceRule : undefined,
@@ -319,19 +321,19 @@ export function EventSheet({
   };
 
   const handleMarkDone = async () => {
-    if (!event) return;
+    if (!event || isMasked) return;
     await updateEvent.mutateAsync({ id: event.id, status: "completed" });
     onOpenChange(false);
   };
 
   const handleDelete = async () => {
-    if (!event) return;
+    if (!event || isMasked) return;
     await deleteEvent.mutateAsync({ id: event.id });
     onOpenChange(false);
   };
 
   const handleSendComment = () => {
-    if (!commentText.trim() || isAdding) return;
+    if (isMasked || !commentText.trim() || isAdding) return;
     addComment(commentText.trim());
     setCommentText("");
   };
@@ -463,6 +465,12 @@ export function EventSheet({
           {isCompleted && (
             <AgendaRow icon={<Lock size={18} />} align="center">
               <span className="inline-flex h-8 items-center rounded-lg bg-emerald-500/15 px-3 text-sm font-semibold text-emerald-300">Atividade concluída, somente leitura</span>
+            </AgendaRow>
+          )}
+
+          {isMasked && (
+            <AgendaRow icon={<Lock size={18} />} align="center">
+              <span className="inline-flex h-8 items-center rounded-lg bg-white/10 px-3 text-sm font-semibold text-zinc-300">Informacoes privadas</span>
             </AgendaRow>
           )}
 
@@ -684,7 +692,7 @@ export function EventSheet({
                 </PopoverContent>
               </Popover>
             ) : (
-              <span className="text-sm text-zinc-400">Sem lead</span>
+              <span className="text-sm text-zinc-400">{isMasked ? "Informacao privada" : "Sem lead"}</span>
             )}
           </AgendaRow>
 
@@ -716,13 +724,13 @@ export function EventSheet({
                 )}
               />
             ) : (
-              <span className="text-sm text-zinc-400">Sem imóvel</span>
+              <span className="text-sm text-zinc-400">{isMasked ? "Informacao privada" : "Sem imóvel"}</span>
             )}
           </AgendaRow>
 
           <AgendaRow icon={<MessageSquare size={19} />}>
             {locked ? (
-              <p className="text-sm text-zinc-300">{description || "Sem descrição"}</p>
+              <p className="text-sm text-zinc-300">{description || (isMasked ? "Informacao privada" : "Sem descrição")}</p>
             ) : (
               <Textarea
                 value={description}
@@ -759,42 +767,48 @@ export function EventSheet({
           {isExisting && (
             <AgendaRow icon={<MessageSquare size={19} />}>
               <div className="space-y-3">
-                {comments.length === 0 && <p className="text-sm text-zinc-400">Nenhum comentário</p>}
-                {comments.map((c) => (
-                  <div key={c.id} className="flex gap-2">
-                    <Avatar className="h-6 w-6 shrink-0">
-                      <AvatarImage src={c.user?.avatar_url || undefined} />
-                      <AvatarFallback className="text-[10px]">{(c.user?.name || "U").split(" ").slice(0, 2).map((p) => p[0]).join("")}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-0.5 text-[10px] text-zinc-400">
-                        <span className="font-medium text-zinc-100">{c.user?.name || "Usuário"}</span>
-                        {" · "}{format(new Date(c.created_at), "dd/MM HH:mm", { locale: ptBR })}
+                {isMasked ? (
+                  <p className="text-sm text-zinc-400">Comentarios privados</p>
+                ) : (
+                  <>
+                    {comments.length === 0 && <p className="text-sm text-zinc-400">Nenhum comentário</p>}
+                    {comments.map((c) => (
+                      <div key={c.id} className="flex gap-2">
+                        <Avatar className="h-6 w-6 shrink-0">
+                          <AvatarImage src={c.user?.avatar_url || undefined} />
+                          <AvatarFallback className="text-[10px]">{(c.user?.name || "U").split(" ").slice(0, 2).map((p) => p[0]).join("")}</AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-0.5 text-[10px] text-zinc-400">
+                            <span className="font-medium text-zinc-100">{c.user?.name || "Usuário"}</span>
+                            {" · "}{format(new Date(c.created_at), "dd/MM HH:mm", { locale: ptBR })}
+                          </div>
+                          <div className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs text-zinc-100">{c.content}</div>
+                        </div>
                       </div>
-                      <div className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs text-zinc-100">{c.content}</div>
+                    ))}
+                    <div className="flex gap-2">
+                      <Input
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleSendComment()}
+                        placeholder="Comentário..."
+                        className="h-9 border-0 bg-white/10 text-xs text-white"
+                        disabled={isAdding}
+                      />
+                      <Button size="icon" onClick={handleSendComment} disabled={isAdding || !commentText.trim()} className="h-9 w-9 shrink-0">
+                        <Send size={13} />
+                      </Button>
                     </div>
-                  </div>
-                ))}
-                <div className="flex gap-2">
-                  <Input
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSendComment()}
-                    placeholder="Comentário..."
-                    className="h-9 border-0 bg-white/10 text-xs text-white"
-                    disabled={isAdding}
-                  />
-                  <Button size="icon" onClick={handleSendComment} disabled={isAdding || !commentText.trim()} className="h-9 w-9 shrink-0">
-                    <Send size={13} />
-                  </Button>
-                </div>
+                  </>
+                )}
               </div>
             </AgendaRow>
           )}
         </div>
 
         <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-4">
-          {isExisting ? (
+          {isExisting && !isMasked ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="ghost" size="sm" className="gap-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 hover:text-white">
@@ -817,13 +831,13 @@ export function EventSheet({
           )}
 
           <div className="ml-auto flex flex-1 flex-wrap items-center justify-end gap-2">
-            {isExisting && !isCompleted && (
+            {isExisting && !isMasked && !isCompleted && (
               <Button variant="ghost" size="sm" onClick={handleMarkDone} disabled={isLoading} className="gap-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white">
                 <CheckCircle size={13} /> Concluir
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={() => (isExisting ? setIsEditing((value) => !value) : onOpenChange(false))} disabled={isLoading || isCompleted} className={cn("rounded-lg font-semibold", !locked ? "order-1 h-11 flex-[3] bg-[#202020] text-zinc-100 hover:bg-[#2a2a2a] hover:text-white" : "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground")}>
-              {isExisting && !isEditing ? "Editar" : "Cancelar"}
+            <Button variant="ghost" size="sm" onClick={() => (isExisting && !isMasked ? setIsEditing((value) => !value) : onOpenChange(false))} disabled={isLoading || isCompleted} className={cn("rounded-lg font-semibold", !locked ? "order-1 h-11 flex-[3] bg-[#202020] text-zinc-100 hover:bg-[#2a2a2a] hover:text-white" : "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground")}>
+              {isExisting && !isMasked && !isEditing ? "Editar" : "Cancelar"}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => (isExisting ? setIsEditing(true) : onOpenChange(false))} disabled={isLoading || isCompleted} className="hidden">
               Mais opções

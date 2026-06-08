@@ -54,6 +54,7 @@ export interface ScheduleEvent {
     name: string;
   } | null;
   assignee_user_ids?: string[];
+  is_masked?: boolean;
 }
 
 export type ScheduleRecurrenceFrequency = 'none' | 'weekly' | 'monthly' | 'yearly';
@@ -140,18 +141,19 @@ function applyScheduleVisibility(events: ScheduleEvent[], currentUserId?: string
     .filter((event) => event.visibility !== 'private' || isEventParticipant(event, currentUserId))
     .map((event) => {
       if (event.visibility !== 'public') return event;
-      if (isEventParticipant(event, currentUserId) || currentUserRole === 'admin') return event;
+      if (isEventParticipant(event, currentUserId)) return event;
 
       return {
         ...event,
-        title: 'Ocupado',
-        description: null,
+        title: 'Horario ocupado',
+        description: 'Informacao privada',
         event_type: 'task',
         lead_id: null,
         property_id: null,
         location: null,
         lead: null,
         property: null,
+        is_masked: true,
       };
     });
 }
