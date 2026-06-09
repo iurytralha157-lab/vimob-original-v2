@@ -275,18 +275,17 @@ export default function Pipelines() {
   // Wait for permission to load before deciding the filter
   useEffect(() => {
     if (!profile.id || permissionLoading) return;
+    // Só inicializa se o filtro ainda não foi definido pelo usuário
+    if (filterUser !== null) return;
 
     const canSeeExpandedScope = isAdmin || hasLeadViewAll || isTeamLeader;
 
-    if (canSeeExpandedScope && (filterUser === null || filterUser === profile.id)) {
-      setFilterUser('all');
-      return;
+    if (canSeeExpandedScope) {
+    setFilterUser('all');
+    } else {
+    setFilterUser(profile.id);
     }
-
-    if (!canSeeExpandedScope && (filterUser === null || filterUser === 'all')) {
-      setFilterUser(profile.id);
-    }
-  }, [profile.id, isAdmin, filterUser, hasLeadViewAll, permissionLoading, isTeamLeader]);
+  }, [profile.id, isAdmin, hasLeadViewAll, permissionLoading, isTeamLeader]);
   
   // Date range is now handled by FilterContext
 
