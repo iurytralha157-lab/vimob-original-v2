@@ -213,6 +213,7 @@ export default function Conversations() {
   const [createLeadContact, setCreateLeadContact] = useState<{
     phone?: string;
     name?: string;
+    conversationId?: string;
   }>({});
   const [showLeadPanel, setShowLeadPanel] = useState(true);
   useWhatsAppRealtimeConversations();
@@ -711,7 +712,8 @@ export default function Conversations() {
                         onCreateLead={() => {
                           setCreateLeadContact({
                             phone: conv.contact_phone || undefined,
-                            name: conv.contact_name || undefined
+                            name: conv.contact_name || undefined,
+                            conversationId: conv.id,
                           });
                           setCreateLeadOpen(true);
                         }} 
@@ -723,7 +725,7 @@ export default function Conversations() {
             </div>}
         </div>
 
-        <CreateLeadDialog open={createLeadOpen} onOpenChange={setCreateLeadOpen} contactPhone={createLeadContact.phone} contactName={createLeadContact.name} />
+        <CreateLeadDialog open={createLeadOpen} onOpenChange={setCreateLeadOpen} contactPhone={createLeadContact.phone} contactName={createLeadContact.name} conversationId={createLeadContact.conversationId} />
         {selectedLeadId && (
           <StartAutomationDialog
             open={showAutomationDialog}
@@ -852,7 +854,8 @@ export default function Conversations() {
                       onCreateLead={() => {
                         setCreateLeadContact({
                           phone: conv.contact_phone || undefined,
-                          name: conv.contact_name || undefined
+                          name: conv.contact_name || undefined,
+                          conversationId: conv.id,
                         });
                         setCreateLeadOpen(true);
                       }} 
@@ -916,7 +919,8 @@ export default function Conversations() {
                 onCreateLead={() => {
                   setCreateLeadContact({
                     phone: selectedConversation.contact_phone || undefined,
-                    name: selectedConversation.contact_name || undefined
+                    name: selectedConversation.contact_name || undefined,
+                    conversationId: selectedConversation.id,
                   });
                   setCreateLeadOpen(true);
                 }}
@@ -1050,7 +1054,7 @@ export default function Conversations() {
         )}
       </div>
 
-      <CreateLeadDialog open={createLeadOpen} onOpenChange={setCreateLeadOpen} contactPhone={createLeadContact.phone} contactName={createLeadContact.name} />
+      <CreateLeadDialog open={createLeadOpen} onOpenChange={setCreateLeadOpen} contactPhone={createLeadContact.phone} contactName={createLeadContact.name} conversationId={createLeadContact.conversationId} />
       {selectedLeadId && (
         <StartAutomationDialog
           open={showAutomationDialog}
