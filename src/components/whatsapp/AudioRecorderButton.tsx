@@ -39,18 +39,26 @@
    };
  
    const handleSendAudio = async () => {
-     if (!base64) return;
-     
-     setIsSending(true);
-     try {
-       await onSend(base64, mimeType || audioBlob?.type || "audio/webm");
-       clearRecording();
-     } catch (error) {
-       console.error("Error sending audio:", error);
-     } finally {
-       setIsSending(false);
-     }
-   };
+      if (!base64) return;
+      
+      setIsSending(true);
+      try {
+        await onSend(base64, mimeType || audioBlob?.type || "audio/webm");
+        clearRecording();
+      } catch (error) {
+        console.error("Error sending audio:", error);
+        const message = error instanceof Error ? error.message : "Não foi possível enviar o áudio";
+        toast({
+          title: "Erro ao enviar áudio",
+          description: message.includes("RATE_LIMIT")
+            ? "Aguarde um momento antes de enviar outra mensagem"
+            : message.length < 200 ? message : "Tente novamente em alguns segundos",
+          variant: "destructive",
+        });
+      } finally {
+        setIsSending(false);
+      }
+    };
  
    // Recording in progress
    if (isRecording) {

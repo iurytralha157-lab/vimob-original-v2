@@ -33,6 +33,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { AudioRecorderButton } from "@/components/whatsapp/AudioRecorderButton";
 import { useMetaConversations, useMetaMessages, useSendMetaMessage } from "@/hooks/use-meta-conversations";
 import { useMetaIntegrations } from "@/hooks/use-meta-integration";
+import { useAuth } from "@/contexts/AuthContext";
 
 const MAX_IMAGE_DIMENSION = 1600;
 const IMAGE_QUALITY = 0.82;
@@ -104,6 +105,7 @@ async function compressImageFile(file: File): Promise<File> {
 export default function Conversations() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [activePlatform, setActivePlatform] = useState<'whatsapp' | 'instagram' | 'facebook'>('whatsapp');
   const [selectedSessionId, setSelectedSessionId] = useState<string>("all");
   const [selectedPageId, setSelectedPageId] = useState<string>("all");
@@ -362,7 +364,13 @@ export default function Conversations() {
       // Also upload to Supabase Storage for local storage
       const fileExt = processedFile.name.split('.').pop() || mimeExtension(processedFile.type);
       const fileName = `${crypto.randomUUID()}.${fileExt}`;
-      const filePath = `uploads/${fileName}`;
+      // Use org-scoped path to comply with RLS policy (requires orgs/{org_id}/ prefix)
+      const orgId = profile?.organization_id ||
+        (selectedConversation as any)?.session?.organization_id ||
+        sessions?.find(s => s.id === (selectedSessionId !== "all" ? selectedSessionId : selectedConversation?.session_id))?.organization_id;
+      const filePath = orgId
+        ? `orgs/${orgId}/uploads/${fileName}`
+        : `uploads/${fileName}`;
       const {
         error: uploadError
       } = await supabase.storage.from("whatsapp-media").upload(filePath, processedFile);

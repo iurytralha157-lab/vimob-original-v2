@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect, SyntheticEvent } from "react";
+import { useState, useRef, useEffect, SyntheticEvent } from "react";
 import { Check, CheckCheck, Clock, Mic, Play, Pause, FileText, Download, AlertCircle, RefreshCw, Loader2, Image as ImageIcon, Video, Volume2, Link2 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ interface MessageBubbleProps {
   mediaMimeType: string | null;
   mediaStatus: 'pending' | 'ready' | 'failed' | null;
   mediaError: string | null;
-  mediaSize: number | null;
+  mediaSize?: number | null;
   fromMe: boolean;
   status: string;
   sentAt: string;

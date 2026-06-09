@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { MessageBox } from "@/components/ui/message-box";
 import { useFloatingChat } from "@/contexts/FloatingChatContext";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from "@/components/ui/tooltip";
+import { useAuth } from "@/contexts/AuthContext";
 
 const MAX_IMAGE_DIMENSION = 1600;
 const IMAGE_QUALITY = 0.82;
@@ -185,6 +186,7 @@ export function FloatingChat() {
   } = state;
   const isMobile = useIsMobile();
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
+  const { profile } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [messageText, setMessageText] = useState("");
   const [hideGroups, setHideGroups] = useState(() => {
@@ -575,7 +577,12 @@ export function FloatingChat() {
       // Upload to Supabase Storage
       const fileExt = processedFile.name.split('.').pop() || mimeExtension(processedFile.type);
       const fileName = `${crypto.randomUUID()}.${fileExt}`;
-      const filePath = `uploads/${fileName}`;
+      // Use org-scoped path to comply with RLS policy (requires orgs/{org_id}/ prefix)
+      const orgId = profile?.organization_id ||
+        sessions?.find(s => s.id === selectedSessionId)?.organization_id;
+      const filePath = orgId
+        ? `orgs/${orgId}/uploads/${fileName}`
+        : `uploads/${fileName}`;
       const {
         error: uploadError
       } = await supabase.storage.from("whatsapp-media").upload(filePath, processedFile);

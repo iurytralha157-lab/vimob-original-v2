@@ -1,4 +1,4 @@
-﻿import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -832,7 +832,7 @@ export function useSendWhatsAppMessage() {
         message_type: mediaType || "text",
         media_url: storedMediaUrl || null,
         media_mime_type: mimetype || null,
-        media_status: storedMediaUrl ? 'ready' : (base64 ? 'pending' : null),
+        media_status: storedMediaUrl ? 'ready' : (base64 ? 'ready' : null),
         media_storage_path: storedMediaPath,
         remote_jid: conversation.remote_jid,
         status: "sent",

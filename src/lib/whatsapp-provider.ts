@@ -29,6 +29,14 @@ function normalizeMimeType(mediatype: WhatsAppMediaType, mimetype: string) {
   return mimetype || "application/octet-stream";
 }
 
+function isBase64String(s: string): boolean {
+  if (!s || s.length < 4) return false;
+  // Allow base64 with or without data: prefix
+  if (s.startsWith("data:")) return true;
+  // Pure base64: only valid base64 chars (may have padding)
+  return /^[A-Za-z0-9+/]/.test(s) && !/^https?:\/\//.test(s);
+}
+
 /**
  * Provider router: same operation, but routed to the correct backend
  * depending on session.provider.
@@ -90,16 +98,20 @@ export function getWhatsAppClient(session: Pick<WhatsAppSession, "provider" | "i
       return normalizeLegacyResponse(data);
     }
     const normalizedMimeType = normalizeMimeType(mediatype, mimetype);
-    const base64Media = media.startsWith("data:") || /^[A-Za-z0-9+/=]+$/.test(media) ? media : undefined;
+    const isBase64 = isBase64String(media);
+    // For audio: always send as base64 so Evolution Go treats it as PTT voice note.
+    // For other media: prefer a URL (signed) when possible, fall back to base64.
+    const urlField = !isBase64 ? media : undefined;
+    const base64Field = isBase64 ? media : undefined;
     const result = await callEvolutionGo(mediatype === "audio" ? "send.audio" : "send.media", {
       session_id: session.id,
       body: {
         number,
         type: mediatype,
-        url: media,
-        media,
-        base64: base64Media,
-        audio: mediatype === "audio" ? media : undefined,
+        url: urlField,
+        media: urlField || base64Field,
+        base64: base64Field,
+        audio: mediatype === "audio" ? (base64Field || urlField) : undefined,
         mediatype,
         mediaType: mediatype,
         mimetype: normalizedMimeType,
