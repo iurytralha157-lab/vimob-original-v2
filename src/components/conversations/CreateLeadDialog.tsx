@@ -23,12 +23,14 @@ import { useCreateLead } from "@/hooks/use-leads";
 import { useProperties } from "@/hooks/use-properties";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface CreateLeadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contactPhone?: string;
   contactName?: string;
+  conversationId?: string;
 }
 
 export function CreateLeadDialog({
@@ -36,6 +38,7 @@ export function CreateLeadDialog({
   onOpenChange,
   contactPhone,
   contactName,
+  conversationId,
 }: CreateLeadDialogProps) {
   const { profile } = useAuth();
   const [name, setName] = useState("");
@@ -94,7 +97,7 @@ export function CreateLeadDialog({
       // Get property code if property is selected
       const selectedProperty = properties.find(p => p.id === selectedPropertyId);
       
-      await createLead.mutateAsync({
+      const newLead = await createLead.mutateAsync({
         name: name.trim(),
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
@@ -105,6 +108,14 @@ export function CreateLeadDialog({
         source: "whatsapp",
         assigned_user_id: profile?.id,
       });
+
+      // Vincula a conversa ativa ao novo lead imediatamente
+      if (conversationId && newLead?.id) {
+        await supabase
+          .from("whatsapp_conversations")
+          .update({ lead_id: newLead.id })
+          .eq("id", conversationId);
+      }
 
       toast({
         title: "Lead criado",
