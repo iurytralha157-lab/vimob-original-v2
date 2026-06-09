@@ -173,7 +173,15 @@ function remoteJidVariants(jid: string): string[] {
   const normalized = normalizeRemoteJid(jid);
   if (normalized.endsWith("@g.us")) return [normalized];
   const phone = normalizePhone(normalized);
-  return Array.from(new Set([normalized, `${phone}@s.whatsapp.net`, `${phone}@c.us`, jid].filter(Boolean)));
+  const variants = phoneVariants(phone);
+  const results: string[] = [];
+  for (const variant of variants) {
+    results.push(`${variant}@s.whatsapp.net`);
+    results.push(`${variant}@c.us`);
+  }
+  results.push(normalized);
+  results.push(jid);
+  return Array.from(new Set(results.filter(Boolean)));
 }
 
 async function findLeadByPhone(organizationId: string, phone: string) {

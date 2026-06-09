@@ -133,18 +133,38 @@ export function MessageBubble({
   // Waveform bars generated from mediaUrl or sentAt as seed
   const waveformBars = generateWaveform(mediaUrl || sentAt, 28);
 
-  useEffect(() => {
-    setMediaChecked(false);
-    setBlobAttempted(false);
-    setAudioError(null);
-    setAudioReady(false);
-    setAudioProgress(0);
-    setCurrentTime(0);
-    setIsPlaying(false);
+  const getBaseUrl = (url: string | null) => {
+    if (!url) return null;
+    try {
+      const parsed = new URL(url);
+      return parsed.origin + parsed.pathname;
+    } catch {
+      return url;
+    }
+  };
 
-    if (messageType === "image" || messageType === "sticker") {
-      setImageError(false);
-      setImageLoading(!!mediaUrl);
+  const lastMessageIdRef = useRef<string | null>(null);
+  const lastBaseUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const currentBaseUrl = getBaseUrl(mediaUrl);
+    const didUrlChange = currentBaseUrl !== lastBaseUrlRef.current || messageId !== lastMessageIdRef.current;
+    lastBaseUrlRef.current = currentBaseUrl;
+    lastMessageIdRef.current = messageId;
+
+    if (didUrlChange) {
+      setMediaChecked(false);
+      setBlobAttempted(false);
+      setAudioError(null);
+      setAudioReady(false);
+      setAudioProgress(0);
+      setCurrentTime(0);
+      setIsPlaying(false);
+
+      if (messageType === "image" || messageType === "sticker") {
+        setImageError(false);
+        setImageLoading(!!mediaUrl);
+      }
     }
   }, [mediaUrl, messageType, messageId]);
 
@@ -1000,12 +1020,39 @@ function MessageText({ content, fromMe }: { content: string; fromMe: boolean }) 
     .map((p) => p.slice(1));
   const names = useMentionNames(digitMentions);
 
+  const renderTextWithLinks = (text: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const urlParts = text.split(urlRegex);
+    
+    return urlParts.map((urlPart, i) => {
+      if (urlRegex.test(urlPart)) {
+        return (
+          <a
+            key={i}
+            href={urlPart}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={cn(
+              "underline break-all transition-colors duration-200",
+              fromMe 
+                ? "text-white hover:text-white/80 font-medium" 
+                : "text-primary hover:text-primary/80 font-medium"
+            )}
+          >
+            {urlPart}
+          </a>
+        );
+      }
+      return urlPart;
+    });
+  };
+
   return (
     <p className="text-[14.2px] leading-[19px] whitespace-pre-wrap break-words">
       {parts.length === 1
-        ? content
+        ? renderTextWithLinks(content)
         : parts.map((part, index) => {
-            if (!mentionTokenRegex.test(part)) return part;
+            if (!mentionTokenRegex.test(part)) return renderTextWithLinks(part);
             const isDigit = /^@\d{7,}$/.test(part);
             const display = isDigit ? `@${names[part.slice(1)] ?? part.slice(1)}` : part;
             return (
