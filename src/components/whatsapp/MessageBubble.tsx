@@ -238,7 +238,9 @@ export function MessageBubble({
     if (messageType === "sticker" && url.includes("a.whatsapp.net")) return false;
     if (url.includes("mmg.whatsapp.net")) return false;
     if (url.includes("pps.whatsapp.net")) return false;
-    if (url.includes(".enc")) return false;
+    // Extract path without query parameters to avoid false matches on signed URL token strings
+    const pathPart = url.split("?")[0];
+    if (pathPart.endsWith(".enc") || pathPart.includes(".enc/")) return false;
     if (url.startsWith("data:")) return true;
     return url.startsWith("http://") || url.startsWith("https://");
   };

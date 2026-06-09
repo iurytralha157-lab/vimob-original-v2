@@ -48,8 +48,41 @@ export function WhatsAppRealtimeBus() {
       }, 800);
     };
 
+    const findCachedMessage = (messageId: string, conversationId: string) => {
+      // Look in paginated messages cache
+      const paginatedData = queryClient.getQueryData(["whatsapp-messages-paginated", conversationId]) as any;
+      if (paginatedData?.pages) {
+        for (const page of paginatedData.pages) {
+          const found = page.messages?.find((m: any) => m.id === messageId);
+          if (found) return found;
+        }
+      }
+
+      // Look in legacy messages cache
+      const legacyData = queryClient.getQueriesData({
+        predicate: (q) =>
+          Array.isArray(q.queryKey) &&
+          q.queryKey[0] === "whatsapp-messages" &&
+          q.queryKey[1] === conversationId,
+      });
+      for (const [, data] of legacyData) {
+        if (Array.isArray(data)) {
+          const found = data.find((m: any) => m.id === messageId);
+          if (found) return found;
+        }
+      }
+
+      return null;
+    };
+
     const signMessageMediaUrl = async (msg: any) => {
       if (!msg?.media_storage_path) return msg;
+
+      // Se já temos a mensagem no cache com uma URL válida e o caminho da mídia é o mesmo, reutiliza!
+      const existingMsg = findCachedMessage(msg.id, msg.conversation_id);
+      if (existingMsg?.media_url && existingMsg.media_storage_path === msg.media_storage_path) {
+        return { ...msg, media_url: existingMsg.media_url };
+      }
 
       const { data, error } = await supabase.storage
         .from("whatsapp-media")
@@ -61,6 +94,10 @@ export function WhatsAppRealtimeBus() {
           storagePath: msg.media_storage_path,
           error,
         });
+        // Preserva a URL existente em caso de erro de assinatura temporário
+        if (existingMsg?.media_url) {
+          return { ...msg, media_url: existingMsg.media_url };
+        }
         return msg;
       }
 
@@ -133,7 +170,7 @@ export function WhatsAppRealtimeBus() {
               messages: page.messages.map((m: any) =>
                 m.id === msg.id ||
                 (m.client_message_id && newCid && m.client_message_id === newCid)
-                  ? { ...m, ...msg }
+                  ? { ...m, ...msg, media_url: msg.media_url || m.media_url }
                   : m,
               ),
             })),
@@ -161,7 +198,7 @@ export function WhatsAppRealtimeBus() {
             messages: page.messages.map((m: any) =>
               m.id === msg.id ||
               (m.client_message_id && cid && m.client_message_id === cid)
-                ? { ...m, ...msg }
+                ? { ...m, ...msg, media_url: msg.media_url || m.media_url }
                 : m,
             ),
           })),
