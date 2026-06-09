@@ -1217,7 +1217,7 @@ async function handleSingleMessageUpsert(session: any, m: any) {
     try {
       const bytes = Uint8Array.from(atob(mediaBase64), (c) => c.charCodeAt(0));
       const ext = (mediaMimeType?.split("/")?.[1] || "bin").split(";")[0];
-      const path = `${session.organization_id}/${conv.id}/${inserted.id}.${ext}`;
+      const path = `orgs/${session.organization_id}/sessions/${session.id}/media/${inserted.id}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("whatsapp-media")
         .upload(path, bytes, { contentType: mediaMimeType?.split(";")[0] || "application/octet-stream", upsert: true });
@@ -1256,6 +1256,7 @@ async function handleSingleMessageUpsert(session: any, m: any) {
       conversation_id: conv.id,
       message_id: inserted.id,
       message_key: {
+        id: messageId,        // ← adicionado
         message_id: messageId,
         remote_jid: remoteJid,
         sender_jid: senderJid,

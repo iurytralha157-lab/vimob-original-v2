@@ -24,6 +24,7 @@ function normalizeLegacyResponse(result: any): WhatsAppSendResult {
 }
 
 function normalizeMimeType(mediatype: WhatsAppMediaType, mimetype: string) {
+  if (mediatype === "audio") return "audio/ogg";
   if (mediatype === "document" && !mimetype) return "application/octet-stream";
   return mimetype || "application/octet-stream";
 }
