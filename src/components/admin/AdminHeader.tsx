@@ -205,7 +205,7 @@ export const AdminHeader = React.memo(function AdminHeader({
               
               <div className="px-4 py-2 mt-1 border-t border-border/20 flex items-center justify-between">
                 <span className="text-[10px] text-muted-foreground/60">Versão</span>
-                <span className="text-[10px] font-medium text-muted-foreground/80">v2.1.8</span>
+                <span className="text-[10px] font-medium text-muted-foreground/80">v2.1.9</span>
               </div>
             </div>
             <DropdownMenuSeparator className="my-1 border-border/40" />
