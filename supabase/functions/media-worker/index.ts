@@ -137,6 +137,7 @@ Deno.serve(async (req) => {
           media_mime_type, 
           message_id, 
           from_me,
+          metadata,
           session:whatsapp_sessions(organization_id),
           conversation:whatsapp_conversations(remote_jid)
         `)
@@ -160,6 +161,9 @@ Deno.serve(async (req) => {
         const remoteJid = (msg as any).conversation?.remote_jid;
         if (!orgId || !remoteJid) continue;
 
+        const metadataObj = (msg as any).metadata || {};
+        const mediaPayload = metadataObj.media_payload || metadataObj.raw_message || null;
+
         const { error: insErr } = await supabase.from("media_jobs").insert({
           organization_id: orgId,
           message_id: msg.id,
@@ -168,7 +172,8 @@ Deno.serve(async (req) => {
           message_key: { 
             id: msg.message_id,
             remoteJid: remoteJid,
-            fromMe: msg.from_me
+            fromMe: msg.from_me,
+            media: mediaPayload
           },
           media_type: msg.message_type,
           media_mime_type: msg.media_mime_type,
@@ -298,9 +303,10 @@ Deno.serve(async (req) => {
         let messageNotFound = false;
 
         if (session.provider === "evolution_go") {
+          const token = (session.advanced_settings as any)?.token || EVOLUTION_GO_API_KEY;
           const resultGo = await tryEvolutionGoDownloadMedia(
             EVOLUTION_GO_API_URL,
-            EVOLUTION_GO_API_KEY,
+            token,
             session.instance_id || session.instance_name,
             pickGoMediaPayload(job.message_key, job.media_type),
             job.media_mime_type || "",
@@ -311,55 +317,60 @@ Deno.serve(async (req) => {
           } else {
             failureReasons.push(`GO: ${resultGo.error || "Unknown error"}`);
           }
-        } else if (EVOLUTION_API_URL && EVOLUTION_API_KEY && messageId) {
-          // Strategy 1a: getBase64FromMediaMessage with full key
-          let result1 = await tryGetBase64(
-            EVOLUTION_API_URL,
-            EVOLUTION_API_KEY,
-            session.instance_name,
-            job.message_key,
-            job.media_type,
-            job.media_mime_type || ""
-          );
-
-          // Strategy 1b: retry with minimal key { id } — Evolution sometimes
-          // rejects extra fields (remoteJidAlt, addressingMode, empty participant).
-          if (!result1.content && /Message not found/i.test(result1.error || "")) {
-            console.log("Retrying Strategy 1 with minimal key { id } only...");
-            result1 = await tryGetBase64(
+        } else if (EVOLUTION_API_URL && messageId) {
+          const token = (session.advanced_settings as any)?.token || EVOLUTION_API_KEY;
+          if (token) {
+            // Strategy 1a: getBase64FromMediaMessage with full key
+            let result1 = await tryGetBase64(
               EVOLUTION_API_URL,
-              EVOLUTION_API_KEY,
+              token,
               session.instance_name,
-              { id: messageId },
+              job.message_key,
               job.media_type,
               job.media_mime_type || ""
             );
-          }
 
-          if (result1.content) {
-            mediaContent = result1.content;
-          } else {
-            const err = result1.error || "Unknown error";
-            failureReasons.push(`S1: ${err}`);
-            if (/Message not found/i.test(err)) messageNotFound = true;
-
-            const isDiagnostic = Deno.env.get("DEBUG_MEDIA") === "true";
-            if (isDiagnostic) {
-              const result2 = await tryDownloadMedia(
+            // Strategy 1b: retry with minimal key { id } — Evolution sometimes
+            // rejects extra fields (remoteJidAlt, addressingMode, empty participant).
+            if (!result1.content && /Message not found/i.test(result1.error || "")) {
+              console.log("Retrying Strategy 1 with minimal key { id } only...");
+              result1 = await tryGetBase64(
                 EVOLUTION_API_URL,
-                EVOLUTION_API_KEY,
+                token,
                 session.instance_name,
-                job.message_key,
+                { id: messageId },
+                job.media_type,
                 job.media_mime_type || ""
               );
-              if (result2.content) {
-                mediaContent = result2.content;
-              } else {
-                failureReasons.push(`S2: ${result2.error || "Unknown error"}`);
-              }
-            } else {
-              failureReasons.push("S2 skipped (non-diagnostic mode)");
             }
+
+            if (result1.content) {
+              mediaContent = result1.content;
+            } else {
+              const err = result1.error || "Unknown error";
+              failureReasons.push(`S1: ${err}`);
+              if (/Message not found/i.test(err)) messageNotFound = true;
+
+              const isDiagnostic = Deno.env.get("DEBUG_MEDIA") === "true";
+              if (isDiagnostic) {
+                const result2 = await tryDownloadMedia(
+                  EVOLUTION_API_URL,
+                  token,
+                  session.instance_name,
+                  job.message_key,
+                  job.media_mime_type || ""
+                );
+                if (result2.content) {
+                  mediaContent = result2.content;
+                } else {
+                  failureReasons.push(`S2: ${result2.error || "Unknown error"}`);
+                }
+              } else {
+                failureReasons.push("S2 skipped (non-diagnostic mode)");
+              }
+            }
+          } else {
+            failureReasons.push("Missing Evolution API key");
           }
         } else {
           failureReasons.push("Missing configuration or message ID");
@@ -367,8 +378,10 @@ Deno.serve(async (req) => {
 
         if (mediaContent && mediaContent.length > 100) {
           // Store in Supabase Storage with standardized path
+          // Usa job.message_id (UUID interno) como fallback se o messageId do WhatsApp não estiver disponível
           const extension = getExtensionFromMime(job.media_mime_type || "");
-          const filePath = `orgs/${session.organization_id}/sessions/${session.id}/media/${messageId}.${extension}`;
+          const safeFileId = messageId || job.message_id;
+          const filePath = `orgs/${session.organization_id}/sessions/${session.id}/media/${safeFileId}.${extension}`;
           
           const { error: uploadError } = await supabase.storage
             .from("whatsapp-media")
@@ -659,56 +672,81 @@ async function tryEvolutionGoDownloadMedia(
   if (!apiUrl || !apiKey || !instanceId) return { content: null, error: "Missing Evolution Go configuration" };
   if (!media || typeof media !== "object") return { content: null, error: "Missing media payload" };
 
-  try {
-    const response = await fetch(`${apiUrl}/message/downloadimage`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "apikey": apiKey,
-        "instanceId": instanceId,
-      },
-      body: JSON.stringify(media),
-    });
+  // Evolution Go (Xungoo/Whatsmeow) utiliza a rota /message/downloadimage como endpoint único para download e descriptografia de qualquer tipo de mídia
+  const endpoints = ["/message/downloadimage"];
+  const errors: string[] = [];
 
-    if (!response.ok) {
-      const text = await response.text();
-      return { content: null, error: `HTTP ${response.status}: ${text.substring(0, 160)}` };
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(`${apiUrl}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": apiKey,
+          "instanceId": instanceId,
+        },
+        body: JSON.stringify(media),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        errors.push(`${endpoint}: HTTP ${response.status}: ${text.substring(0, 120)}`);
+        continue;
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const buffer = await response.arrayBuffer();
+        const content = new Uint8Array(buffer);
+        if (content.length > 100 && validateMagicBytes(content, expectedMime)) {
+          console.log(`Evolution Go ${endpoint} success: ${content.length} bytes`);
+          return { content };
+        }
+        errors.push(`${endpoint}: Invalid binary (${content.length} bytes)`);
+        continue;
+      }
+
+      const data = await response.json();
+      const rawBase64 =
+        data.base64 ||
+        data.image ||
+        data.audio ||
+        data.video ||
+        data.document ||
+        data.sticker ||
+        data.media ||
+        data.file ||
+        data.data?.base64 ||
+        data.data?.image ||
+        data.data?.sticker ||
+        data.data?.media;
+
+      if (typeof rawBase64 !== "string") {
+        errors.push(`${endpoint}: No media content in JSON response`);
+        continue;
+      }
+
+      const normalized = normalizeBase64(rawBase64);
+      if (!isValidBase64(normalized)) {
+        errors.push(`${endpoint}: Invalid base64`);
+        continue;
+      }
+
+      const content = decode(normalized);
+      if (content.length > 100 && validateMagicBytes(content, expectedMime)) {
+        console.log(`Evolution Go ${endpoint} (base64) success: ${content.length} bytes`);
+        return { content };
+      }
+      errors.push(`${endpoint}: Magic bytes validation failed or too small (${content.length} bytes)`);
+
+    } catch (e) {
+      errors.push(`${endpoint}: ${e instanceof Error ? e.message : String(e)}`);
     }
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      const buffer = await response.arrayBuffer();
-      const content = new Uint8Array(buffer);
-      if (content.length > 100 && validateMagicBytes(content, expectedMime)) return { content };
-      return { content: null, error: `Invalid binary media (${content.length} bytes)` };
-    }
-
-    const data = await response.json();
-    const rawBase64 =
-      data.base64 ||
-      data.image ||
-      data.audio ||
-      data.video ||
-      data.document ||
-      data.sticker ||
-      data.media ||
-      data.file ||
-      data.data?.base64 ||
-      data.data?.image ||
-      data.data?.sticker ||
-      data.data?.media;
-    if (typeof rawBase64 !== "string") return { content: null, error: "No media content in JSON response" };
-
-    const normalized = normalizeBase64(rawBase64);
-    if (!isValidBase64(normalized)) return { content: null, error: "Invalid base64 received" };
-
-    const content = decode(normalized);
-    if (content.length > 100 && validateMagicBytes(content, expectedMime)) return { content };
-    return { content: null, error: `Magic bytes validation failed or too small (${content.length} bytes)` };
-  } catch (e) {
-    return { content: null, error: e instanceof Error ? e.message : String(e) };
   }
+
+  return { content: null, error: errors.join(" | ") };
 }
+
 
 function getExtensionFromMime(mime: string): string {
   const map: Record<string, string> = {

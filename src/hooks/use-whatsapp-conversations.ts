@@ -122,7 +122,7 @@ async function hydrateMessageMediaUrls(messages: WhatsAppMessage[]): Promise<Wha
   const uniquePaths = [...new Set(messagesWithPrivateMedia.map((message) => message.media_storage_path!).filter(Boolean))];
   const { data, error } = await supabase.storage
     .from("whatsapp-media")
-    .createSignedUrls(uniquePaths, 60 * 60);
+    .createSignedUrls(uniquePaths, 12 * 60 * 60); // 12h — evita URLs expirando durante uso normal
 
   if (error || !data) {
     console.error("Error creating signed WhatsApp media URLs:", error);
@@ -500,12 +500,13 @@ export function useWhatsAppMessages(
       return hydrateMessageMediaUrls((data?.messages || []) as WhatsAppMessage[]);
     },
     enabled: !!conversationId || !!leadId,
-    // Realtime updates are pushed by WhatsAppRealtimeBus; no polling needed
+    // Realtime updates are pushed by WhatsAppRealtimeBus
+    // staleTime baixo garante que URLs assinadas sejam renovadas ao reabrir o chat
     refetchIntervalInBackground: false,
-    staleTime: 60_000,
-    gcTime: 1000 * 60 * 5,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000, // 5 min — balanceia performance com renovação de URLs assinadas
+    gcTime: 1000 * 60 * 15,
+    refetchOnMount: "always", // sempre renova URLs ao montar o componente de chat
+    refetchOnWindowFocus: true, // renova URLs ao voltar à aba
   });
 
 
@@ -755,6 +756,7 @@ export function useSendWhatsAppMessage() {
 
         if (rebindError) {
           console.error("[useSendWhatsAppMessage] Failed to rebind conversation session:", rebindError);
+          // Fallback: update direto do session_id na conversa atual
           const { error: directRebindError } = await supabase
             .from("whatsapp_conversations")
             .update({
@@ -772,7 +774,14 @@ export function useSendWhatsAppMessage() {
             (conversation as any).session = session;
           }
         } else {
-          conversation.id = reboundConversation?.id || conversation.id;
+          // IMPORTANTE: o rebind pode retornar um ID diferente (conversa que existia na nova session).
+          // Sempre usar o ID retornado como conversation_id para a mensagem.
+          const newId = reboundConversation?.id || conversation.id;
+          const oldId = conversation.id;
+          if (newId !== oldId) {
+            console.log("[useSendWhatsAppMessage] Rebind retornou conversa diferente:", { oldId, newId });
+          }
+          conversation.id = newId;
           conversation.session_id = reboundConversation?.session_id || session.id;
           conversation.organization_id = reboundConversation?.organization_id || conversation.organization_id;
           conversation.lead_id = reboundConversation?.lead_id || conversation.lead_id;
@@ -821,7 +830,11 @@ export function useSendWhatsAppMessage() {
       // Insert message in database with client_message_id for deduplication
       const messageId = extractProviderMessageId(sendResult.data) || clientMessageId;
       
-      console.log("[useSendWhatsAppMessage] Inserting message into DB");
+      console.log("[useSendWhatsAppMessage] Inserting message into DB", {
+        conversation_id: conversation.id,
+        session_id: session.id,
+        message_id: messageId,
+      });
       const { error: insertError } = await supabase.from("whatsapp_messages").upsert({
         conversation_id: conversation.id,
         session_id: session.id,

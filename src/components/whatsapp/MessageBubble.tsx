@@ -814,7 +814,7 @@ export function MessageBubble({
         return (
           <div 
             className={cn(
-              "flex items-center gap-2 p-2 rounded-md transition-colors min-w-0 w-full",
+              "flex items-center gap-2 p-2 rounded-md transition-colors min-w-0 w-full max-w-[260px]",
               hasValidMedia ? "cursor-pointer" : "",
               fromMe 
                 ? "bg-primary-foreground/10 hover:bg-primary-foreground/20" 
@@ -833,14 +833,23 @@ export function MessageBubble({
               )} />
             </div>
             
-            {/* Content area - 90% */}
-            <div className="min-w-0 flex-[9]">
-              <p className="text-sm font-medium truncate">
+            {/* Content area — flex-1 com overflow hidden garante truncate */}
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <p
+                className="text-sm font-medium truncate leading-tight"
+                title={safeContent || "Documento"}
+              >
                 {safeContent || "Documento"}
               </p>
+              {mediaMimeType && (
+                <span className="text-[10px] opacity-50 block">
+                  {mediaMimeType.split("/")[1]?.toUpperCase().replace("OCTET-STREAM", "DOC") || "DOC"}
+                  {mediaSize ? ` · ${formatFileSize(mediaSize)}` : ""}
+                </span>
+              )}
             </div>
             
-            {/* Timestamp area - 10% */}
+            {/* Timestamp area */}
             <div className="flex flex-col items-end shrink-0 gap-1">
               <div className="flex items-center gap-1.5">
                 {leadId && hasValidMedia && (

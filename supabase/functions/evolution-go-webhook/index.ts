@@ -577,12 +577,18 @@ async function findOrCreateConversation(
   const { data: convs } = await supabase
     .from("whatsapp_conversations")
     .select("*")
-    .eq("session_id", sessionId)
+    .eq("organization_id", organizationId)
     .in("remote_jid", remoteJidVariants(remoteJid));
 
-  const conv = (convs || []).find((c: any) => c.lead_id) || (convs || [])[0];
+  const conv = (convs || []).find((c: any) => c.lead_id) || (convs || []).find((c: any) => c.session_id === sessionId) || (convs || [])[0];
   if (conv) {
     const update: any = {};
+    // Se a conversa veio de uma session diferente (session mudou por reconexão),
+    // migrar para a nova session automaticamente
+    if (conv.session_id !== sessionId) {
+      update.session_id = sessionId;
+      console.log(`[findOrCreateConversation] Migrando conversa ${conv.id} da session ${conv.session_id} para ${sessionId}`);
+    }
     if (groupMeta?.subject && conv.contact_name !== groupMeta.subject) update.contact_name = groupMeta.subject;
     if (groupMeta?.pictureUrl && !conv.contact_picture) update.contact_picture = groupMeta.pictureUrl;
     if (!isGroup && contactPicture && !conv.contact_picture) update.contact_picture = contactPicture;
@@ -603,13 +609,10 @@ async function findOrCreateConversation(
   }
   if (conv) return conv;
 
-  // When Evolution Go first sends @lid and later reveals the stable phone JID,
-  // keep the same conversation instead of splitting the chat in two.
   if (!isGroup && !isLidJid(canonicalJid) && contactName) {
     const { data: lidMatches } = await supabase
       .from("whatsapp_conversations")
       .select("*")
-      .eq("session_id", sessionId)
       .eq("organization_id", organizationId)
       .eq("is_group", false)
       .eq("contact_name", contactName)
@@ -629,13 +632,10 @@ async function findOrCreateConversation(
     }
   }
 
-  // Evolution Go can emit @lid for direct chats. If that happens, do not create
-  // a duplicate conversation when the lead conversation is already known by name.
   if (!isGroup && isLidJid(canonicalJid) && contactName) {
     const { data: nameMatches } = await supabase
       .from("whatsapp_conversations")
       .select("*")
-      .eq("session_id", sessionId)
       .eq("organization_id", organizationId)
       .eq("is_group", false)
       .eq("contact_name", contactName)
@@ -660,7 +660,6 @@ async function findOrCreateConversation(
     const { data: leadMatches } = await supabase
       .from("whatsapp_conversations")
       .select("*")
-      .eq("session_id", sessionId)
       .eq("organization_id", organizationId)
       .eq("is_group", false)
       .eq("contact_name", contactName)
@@ -671,7 +670,6 @@ async function findOrCreateConversation(
     if (leadMatches?.length === 1) return leadMatches[0];
   }
 
-  // 2) try to find lead by phone variants (org-scoped) — only for direct chats
   let leadId: string | null = null;
   let leadName: string | null = null;
   if (!isGroup) {

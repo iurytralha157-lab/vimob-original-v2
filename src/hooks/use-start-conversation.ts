@@ -63,8 +63,8 @@ export function useStartConversation() {
       const cleanPhone = formatPhoneForWhatsApp(phone);
       const remoteJid = cleanPhone.includes("@") ? cleanPhone : `${cleanPhone}@c.us`;
 
-      console.log('[WhatsApp Start] Buscando se já existe conversa local...', { remoteJid, sessionId });
-      // Verificar se já existe conversa com esse telefone na sessão
+      console.log('[WhatsApp Start] Buscando se já existe conversa local...', { remoteJid, sessionId, orgId, leadId });
+      // 1) Verificar se já existe conversa com esse telefone na sessão atual
       const { data: existingConversation, error: searchError } = await supabase
         .from("whatsapp_conversations")
         .select(`
@@ -83,7 +83,7 @@ export function useStartConversation() {
       }
 
       if (existingConversation) {
-        console.log('[WhatsApp Start] Conversa encontrada localmente:', existingConversation.id);
+        console.log('[WhatsApp Start] Conversa encontrada na session atual:', existingConversation.id);
         if (leadId && existingConversation.lead_id !== leadId) {
           console.log('[WhatsApp Start] Atualizando lead_id da conversa existente');
           await supabase
@@ -94,7 +94,68 @@ export function useStartConversation() {
         return existingConversation as WhatsAppConversation;
       }
 
-      console.log('[WhatsApp Start] Inserindo nova conversa...');
+      // 2) Busca cross-session: a session pode ter mudado por reconexão.
+      // Procurar pela organização + lead_id OU remote_jid sem filtrar session.
+      console.log('[WhatsApp Start] Não encontrado na session atual, buscando cross-session...');
+
+      // 2a) Por lead_id (mais preciso — identifica o lead independente do número formatado)
+      if (leadId) {
+        const { data: byLead } = await supabase
+          .from("whatsapp_conversations")
+          .select(`
+            *,
+            session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id),
+            lead:leads!whatsapp_conversations_lead_id_fkey(id, name)
+          `)
+          .eq("organization_id", orgId)
+          .eq("lead_id", leadId)
+          .is("deleted_at", null)
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .limit(1);
+
+        if (byLead?.[0]) {
+          console.log('[WhatsApp Start] Encontrado cross-session por lead_id:', byLead[0].id, '— migrando session...');
+          // Migrar para a nova session
+          await supabase
+            .from("whatsapp_conversations")
+            .update({ session_id: sessionId, remote_jid: remoteJid, contact_phone: cleanPhone })
+            .eq("id", byLead[0].id);
+          return { ...byLead[0], session_id: sessionId, remote_jid: remoteJid } as WhatsAppConversation;
+        }
+      }
+
+      // 2b) Por remote_jid na organização (fallback quando não temos lead_id)
+      const digits = cleanPhone.replace(/\D/g, '');
+      const withoutCountry = digits.startsWith('55') && digits.length >= 12 ? digits.substring(2) : digits;
+      const withCountry = digits.startsWith('55') ? digits : `55${digits}`;
+      const searchVariants = [...new Set([digits, withoutCountry, withCountry])];
+      const orFilter = searchVariants
+        .flatMap(v => [`remote_jid.ilike.%${v}%`, `contact_phone.ilike.%${v}%`])
+        .join(',');
+
+      const { data: byJid } = await supabase
+        .from("whatsapp_conversations")
+        .select(`
+          *,
+          session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id),
+          lead:leads!whatsapp_conversations_lead_id_fkey(id, name)
+        `)
+        .eq("organization_id", orgId)
+        .or(orFilter)
+        .is("deleted_at", null)
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(1);
+
+      if (byJid?.[0]) {
+        console.log('[WhatsApp Start] Encontrado cross-session por remote_jid:', byJid[0].id, '— migrando session...');
+        const updateData: any = { session_id: sessionId, remote_jid: remoteJid, contact_phone: cleanPhone };
+        if (leadId && !byJid[0].lead_id) updateData.lead_id = leadId;
+        await supabase.from("whatsapp_conversations").update(updateData).eq("id", byJid[0].id);
+        return { ...byJid[0], ...updateData } as WhatsAppConversation;
+      }
+
+      console.log('[WhatsApp Start] Nenhuma conversa encontrada. Inserindo nova...');
+
       const { data: newConversation, error: insertError } = await supabase
         .from("whatsapp_conversations")
         .insert({
