@@ -95,6 +95,7 @@ interface AccountGroup {
 }
 
 const getPagePicture = (page?: MetaPage | null) => page?.picture?.data?.url || "";
+const searchableText = (value: unknown) => String(value ?? "").toLowerCase();
 
 const buildConfigForm = (config: MetaFormConfig): MetaForm => ({
   id: config.form_id,
@@ -243,12 +244,14 @@ export function MetaIntegrationSettings({
     integrationId ? configs.filter((config) => config.integration_id === integrationId) : [];
 
   const filteredAccounts = accounts.filter((account) =>
-    account.name.toLowerCase().includes(accountSearch.toLowerCase())
+    searchableText(account.name).includes(searchableText(accountSearch))
   );
 
-  const filteredForms = forms.filter((form) =>
-    form.name.toLowerCase().includes(formSearch.toLowerCase()) || form.id.includes(formSearch)
-  );
+  const filteredForms = forms.filter((form) => {
+    const search = searchableText(formSearch.trim());
+    if (!search) return true;
+    return [form.name, form.id, form.status].some((value) => searchableText(value).includes(search));
+  });
 
   const openOAuth = async () => {
     const returnUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
@@ -397,7 +400,7 @@ export function MetaIntegrationSettings({
                     config.form_id,
                     integration?.facebook_account_name,
                     integration?.page_name,
-                    userNames[config.created_by || ""],
+                    config.created_by_name,
                   ]
                     .filter(Boolean)
                     .some((value) => String(value).toLowerCase().includes(search));

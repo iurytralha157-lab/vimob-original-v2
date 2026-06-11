@@ -57,6 +57,42 @@ export interface ScheduleEvent {
   is_masked?: boolean;
 }
 
+interface ScheduleEventRpcRow {
+  id: string;
+  organization_id: string;
+  user_id: string | null;
+  lead_id: string | null;
+  property_id: string | null;
+  title: string;
+  description: string | null;
+  event_type: string | null;
+  start_time: string;
+  end_time: string;
+  is_all_day: boolean | null;
+  location: string | null;
+  status: string | null;
+  visibility: ScheduleEventVisibility | null;
+  reminder_minutes: number | null;
+  recurrence_parent_id: string | null;
+  recurrence_rule: string | null;
+  recurrence_until: string | null;
+  recurrence_count: number | null;
+  google_event_id: string | null;
+  completed_by: string | null;
+  completed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  user_name: string | null;
+  user_avatar_url: string | null;
+  lead_name: string | null;
+  lead_phone: string | null;
+  property_title: string | null;
+  property_code: string | null;
+  completed_by_user_name: string | null;
+  assignee_user_ids: string[] | null;
+  is_masked: boolean | null;
+}
+
 export type ScheduleRecurrenceFrequency = 'none' | 'weekly' | 'monthly' | 'yearly';
 
 function addRecurrenceInterval(date: Date, frequency: ScheduleRecurrenceFrequency, amount: number) {
@@ -145,14 +181,17 @@ function applyScheduleVisibility(events: ScheduleEvent[], currentUserId?: string
 
       return {
         ...event,
+        user_id: '',
         title: 'Horario ocupado',
         description: 'Informacao privada',
         event_type: 'task',
         lead_id: null,
         property_id: null,
         location: null,
+        user: null,
         lead: null,
         property: null,
+        assignee_user_ids: [],
         is_masked: true,
       };
     });
@@ -236,80 +275,61 @@ export function useScheduleEvents(options: UseScheduleEventsOptions = {}) {
   return useQuery({
     queryKey: ['schedule-events', options],
     queryFn: async () => {
-      let assignedEventIds: string[] = [];
-
-      // Se houver filtro de usuário, buscamos eventos onde ele Ã© co-responsÃ¡vel
-      if (options.userId) {
-        const { data: assignments } = await supabase
-          .from('schedule_event_assignees')
-          .select('event_id')
-          .eq('user_id', options.userId);
-        
-        if (assignments && assignments.length > 0) {
-          assignedEventIds = assignments.map(a => a.event_id);
-        }
-      }
-
-      let query = supabase
-        .from('schedule_events')
-        .select(`
-          id, organization_id, user_id, lead_id, property_id, title, 
-          description, event_type, start_time, end_time, is_all_day, location, status, visibility,
-          completed_by, completed_at, recurrence_parent_id, recurrence_rule, recurrence_until, recurrence_count,
-          user:users!schedule_events_user_id_fkey(id, name, avatar_url),
-          lead:leads(id, name, phone),
-          property:properties(id, title, code),
-          completed_by_user:users!schedule_events_completed_by_fkey(id, name)
-        `)
-        .order('start_time', { ascending: true });
-
-      if (options.userId) {
-        if (assignedEventIds.length > 0) {
-          // Filtra onde ele Ã© o dono OU onde ele está na lista de co-responsÃ¡veis
-          query = query.or(`user_id.eq.${options.userId},id.in.(${assignedEventIds.join(',')})`);
-        } else {
-          query = query.eq('user_id', options.userId);
-        }
-      }
-
-      if (options.leadId) {
-        query = query.eq('lead_id', options.leadId);
-      }
-
-      if (options.startDate) {
-        query = query.gte('start_time', options.startDate.toISOString());
-      }
-
-      if (options.endDate) {
-        query = query.lte('start_time', options.endDate.toISOString());
-      }
-
-      const { data, error } = await query;
+      const { data, error } = await (supabase as any).rpc('get_schedule_events_secure', {
+        p_user_id: options.userId || null,
+        p_lead_id: options.leadId || null,
+        p_start_time: options.startDate?.toISOString() || null,
+        p_end_time: options.endDate?.toISOString() || null,
+      });
 
       if (error) throw error;
 
-      const eventRows = (data || []) as ScheduleEvent[];
-      if (eventRows.length === 0) {
-        return [];
-      }
-
-      const { data: assignmentRows } = await (supabase as any)
-        .from('schedule_event_assignees')
-        .select('event_id, user_id')
-        .in('event_id', eventRows.map((event) => event.id));
-
-      const assigneesByEvent = new Map<string, string[]>();
-      (assignmentRows || []).forEach((assignment: any) => {
-        if (!assignment?.event_id || !assignment?.user_id) return;
-        assigneesByEvent.set(assignment.event_id, [
-          ...(assigneesByEvent.get(assignment.event_id) || []),
-          assignment.user_id,
-        ]);
-      });
-
-      const eventsWithAssignees = eventRows.map((event) => ({
-        ...event,
-        assignee_user_ids: assigneesByEvent.get(event.id) || [],
+      const eventsWithAssignees = ((data || []) as ScheduleEventRpcRow[]).map((row) => ({
+        id: row.id,
+        organization_id: row.organization_id,
+        lead_id: row.lead_id,
+        property_id: row.property_id,
+        title: row.title,
+        description: row.description,
+        event_type: row.event_type,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        is_all_day: row.is_all_day,
+        location: row.location,
+        status: row.status,
+        visibility: row.visibility,
+        reminder_minutes: row.reminder_minutes,
+        recurrence_parent_id: row.recurrence_parent_id,
+        recurrence_rule: row.recurrence_rule,
+        recurrence_until: row.recurrence_until,
+        recurrence_count: row.recurrence_count,
+        google_event_id: row.google_event_id,
+        completed_by: row.completed_by,
+        completed_at: row.completed_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        user_id: row.user_id || '',
+        user: !row.is_masked && row.user_name ? {
+          id: row.user_id || '',
+          name: row.user_name,
+          avatar_url: row.user_avatar_url,
+        } : null,
+        lead: row.lead_id && row.lead_name ? {
+          id: row.lead_id,
+          name: row.lead_name,
+          phone: row.lead_phone,
+        } : null,
+        property: row.property_id && row.property_title ? {
+          id: row.property_id,
+          title: row.property_title,
+          code: row.property_code,
+        } : null,
+        completed_by_user: row.completed_by && row.completed_by_user_name ? {
+          id: row.completed_by,
+          name: row.completed_by_user_name,
+        } : null,
+        assignee_user_ids: row.assignee_user_ids || [],
+        is_masked: Boolean(row.is_masked),
       }));
 
       return applyScheduleVisibility(eventsWithAssignees, profile?.id, profile?.role);

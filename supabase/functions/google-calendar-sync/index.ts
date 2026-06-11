@@ -11,6 +11,15 @@ const GOOGLE_CLIENT_SECRET = Deno.env.get('GOOGLE_CLIENT_SECRET')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
+function getEventStart(event: any) {
+  return event.start_time || event.start_at
+}
+
+function getEventEnd(event: any) {
+  const start = getEventStart(event)
+  return event.end_time || event.end_at || new Date(new Date(start).getTime() + (event.duration_minutes || 30) * 60000).toISOString()
+}
+
 async function refreshAccessToken(supabaseAdmin: any, userId: string, refreshToken: string) {
   const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -103,11 +112,11 @@ serve(async (req) => {
         summary: event.title,
         description: event.description || '',
         start: {
-          dateTime: event.start_at,
+          dateTime: getEventStart(event),
           timeZone: 'America/Sao_Paulo',
         },
         end: {
-          dateTime: event.end_at || new Date(new Date(event.start_at).getTime() + (event.duration_minutes || 30) * 60000).toISOString(),
+          dateTime: getEventEnd(event),
           timeZone: 'America/Sao_Paulo',
         },
       }
@@ -136,7 +145,6 @@ serve(async (req) => {
           .from('schedule_events')
           .update({
             google_event_id: createdEvent.id,
-            google_calendar_id: 'primary',
           })
           .eq('id', event.id)
       }
@@ -159,11 +167,11 @@ serve(async (req) => {
         summary: event.title,
         description: event.description || '',
         start: {
-          dateTime: event.start_at,
+          dateTime: getEventStart(event),
           timeZone: 'America/Sao_Paulo',
         },
         end: {
-          dateTime: event.end_at || new Date(new Date(event.start_at).getTime() + (event.duration_minutes || 30) * 60000).toISOString(),
+          dateTime: getEventEnd(event),
           timeZone: 'America/Sao_Paulo',
         },
       }

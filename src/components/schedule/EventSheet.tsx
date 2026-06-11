@@ -238,6 +238,8 @@ export function EventSheet({
   };
 
   const allAssignees = useMemo(() => {
+    if (isMasked) return [];
+
     const list: { id: string; name: string; avatar_url: string | null; primary: boolean; pending?: boolean }[] = [];
     const primary = users.find((u) => u.id === primaryUserId);
     if (primary) list.push({ ...primary, primary: true });
@@ -254,7 +256,7 @@ export function EventSheet({
     });
 
     return list;
-  }, [users, primaryUserId, assignees, pendingAssigneeIds]);
+  }, [isMasked, users, primaryUserId, assignees, pendingAssigneeIds]);
 
   const availableUsers = users.filter(
     (u) => u.id !== primaryUserId && !assignees.some((a) => a.id === u.id) && !pendingAssigneeIds.includes(u.id),
@@ -527,7 +529,9 @@ export function EventSheet({
 
           <AgendaRow icon={<Users size={18} />} label="Responsáveis" inline>
             <div className="flex min-h-10 flex-wrap items-center gap-2">
-              {allAssignees.length > 0 ? (
+              {isMasked ? (
+                <span className="text-sm text-zinc-400">Informacao privada</span>
+              ) : allAssignees.length > 0 ? (
                 allAssignees.map((a) => (
                   <div key={a.id} className="group relative">
                     <Avatar className="h-8 w-8" title={a.name}>

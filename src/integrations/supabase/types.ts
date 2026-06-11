@@ -6620,6 +6620,7 @@ export type Database = {
           title: string
           updated_at: string | null
           user_id: string
+          visibility: string
         }
         Insert: {
           completed_at?: string | null
@@ -6645,6 +6646,7 @@ export type Database = {
           title: string
           updated_at?: string | null
           user_id: string
+          visibility?: string
         }
         Update: {
           completed_at?: string | null
@@ -6670,6 +6672,7 @@ export type Database = {
           title?: string
           updated_at?: string | null
           user_id?: string
+          visibility?: string
         }
         Relationships: [
           {

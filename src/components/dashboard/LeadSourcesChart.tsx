@@ -1,9 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PieChart as PieChartIcon, TrendingUp, Users, MousePointer2 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { cn } from '@/lib/utils';
-import { DashboardChartTooltip } from './DashboardChartTooltip';
 import { sourceLabels } from '@/hooks/use-dashboard-filters';
 
 interface SourceDataPoint {
@@ -46,16 +45,35 @@ function ChartSkeleton() {
   );
 }
 
-function CustomTooltip(props: any) {
+function LeadSourcesTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+
+  const entry = payload[0];
+  const source = entry.payload;
+  const percentage = source?.percentage ?? 0;
+  const value = Number(entry.value || 0);
+  const leadLabel = value === 1 ? 'lead' : 'leads';
+
   return (
-    <DashboardChartTooltip 
-      {...props}
-      className="min-w-[180px]"
-      valueFormatter={(value, entry) => {
-        const percentage = entry?.payload?.percentage;
-        return `${value} (${percentage}%)`;
-      }}
-    />
+    <div className="min-w-[150px] rounded-lg border border-border/70 bg-background/95 px-3 py-2.5 shadow-xl shadow-black/20 backdrop-blur-md animate-in fade-in zoom-in-95 duration-150">
+      <div className="mb-1 flex items-center gap-2">
+        <span
+          className="h-2.5 w-2.5 rounded-full ring-2 ring-background"
+          style={{ backgroundColor: source?.color || entry.color || entry.fill }}
+        />
+        <span className="truncate text-xs font-semibold text-foreground">
+          {source?.name || entry.name}
+        </span>
+      </div>
+      <div className="flex items-end justify-between gap-4">
+        <span className="text-[11px] text-muted-foreground">
+          {value} {leadLabel}
+        </span>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-bold tabular-nums text-foreground">
+          {percentage}%
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -82,7 +100,11 @@ export function LeadSourcesChart({ data, isLoading, selectedSource, onSourceChan
       ...item,
       percentage: total > 0 ? Math.round((item.value / total) * 100) : 0,
     }))
-    .sort((a, b) => b.value - a.value);
+    .sort((a, b) => b.value - a.value)
+    .map((item, index) => ({
+      ...item,
+      color: COLORS[index % COLORS.length],
+    }));
 
   const bestSource = chartData[0] || { name: 'N/A', value: 0, percentage: 0 };
 
@@ -167,7 +189,7 @@ export function LeadSourcesChart({ data, isLoading, selectedSource, onSourceChan
                   return (
                     <Cell
                       key={`cell-${index}`}
-                      fill={COLORS[index % COLORS.length]}
+                      fill={entry.color}
                       opacity={hasSelection && !isSelected ? 0.35 : 1}
                       stroke={isSelected ? "white" : "transparent"}
                       strokeWidth={isSelected ? 2 : 0}
@@ -180,10 +202,12 @@ export function LeadSourcesChart({ data, isLoading, selectedSource, onSourceChan
                   );
                 })}
               </Pie>
-              <Tooltip 
-                content={<CustomTooltip />} 
+              <Tooltip
+                content={<LeadSourcesTooltip />}
                 cursor={false}
-                wrapperStyle={{ zIndex: 1001 }}
+                position={{ x: 12, y: 10 }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ zIndex: 30, pointerEvents: 'none' }}
               />
             </PieChart>
           </ResponsiveContainer>

@@ -16,6 +16,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "
 const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") || "v25.0";
 const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 const META_DIALOG_BASE_URL = `https://www.facebook.com/${META_GRAPH_VERSION}`;
+const MAX_META_FORM_PAGES = 30;
 
 function generateSuccessPage(payload: Record<string, unknown>, returnUrl: string): Response {
   const encodedData = encodeURIComponent(JSON.stringify(payload));
@@ -86,6 +87,58 @@ function redirectWithSuccess(pages: any[], userToken: string, returnUrl: string,
       "cache-control": "no-store",
     },
   });
+}
+
+async function fetchLeadFormsCollection(pageId: string, accessToken: string, status?: string): Promise<any[]> {
+  const forms: any[] = [];
+  const params = new URLSearchParams({
+    access_token: accessToken,
+    fields: "id,name,status,leads_count,questions",
+    limit: "100",
+  });
+
+  if (status) {
+    params.set("filtering", JSON.stringify([{ field: "status", operator: "EQUAL", value: status }]));
+  }
+
+  let nextUrl =
+    `${META_GRAPH_BASE_URL}/${pageId}/leadgen_forms?` +
+    params.toString();
+
+  for (let page = 0; nextUrl && page < MAX_META_FORM_PAGES; page += 1) {
+    const response = await fetch(nextUrl);
+    const payload = await response.json();
+
+    if (payload.error) throw payload.error;
+
+    forms.push(...(payload.data || []));
+    nextUrl = payload.paging?.next || "";
+  }
+
+  return forms;
+}
+
+async function fetchAllLeadForms(pageId: string, accessToken: string): Promise<any[]> {
+  const byId = new Map<string, any>();
+  const addForms = (forms: any[]) => {
+    for (const form of forms) {
+      if (form?.id) byId.set(form.id, form);
+    }
+  };
+
+  addForms(await fetchLeadFormsCollection(pageId, accessToken));
+
+  // Meta can hide archived/draft lead forms from the default listing.
+  // Fetching statuses explicitly keeps old reusable forms visible in the CRM wizard.
+  for (const status of ["ACTIVE", "ARCHIVED", "DRAFT"]) {
+    try {
+      addForms(await fetchLeadFormsCollection(pageId, accessToken, status));
+    } catch (statusError) {
+      console.warn(`Could not fetch Meta lead forms with status ${status}:`, statusError);
+    }
+  }
+
+  return Array.from(byId.values());
 }
 
 // Redirect to frontend with error
@@ -422,44 +475,42 @@ serve(async (req) => {
 
         console.log("Found integration for page:", integration.page_name);
 
-        // Fetch forms from the page
-        const formsUrl = `${META_GRAPH_BASE_URL}/${page_id}/leadgen_forms?` +
-          `access_token=${integration.access_token}` +
-          `&fields=id,name,status,leads_count,questions`;
+        console.log("Fetching all forms from Meta API...");
+        let metaForms: any[] = [];
 
-        console.log("Fetching forms from Meta API...");
-        const formsResponse = await fetch(formsUrl);
-        const formsData = await formsResponse.json();
-
-        if (formsData.error) {
-          console.error("Meta API error:", formsData.error);
+        try {
+          metaForms = await fetchAllLeadForms(page_id, integration.access_token);
+        } catch (rawError) {
+          const metaError = rawError as any;
+          console.error("Meta API error:", metaError);
+          const errorMessage = metaError?.message || "Erro ao buscar formularios no Meta";
           
           // Update integration with error
           await supabase
             .from("meta_integrations")
             .update({ 
-              last_error: formsData.error.message,
+              last_error: errorMessage,
               updated_at: new Date().toISOString()
             })
             .eq("organization_id", userData.organization_id)
             .eq("page_id", page_id);
           
           return new Response(JSON.stringify({ 
-            error: formsData.error.message,
-            error_code: formsData.error.code,
-            error_subcode: formsData.error.error_subcode
+            error: errorMessage,
+            error_code: metaError?.code,
+            error_subcode: metaError?.error_subcode
           }), {
             status: 400,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
 
-        console.log(`Found ${formsData.data?.length || 0} forms`);
+        console.log(`Found ${metaForms.length || 0} forms`);
 
-        const forms = (formsData.data || []).map((form: any) => ({
+        const forms = metaForms.map((form: any) => ({
           id: form.id,
-          name: form.name,
-          status: form.status,
+          name: form.name || form.id,
+          status: form.status || "UNKNOWN",
           leads_count: form.leads_count,
           questions: (form.questions || []).map((q: any) => ({
             key: q.key,
