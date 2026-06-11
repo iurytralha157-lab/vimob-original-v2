@@ -11,6 +11,8 @@ const META_APP_SECRET = Deno.env.get("META_APP_SECRET") || "";
 const META_WEBHOOK_VERIFY_TOKEN = Deno.env.get("META_WEBHOOK_VERIFY_TOKEN") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") || "v25.0";
+const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 
 // Verify Meta webhook signature (HMAC-SHA256)
 function verifySignature(payload: string, signature: string): boolean {
@@ -123,7 +125,7 @@ async function handleMessaging(supabase: any, messagingItem: any, pageId: string
     let name = "Meta User";
     let profilePic = null;
     try {
-      const profileUrl = `https://graph.facebook.com/v19.0/${senderId}?fields=name,first_name,last_name,profile_pic&access_token=${integration.access_token}`;
+      const profileUrl = `${META_GRAPH_BASE_URL}/${senderId}?fields=name,first_name,last_name,profile_pic&access_token=${integration.access_token}`;
       const profileRes = await fetch(profileUrl);
       const profile = await profileRes.json();
       if (profile.name) name = profile.name;
@@ -337,7 +339,7 @@ async function processLeadgen(
       if (property?.preco) valorInteresse = property.preco;
     }
 
-    const leadUrl = `https://graph.facebook.com/v19.0/${leadgenId}?access_token=${integration.access_token}&fields=id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,platform`;
+    const leadUrl = `${META_GRAPH_BASE_URL}/${leadgenId}?access_token=${integration.access_token}&fields=id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,platform`;
     const leadResponse = await fetch(leadUrl);
     const leadData = await leadResponse.json();
 
@@ -355,14 +357,14 @@ async function processLeadgen(
     let creativeInstagramUrl = null;
     if (leadData.ad_id) {
       try {
-        const creativeApiUrl = `https://graph.facebook.com/v19.0/${leadData.ad_id}?fields=creative{effective_image_url,thumbnail_url,video_id,instagram_permalink_url}&access_token=${integration.access_token}`;
+        const creativeApiUrl = `${META_GRAPH_BASE_URL}/${leadData.ad_id}?fields=creative{effective_image_url,thumbnail_url,video_id,instagram_permalink_url}&access_token=${integration.access_token}`;
         const creativeResponse = await fetch(creativeApiUrl);
         const creativeData = await creativeResponse.json();
         if (creativeData?.creative) {
           creativeUrl = creativeData.creative.effective_image_url || creativeData.creative.thumbnail_url || null;
           creativeInstagramUrl = creativeData.creative.instagram_permalink_url || null;
           if (creativeData.creative.video_id) {
-            const videoApiUrl = `https://graph.facebook.com/v19.0/${creativeData.creative.video_id}?fields=source,permalink_url&access_token=${integration.access_token}`;
+            const videoApiUrl = `${META_GRAPH_BASE_URL}/${creativeData.creative.video_id}?fields=source,permalink_url&access_token=${integration.access_token}`;
             const videoResponse = await fetch(videoApiUrl);
             const videoData = await videoResponse.json();
             creativeVideoUrl = videoData?.source || videoData?.permalink_url || null;

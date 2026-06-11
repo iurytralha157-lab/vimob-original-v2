@@ -13,6 +13,9 @@ const META_APP_ID = Deno.env.get("META_APP_ID") || "";
 const META_APP_SECRET = Deno.env.get("META_APP_SECRET") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") || "v25.0";
+const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
+const META_DIALOG_BASE_URL = `https://www.facebook.com/${META_GRAPH_VERSION}`;
 
 function generateSuccessPage(payload: Record<string, unknown>, returnUrl: string): Response {
   const encodedData = encodeURIComponent(JSON.stringify(payload));
@@ -204,7 +207,7 @@ serve(async (req) => {
       
       // Exchange code for access token
       console.log("Exchanging code for token...");
-      const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?` +
+      const tokenUrl = `${META_GRAPH_BASE_URL}/oauth/access_token?` +
         `client_id=${META_APP_ID}` +
         `&client_secret=${META_APP_SECRET}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
@@ -221,7 +224,7 @@ serve(async (req) => {
       console.log("Token obtained, exchanging for long-lived token...");
       
       // Exchange for long-lived token
-      const longLivedUrl = `https://graph.facebook.com/v19.0/oauth/access_token?` +
+      const longLivedUrl = `${META_GRAPH_BASE_URL}/oauth/access_token?` +
         `grant_type=fb_exchange_token` +
         `&client_id=${META_APP_ID}` +
         `&client_secret=${META_APP_SECRET}` +
@@ -239,7 +242,7 @@ serve(async (req) => {
 
       let facebookUser: any = null;
       try {
-        const meResponse = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${longLivedData.access_token}`);
+        const meResponse = await fetch(`${META_GRAPH_BASE_URL}/me?fields=id,name&access_token=${longLivedData.access_token}`);
         const meData = await meResponse.json();
         if (!meData.error) facebookUser = meData;
       } catch (meError) {
@@ -247,7 +250,7 @@ serve(async (req) => {
       }
       
       // Get pages the user manages
-      const pagesUrl = `https://graph.facebook.com/v19.0/me/accounts?` +
+      const pagesUrl = `${META_GRAPH_BASE_URL}/me/accounts?` +
         `access_token=${longLivedData.access_token}` +
         `&fields=id,name,access_token,picture`;
 
@@ -273,7 +276,7 @@ serve(async (req) => {
       // NEW: Also fetch ad accounts to find the one associated with this user
       let ad_account_id = null;
       try {
-        const adAccountsUrl = `https://graph.facebook.com/v19.0/me/adaccounts?` +
+        const adAccountsUrl = `${META_GRAPH_BASE_URL}/me/adaccounts?` +
           `access_token=${longLivedData.access_token}` +
           `&fields=id,name,account_id`;
         
@@ -384,7 +387,7 @@ serve(async (req) => {
           "business_management",
         ].join(",");
 
-        const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?` +
+        const authUrl = `${META_DIALOG_BASE_URL}/dialog/oauth?` +
           `client_id=${META_APP_ID}` +
           `&redirect_uri=${encodeURIComponent(callbackUrl)}` +
           `&scope=${encodeURIComponent(scopes)}` +
@@ -420,7 +423,7 @@ serve(async (req) => {
         console.log("Found integration for page:", integration.page_name);
 
         // Fetch forms from the page
-        const formsUrl = `https://graph.facebook.com/v19.0/${page_id}/leadgen_forms?` +
+        const formsUrl = `${META_GRAPH_BASE_URL}/${page_id}/leadgen_forms?` +
           `access_token=${integration.access_token}` +
           `&fields=id,name,status,leads_count,questions`;
 
@@ -472,7 +475,7 @@ serve(async (req) => {
 
       case "exchange_token": {
         // Exchange code for access token
-        const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?` +
+        const tokenUrl = `${META_GRAPH_BASE_URL}/oauth/access_token?` +
           `client_id=${META_APP_ID}` +
           `&client_secret=${META_APP_SECRET}` +
           `&redirect_uri=${encodeURIComponent(redirect_uri)}` +
@@ -489,7 +492,7 @@ serve(async (req) => {
         }
 
         // Exchange for long-lived token
-        const longLivedUrl = `https://graph.facebook.com/v19.0/oauth/access_token?` +
+        const longLivedUrl = `${META_GRAPH_BASE_URL}/oauth/access_token?` +
           `grant_type=fb_exchange_token` +
           `&client_id=${META_APP_ID}` +
           `&client_secret=${META_APP_SECRET}` +
@@ -506,7 +509,7 @@ serve(async (req) => {
         }
 
         // Get pages the user manages
-        const pagesUrl = `https://graph.facebook.com/v19.0/me/accounts?` +
+        const pagesUrl = `${META_GRAPH_BASE_URL}/me/accounts?` +
           `access_token=${longLivedData.access_token}` +
           `&fields=id,name,access_token,picture`;
 
@@ -520,7 +523,7 @@ serve(async (req) => {
           });
         }
 
-        const meResponse = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${longLivedData.access_token}`);
+        const meResponse = await fetch(`${META_GRAPH_BASE_URL}/me?fields=id,name&access_token=${longLivedData.access_token}`);
         const meData = await meResponse.json();
 
         return new Response(JSON.stringify({ 
@@ -535,7 +538,7 @@ serve(async (req) => {
 
       case "connect_page": {
         // First, get the page access token from user token (code contains user_token in this case)
-        const pagesUrl = `https://graph.facebook.com/v19.0/me/accounts?` +
+        const pagesUrl = `${META_GRAPH_BASE_URL}/me/accounts?` +
           `access_token=${code}` +
           `&fields=id,name,access_token,picture`;
 
@@ -561,7 +564,7 @@ serve(async (req) => {
         let resolvedFacebookUserName = facebook_user_name || null;
         if (!resolvedFacebookUserId || !resolvedFacebookUserName) {
           try {
-            const meResponse = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${code}`);
+            const meResponse = await fetch(`${META_GRAPH_BASE_URL}/me?fields=id,name&access_token=${code}`);
             const meData = await meResponse.json();
             resolvedFacebookUserId = resolvedFacebookUserId || meData?.id || null;
             resolvedFacebookUserName = resolvedFacebookUserName || meData?.name || null;
@@ -576,7 +579,7 @@ serve(async (req) => {
         if (!ad_account_id) {
           console.log("Ad account ID not provided, attempting to fetch automatically...");
           try {
-            const adAccountsUrl = `https://graph.facebook.com/v19.0/me/adaccounts?` +
+            const adAccountsUrl = `${META_GRAPH_BASE_URL}/me/adaccounts?` +
               `access_token=${code}` +
               `&fields=id,name,account_id`;
             
@@ -595,7 +598,7 @@ serve(async (req) => {
         // Subscribe to webhooks
         // FASE 1: Leadgen (Obrigatório para Lead Ads)
         console.log("Subscribing to leadgen webhook for page:", page_id);
-        const subscribeUrl = `https://graph.facebook.com/v19.0/${page_id}/subscribed_apps`;
+        const subscribeUrl = `${META_GRAPH_BASE_URL}/${page_id}/subscribed_apps`;
         
         let leadgenSuccess = false;
         let messengerSuccess = false;
@@ -604,7 +607,7 @@ serve(async (req) => {
 
         // Log token permissions for debugging
         try {
-          const permUrl = `https://graph.facebook.com/v19.0/me/permissions?access_token=${page.access_token}`;
+          const permUrl = `${META_GRAPH_BASE_URL}/me/permissions?access_token=${page.access_token}`;
           const permRes = await fetch(permUrl);
           const permData = await permRes.json();
           if (permData.data) {

@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-const META_GRAPH_VERSION = "v19.0";
+const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") || "v25.0";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {

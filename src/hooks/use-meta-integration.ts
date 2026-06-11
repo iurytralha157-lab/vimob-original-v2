@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
+const META_GRAPH_VERSION = import.meta.env.VITE_META_GRAPH_VERSION || "v25.0";
+
 export interface MetaIntegration {
   id: string;
   organization_id: string;
@@ -394,7 +396,7 @@ export function useMetaAdAccounts(userToken?: string, integrationId?: string) {
       if (!tokenToUse) return [];
       
       const response = await fetch(
-        `https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name,account_id&access_token=${tokenToUse}`
+        `https://graph.facebook.com/${META_GRAPH_VERSION}/me/adaccounts?fields=id,name,account_id&access_token=${tokenToUse}`
       );
       
       if (!response.ok) {

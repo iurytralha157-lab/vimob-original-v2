@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") || "v25.0";
+const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -76,7 +79,7 @@ serve(async (req) => {
       // 2. Send message via Graph API
       // Use different endpoint for Instagram vs Messenger if needed, 
       // but /me/messages works for both if the recipient ID is scoped correctly.
-      const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${integration.access_token}`;
+      const url = `${META_GRAPH_BASE_URL}/me/messages?access_token=${integration.access_token}`;
       
       const payload = {
         recipient: { id: recipientId },
