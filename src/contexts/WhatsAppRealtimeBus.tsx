@@ -24,6 +24,7 @@ export function WhatsAppRealtimeBus() {
   const { profile } = useAuth();
   const { state: floatingChatState, openConversation } = useFloatingChat();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notifyAfterRef = useRef(Date.now());
   const floatingChatStateRef = useRef(floatingChatState);
   const openConversationRef = useRef(openConversation);
 
@@ -39,6 +40,7 @@ export function WhatsAppRealtimeBus() {
     if (!profile?.organization_id) return;
 
     const orgId = profile.organization_id;
+    notifyAfterRef.current = Date.now();
 
     const debouncedInvalidateConversations = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -80,13 +82,9 @@ export function WhatsAppRealtimeBus() {
 
       // Se já temos a mensagem no cache com uma URL válida e o caminho da mídia é o mesmo, reutiliza!
       const existingMsg = findCachedMessage(msg.id, msg.conversation_id);
-      if (existingMsg?.media_url && existingMsg.media_storage_path === msg.media_storage_path) {
-        return { ...msg, media_url: existingMsg.media_url };
-      }
-
       const { data, error } = await supabase.storage
         .from("whatsapp-media")
-        .createSignedUrl(msg.media_storage_path, 60 * 60);
+        .createSignedUrl(msg.media_storage_path, 24 * 60 * 60);
 
       if (error || !data?.signedUrl) {
         console.warn("[WhatsAppRealtimeBus] Could not sign media URL", {
@@ -111,6 +109,13 @@ export function WhatsAppRealtimeBus() {
       if (type === "video") return `${displayName} te enviou um video`;
       if (type === "document") return `${displayName} te enviou um arquivo`;
       return msg?.content || `${displayName} te enviou uma mensagem`;
+    };
+
+    const isFreshRealtimeInsert = (createdAt?: string | null) => {
+      if (!createdAt) return true;
+      const createdTime = Date.parse(createdAt);
+      if (Number.isNaN(createdTime)) return true;
+      return createdTime >= notifyAfterRef.current - 5000;
     };
 
     const findCachedConversation = (conversationId: string) =>
@@ -243,7 +248,7 @@ export function WhatsAppRealtimeBus() {
           // Lead messages cache — invalidate by conversation->lead lookup
           const conv = await fetchConversationForNotification(msg.conversation_id);
 
-          if (!msg.from_me) {
+          if (!msg.from_me && isFreshRealtimeInsert(msg.created_at)) {
             const floating = floatingChatStateRef.current;
             const isSameFloatingConversation =
               floating.isOpen &&
@@ -330,7 +335,11 @@ export function WhatsAppRealtimeBus() {
           debouncedInvalidateConversations();
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          notifyAfterRef.current = Date.now();
+        }
+      });
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);

@@ -8,6 +8,7 @@ import { getWhatsAppClient } from "@/lib/whatsapp-provider";
 import { callEvolutionGo } from "@/hooks/use-evolution-go";
 
 const WHATSAPP_SEND_COOLDOWN_MS = 1000;
+const WHATSAPP_MEDIA_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
 const lastWhatsAppSendByUser = new Map<string, number>();
 
 export interface WhatsAppConversation {
@@ -120,9 +121,11 @@ async function hydrateMessageMediaUrls(messages: WhatsAppMessage[]): Promise<Wha
   if (messagesWithPrivateMedia.length === 0) return messages;
 
   const uniquePaths = [...new Set(messagesWithPrivateMedia.map((message) => message.media_storage_path!).filter(Boolean))];
+  // Nao remova esta assinatura por storage_path: audios/imagens antigas dependem dela para continuar renderizando.
+  // URLs salvas em media_url podem expirar ou apontar para origem externa temporaria.
   const { data, error } = await supabase.storage
     .from("whatsapp-media")
-    .createSignedUrls(uniquePaths, 12 * 60 * 60); // 12h — evita URLs expirando durante uso normal
+    .createSignedUrls(uniquePaths, WHATSAPP_MEDIA_SIGNED_URL_TTL_SECONDS);
 
   if (error || !data) {
     console.error("Error creating signed WhatsApp media URLs:", error);
@@ -607,17 +610,59 @@ export function useSendWhatsAppMessage() {
       if (session.status !== "connected") {
         throw new Error("WhatsApp desconectado. Reconecte ou selecione uma conexão ativa.");
       }
-// Extract phone number from remote_jid and format
-      const rawPhone = conversation.remote_jid
+      // Extract phone number from remote_jid and format
+      let rawPhone = conversation.remote_jid
         .replace("@c.us", "")
         .replace("@s.whatsapp.net", "")
         .replace("@g.us", "");
-      const phone = formatPhoneForWhatsApp(rawPhone);
+      let phone = formatPhoneForWhatsApp(rawPhone);
 
       const isGroup = conversation.is_group;
 
       // Use optimistic ID if provided, otherwise generate new one
       const clientMessageId = _optimisticId || crypto.randomUUID();
+
+      console.log("[useSendWhatsAppMessage] Preparing canonical CRM conversation", {
+        conversationId: conversation.id,
+        currentSessionId: conversation.session_id,
+        activeSessionId: session.id,
+        remoteJid: conversation.remote_jid,
+      });
+
+      const { data: preparedConversation, error: prepareError } = await (supabase.rpc as any)(
+        "rebind_whatsapp_conversation_session",
+        {
+          p_conversation_id: conversation.id,
+          p_session_id: session.id,
+          p_remote_jid: conversation.remote_jid,
+        },
+      );
+
+      if (prepareError) {
+        console.error("[useSendWhatsAppMessage] Could not prepare CRM conversation before sending:", prepareError);
+        throw new Error("Nao foi possivel preparar o historico do CRM. A mensagem nao foi enviada.");
+      }
+
+      if (preparedConversation?.id) {
+        const previousConversationId = conversation.id;
+        Object.assign(conversation, {
+          ...conversation,
+          ...preparedConversation,
+          session,
+        });
+        if (previousConversationId !== conversation.id) {
+          console.log("[useSendWhatsAppMessage] Canonical conversation selected:", {
+            previousConversationId,
+            canonicalConversationId: conversation.id,
+          });
+        }
+
+        rawPhone = conversation.remote_jid
+          .replace("@c.us", "")
+          .replace("@s.whatsapp.net", "")
+          .replace("@g.us", "");
+        phone = formatPhoneForWhatsApp(rawPhone);
+      }
       
       // If we have base64 media, upload to storage first for reliability
       let storedMediaUrl = mediaUrl;
@@ -737,57 +782,6 @@ export function useSendWhatsAppMessage() {
         provider,
         evolutionData: sendResult.data?.key?.id || sendResult.data?.messageId ? "has_id" : "no_id"
       });
-
-      if (conversation.session_id !== session.id) {
-        console.log("[useSendWhatsAppMessage] Rebinding conversation to active session", {
-          conversationId: conversation.id,
-          previousSessionId: conversation.session_id,
-          activeSessionId: session.id,
-        });
-
-        const { data: reboundConversation, error: rebindError } = await (supabase.rpc as any)(
-          "rebind_whatsapp_conversation_session",
-          {
-            p_conversation_id: conversation.id,
-            p_session_id: session.id,
-            p_remote_jid: conversation.remote_jid,
-          },
-        );
-
-        if (rebindError) {
-          console.error("[useSendWhatsAppMessage] Failed to rebind conversation session:", rebindError);
-          // Fallback: update direto do session_id na conversa atual
-          const { error: directRebindError } = await supabase
-            .from("whatsapp_conversations")
-            .update({
-              session_id: session.id,
-              organization_id: session.organization_id,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", conversation.id);
-
-          if (directRebindError) {
-            console.error("[useSendWhatsAppMessage] Direct conversation rebind also failed; message will still be saved.", directRebindError);
-          } else {
-            conversation.session_id = session.id;
-            conversation.organization_id = session.organization_id;
-            (conversation as any).session = session;
-          }
-        } else {
-          // IMPORTANTE: o rebind pode retornar um ID diferente (conversa que existia na nova session).
-          // Sempre usar o ID retornado como conversation_id para a mensagem.
-          const newId = reboundConversation?.id || conversation.id;
-          const oldId = conversation.id;
-          if (newId !== oldId) {
-            console.log("[useSendWhatsAppMessage] Rebind retornou conversa diferente:", { oldId, newId });
-          }
-          conversation.id = newId;
-          conversation.session_id = reboundConversation?.session_id || session.id;
-          conversation.organization_id = reboundConversation?.organization_id || conversation.organization_id;
-          conversation.lead_id = reboundConversation?.lead_id || conversation.lead_id;
-          (conversation as any).session = session;
-        }
-      }
 
       if (!conversation.lead_id && !isGroup) {
         const phoneDigits = normalizePhone(conversation.contact_phone || conversation.remote_jid || phone);

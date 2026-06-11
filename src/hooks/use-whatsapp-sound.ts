@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export function useWhatsAppSound() {
   const { user, organization } = useAuth();
   const lastPlayedRef = useRef<number>(0);
+  const notifyAfterRef = useRef<number>(Date.now());
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Guarda as conversas que o usuário tem acesso
@@ -26,6 +27,7 @@ export function useWhatsAppSound() {
 
   useEffect(() => {
     if (!user?.id || !organization?.id) return;
+    notifyAfterRef.current = Date.now();
 
     // Lazy-load audio
     const a = new Audio("/sounds/whatsapp-pop.mp3");
@@ -172,6 +174,13 @@ export function useWhatsAppSound() {
       return false;
     };
 
+    const isFreshRealtimeInsert = (createdAt?: string | null) => {
+      if (!createdAt) return true;
+      const createdTime = Date.parse(createdAt);
+      if (Number.isNaN(createdTime)) return true;
+      return createdTime >= notifyAfterRef.current - 5000;
+    };
+
     // ✅ Listener de mensagens — agora filtra pelo acesso do usuário
     const channel = supabase
       .channel(`whatsapp-sound-${user.id}-${organization.id}`)
@@ -188,6 +197,9 @@ export function useWhatsAppSound() {
           // Ignorar mensagens enviadas pelo usuário
           if (!m || m.from_me) return;
 
+          // Ignorar mensagens antigas entregues em lote após login/reconexão
+          if (!isFreshRealtimeInsert(m.created_at)) return;
+
           // Verificar se o usuário tem acesso a essa conversa
           const hasAccess = await canHearMessage(m);
           if (!hasAccess) return;
@@ -200,7 +212,11 @@ export function useWhatsAppSound() {
           audioRef.current?.play().catch(() => {});
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          notifyAfterRef.current = Date.now();
+        }
+      });
 
     // Recarregar acesso periodicamente (a cada 2 minutos)
     const refreshInterval = setInterval(loadAccessData, 2 * 60 * 1000);

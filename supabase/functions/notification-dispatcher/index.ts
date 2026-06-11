@@ -16,6 +16,53 @@ interface DispatchParams {
   is_test?: boolean;
 }
 
+const LEAD_PHONE_KEYS = new Set([
+  "phone",
+  "telefone",
+  "whatsapp",
+  "lead_phone",
+  "leadphone",
+  "lead_whatsapp",
+  "leadwhatsapp",
+  "phone_line",
+  "phoneline",
+  "contact_phone",
+  "contactphone",
+  "client_phone",
+  "clientphone",
+]);
+
+function isLeadScopedNotification(eventKey: string, leadId?: string) {
+  return Boolean(leadId) || eventKey.toLowerCase().includes("lead");
+}
+
+function sanitizeLeadVariables(variables: Record<string, any>, eventKey: string, leadId?: string) {
+  if (!isLeadScopedNotification(eventKey, leadId)) return { ...variables };
+
+  return Object.entries(variables || {}).reduce((acc, [key, value]) => {
+    const normalizedKey = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (LEAD_PHONE_KEYS.has(normalizedKey)) {
+      acc[key] = "";
+      return acc;
+    }
+    acc[key] = value;
+    return acc;
+  }, {} as Record<string, any>);
+}
+
+function scrubLeadPhoneText(value: string, eventKey: string, leadId?: string) {
+  if (!isLeadScopedNotification(eventKey, leadId) || !value) return value;
+
+  return value
+    .split("\n")
+    .filter((line) => !/^\s*(telefone|celular|whats(?:app)?|phone)\s*:/i.test(line))
+    .join("\n")
+    .replace(/\b(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?9?\d{4}[-\s]?\d{4}\b/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -24,6 +71,7 @@ Deno.serve(async (req) => {
   try {
     const params: DispatchParams = await req.json();
     const { event_key, organization_id, user_id, recipient, variables, dedupe_key, lead_id, is_test } = params;
+    const safeVariables = sanitizeLeadVariables(variables || {}, event_key, lead_id);
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -73,7 +121,7 @@ Deno.serve(async (req) => {
     let formattedTitle = template.title || '';
 
     // Enrich variables with common aliases to be more robust
-    const enrichedVariables = { ...variables };
+    const enrichedVariables = { ...safeVariables };
     if (enrichedVariables.nome && !enrichedVariables.user_name) enrichedVariables.user_name = enrichedVariables.nome;
     if (enrichedVariables.user_name && !enrichedVariables.nome) enrichedVariables.nome = enrichedVariables.user_name;
     if (enrichedVariables.lead_name && !enrichedVariables.nome_lead) enrichedVariables.nome_lead = enrichedVariables.lead_name;
@@ -124,7 +172,12 @@ Deno.serve(async (req) => {
     }
 
     // Cleanup extra newlines that might be left after removing org
-    formattedMessage = formattedMessage.replace(/\n\n+/g, '\n\n').trim();
+    formattedMessage = scrubLeadPhoneText(
+      formattedMessage.replace(/\n\n+/g, '\n\n').trim(),
+      event_key,
+      lead_id,
+    );
+    formattedTitle = scrubLeadPhoneText(formattedTitle, event_key, lead_id);
 
     // 4. Dispatch for each channel
     const channels = Array.isArray(template.channels) && template.channels.length > 0
@@ -181,7 +234,7 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               to: recipient,
               template_key: template.slug,
-              variables: variables,
+              variables: safeVariables,
               organization_id: organization_id
             }),
           });
@@ -225,7 +278,7 @@ Deno.serve(async (req) => {
           recipient: recipient || user_id || 'system',
           channel: channel,
           payload: { 
-            variables, 
+            variables: safeVariables, 
             formattedTitle, 
             formattedMessage, 
             dedupe_key: finalDedupeKey, 

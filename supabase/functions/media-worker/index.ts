@@ -256,6 +256,73 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Safety net: every worker run also creates missing jobs for recent pending media.
+    // This keeps media recoverable if a webhook insert succeeds but job creation is skipped.
+    const { data: orphanCandidates } = await supabase
+      .from("whatsapp_messages")
+      .select(`
+        id,
+        session_id,
+        conversation_id,
+        message_type,
+        media_mime_type,
+        message_id,
+        from_me,
+        metadata,
+        session:whatsapp_sessions(organization_id),
+        conversation:whatsapp_conversations(remote_jid)
+      `)
+      .eq("media_status", "pending")
+      .is("media_url", null)
+      .is("media_storage_path", null)
+      .in("message_type", ["image", "audio", "video", "document", "sticker"])
+      .gte("sent_at", new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString())
+      .order("sent_at", { ascending: false })
+      .limit(50);
+
+    let autoCreatedJobs = 0;
+    for (const msg of orphanCandidates || []) {
+      const { data: existing } = await supabase
+        .from("media_jobs")
+        .select("id")
+        .eq("message_id", msg.id)
+        .in("status", ["pending", "processing", "completed"])
+        .maybeSingle();
+
+      if (existing) continue;
+
+      const orgId = (msg as any).session?.organization_id;
+      const remoteJid = (msg as any).conversation?.remote_jid;
+      if (!orgId || !remoteJid) continue;
+
+      const metadataObj = (msg as any).metadata || {};
+      const mediaPayload = metadataObj.media_payload || metadataObj.raw_message || null;
+
+      const { error: autoJobError } = await supabase.from("media_jobs").insert({
+        organization_id: orgId,
+        message_id: msg.id,
+        session_id: msg.session_id,
+        conversation_id: msg.conversation_id,
+        message_key: {
+          id: msg.message_id,
+          remoteJid,
+          fromMe: msg.from_me,
+          media: mediaPayload,
+        },
+        media_type: msg.message_type,
+        media_mime_type: msg.media_mime_type,
+        status: "pending",
+        attempts: 0,
+        next_retry_at: new Date().toISOString(),
+      });
+
+      if (!autoJobError) autoCreatedJobs++;
+    }
+
+    if (autoCreatedJobs > 0) {
+      console.log(`Auto-created ${autoCreatedJobs} media jobs for orphan pending messages`);
+    }
+
     // Fetch pending media jobs
     const { data: jobs, error: fetchError } = await supabase
       .from("media_jobs")
@@ -673,10 +740,24 @@ async function tryEvolutionGoDownloadMedia(
   if (!media || typeof media !== "object") return { content: null, error: "Missing media payload" };
 
   // Evolution Go (Xungoo/Whatsmeow) utiliza a rota /message/downloadimage como endpoint único para download e descriptografia de qualquer tipo de mídia
-  const endpoints = ["/message/downloadimage"];
+  const endpoints = [
+    "/message/downloadimage",
+    "/message/downloadMedia",
+    "/message/downloadmedia",
+    "/chat/downloadMedia",
+    "/chat/downloadmedia",
+    "/media/download",
+  ];
   const errors: string[] = [];
+  const payloads = [
+    media,
+    { media },
+    { message: media },
+    { message: { key: media } },
+  ];
 
   for (const endpoint of endpoints) {
+    for (const payload of payloads) {
     try {
       const response = await fetch(`${apiUrl}${endpoint}`, {
         method: "POST",
@@ -685,7 +766,7 @@ async function tryEvolutionGoDownloadMedia(
           "apikey": apiKey,
           "instanceId": instanceId,
         },
-        body: JSON.stringify(media),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -716,10 +797,15 @@ async function tryEvolutionGoDownloadMedia(
         data.sticker ||
         data.media ||
         data.file ||
+        data.url ||
         data.data?.base64 ||
         data.data?.image ||
+        data.data?.audio ||
+        data.data?.video ||
+        data.data?.document ||
         data.data?.sticker ||
-        data.data?.media;
+        data.data?.media ||
+        data.data?.file;
 
       if (typeof rawBase64 !== "string") {
         errors.push(`${endpoint}: No media content in JSON response`);
@@ -741,6 +827,7 @@ async function tryEvolutionGoDownloadMedia(
 
     } catch (e) {
       errors.push(`${endpoint}: ${e instanceof Error ? e.message : String(e)}`);
+    }
     }
   }
 

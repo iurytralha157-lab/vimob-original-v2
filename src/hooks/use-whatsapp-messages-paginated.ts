@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCallback } from "react";
 import type { WhatsAppMessage } from "./use-whatsapp-conversations";
 
+const WHATSAPP_MEDIA_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
+
 interface PaginatedMessagesResult {
   messages: WhatsAppMessage[];
   nextCursor: string | null;
@@ -17,9 +19,11 @@ async function hydrateMessageMediaUrls(messages: WhatsAppMessage[]): Promise<Wha
     ...new Set(messagesWithStoragePath.map((message) => message.media_storage_path!).filter(Boolean)),
   ];
 
+  // Nao remova esta assinatura por storage_path: audios/imagens antigas dependem dela para continuar renderizando.
+  // URLs salvas em media_url podem expirar ou apontar para origem externa temporaria.
   const { data, error } = await supabase.storage
     .from("whatsapp-media")
-    .createSignedUrls(uniquePaths, 60 * 60);
+    .createSignedUrls(uniquePaths, WHATSAPP_MEDIA_SIGNED_URL_TTL_SECONDS);
 
   if (error || !data) {
     console.error("Error creating signed WhatsApp media URLs:", error);
@@ -87,6 +91,10 @@ export function useWhatsAppMessagesPaginated(
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     initialPageParam: null as string | null,
     enabled: !!conversationId,
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   // Realtime updates are now handled centrally by WhatsAppRealtimeBus

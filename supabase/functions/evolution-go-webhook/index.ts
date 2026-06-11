@@ -160,6 +160,15 @@ function isLidJid(jid: string): boolean {
   return String(jid || "").includes("@lid");
 }
 
+function isNewsletterJid(jid: string): boolean {
+  return String(jid || "").includes("@newsletter");
+}
+
+function isRealContactJid(jid: string): boolean {
+  const value = String(jid || "");
+  return !isGroupJid(value) && !isLidJid(value) && !isNewsletterJid(value) && normalizePhone(value).length >= 10;
+}
+
 function isGroupJid(jid: string): boolean {
   return String(jid || "").endsWith("@g.us");
 }
@@ -172,6 +181,7 @@ function hasPhoneDomain(jid: string): boolean {
 function remoteJidVariants(jid: string): string[] {
   const normalized = normalizeRemoteJid(jid);
   if (normalized.endsWith("@g.us")) return [normalized];
+  if (!isRealContactJid(normalized)) return Array.from(new Set([normalized, jid].filter(Boolean)));
   const phone = normalizePhone(normalized);
   const variants = phoneVariants(phone);
   const results: string[] = [];
@@ -571,13 +581,15 @@ async function findOrCreateConversation(
   groupMeta?: any,
 ) {
   const canonicalJid = normalizeRemoteJid(remoteJid);
-  const phone = normalizePhone(canonicalJid);
+  const hasRealPhone = isRealContactJid(canonicalJid);
+  const phone = hasRealPhone ? normalizePhone(canonicalJid) : "";
   const isGroup = canonicalJid.endsWith("@g.us");
 
   const { data: convs } = await supabase
     .from("whatsapp_conversations")
     .select("*")
     .eq("organization_id", organizationId)
+    .is("deleted_at", null)
     .in("remote_jid", remoteJidVariants(remoteJid));
 
   const conv = (convs || []).find((c: any) => c.lead_id) || (convs || []).find((c: any) => c.session_id === sessionId) || (convs || [])[0];
@@ -672,11 +684,82 @@ async function findOrCreateConversation(
 
   let leadId: string | null = null;
   let leadName: string | null = null;
-  if (!isGroup) {
+  if (!isGroup && hasRealPhone) {
     const lead = await findLeadByPhone(organizationId, phone);
     if (lead?.id) {
       leadId = lead.id;
       leadName = lead.name || null;
+    }
+  }
+
+  if (!isGroup && (leadId || hasRealPhone)) {
+    let canonicalConversation: any = null;
+
+    if (leadId) {
+      const { data: leadConversation } = await supabase
+        .from("whatsapp_conversations")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("is_group", false)
+        .eq("lead_id", leadId)
+        .is("deleted_at", null)
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      canonicalConversation = leadConversation || null;
+    }
+
+    if (!canonicalConversation && hasRealPhone) {
+      const variants = phoneVariants(phone);
+      const remoteVariants = variants.flatMap((variant) => [
+        `${variant}@s.whatsapp.net`,
+        `${variant}@c.us`,
+      ]);
+
+      const { data: phoneMatches } = await supabase
+        .from("whatsapp_conversations")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("is_group", false)
+        .is("deleted_at", null)
+        .or(`contact_phone.in.(${variants.join(",")}),remote_jid.in.(${remoteVariants.join(",")})`)
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      canonicalConversation = (phoneMatches || []).find((candidate: any) =>
+        phonesMatch(candidate.contact_phone || candidate.remote_jid || "", phone)
+      ) || null;
+    }
+
+    if (canonicalConversation) {
+      const update: any = {};
+      if (canonicalConversation.session_id !== sessionId) update.session_id = sessionId;
+      if (hasRealPhone && canonicalConversation.remote_jid !== canonicalJid) update.remote_jid = canonicalJid;
+      if (hasRealPhone && !canonicalConversation.contact_phone) update.contact_phone = phone;
+      if (leadId && !canonicalConversation.lead_id) update.lead_id = leadId;
+      if (leadName && (!canonicalConversation.contact_name || canonicalConversation.contact_name === canonicalConversation.contact_phone || canonicalConversation.contact_name === contactName)) {
+        update.contact_name = leadName;
+      } else if (contactName && !canonicalConversation.contact_name) {
+        update.contact_name = contactName;
+      }
+      if (contactPicture && !canonicalConversation.contact_picture) update.contact_picture = contactPicture;
+
+      if (Object.keys(update).length) {
+        const { error: canonicalUpdateError } = await supabase
+          .from("whatsapp_conversations")
+          .update(update)
+          .eq("id", canonicalConversation.id);
+
+        if (canonicalUpdateError) {
+          console.error("[findOrCreateConversation] canonical conversation update error:", canonicalUpdateError);
+        } else {
+          Object.assign(canonicalConversation, update);
+        }
+      }
+
+      return canonicalConversation;
     }
   }
 
@@ -687,7 +770,7 @@ async function findOrCreateConversation(
       organization_id: organizationId,
       remote_jid: canonicalJid,
       contact_name: isGroup ? (groupMeta?.subject || contactName || canonicalJid) : (leadName || contactName || null),
-      contact_phone: isGroup ? null : phone,
+      contact_phone: isGroup || !hasRealPhone ? null : phone,
       contact_picture: contactPicture || groupMeta?.pictureUrl || null,
       is_group: isGroup,
       lead_id: leadId,
@@ -1075,6 +1158,38 @@ async function handleSingleMessageUpsert(session: any, m: any) {
   const groupMeta = isGroup ? await resolveGroupMetadata(session, remoteJid) : null;
   const incomingAvatar = !isGroup ? extractAvatarFromPayload(m, msg, info, key) : null;
   const avatarPayloadKeys = !isGroup ? collectAvatarLikeKeys(m, msg, info, key) : [];
+
+  if (fromMe && messageId) {
+    const { data: existingOutgoing } = await supabase
+      .from("whatsapp_messages")
+      .select("id, conversation_id, status, conversation:whatsapp_conversations!inner(organization_id)")
+      .eq("message_id", messageId)
+      .eq("from_me", true)
+      .eq("conversation.organization_id", session.organization_id)
+      .order("sent_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingOutgoing?.id) {
+      await supabase
+        .from("whatsapp_messages")
+        .update({
+          status: existingOutgoing.status === "read" ? "read" : "delivered",
+          remote_jid: isRealContactJid(remoteJid) ? remoteJid : undefined,
+        })
+        .eq("id", existingOutgoing.id);
+      return;
+    }
+
+    if (!isGroup && !isRealContactJid(remoteJid)) {
+      console.warn("[evolution-go-webhook] Ignoring outgoing callback without stable contact identity", {
+        session_id: session.id,
+        message_id: messageId,
+        remote_jid: remoteJid,
+      });
+      return;
+    }
+  }
 
   const conv = await findOrCreateConversation(
     session.id,

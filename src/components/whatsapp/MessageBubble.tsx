@@ -133,26 +133,19 @@ export function MessageBubble({
   // Waveform bars generated from mediaUrl or sentAt as seed
   const waveformBars = generateWaveform(mediaUrl || sentAt, 28);
 
-  const getBaseUrl = (url: string | null) => {
-    if (!url) return null;
-    try {
-      const parsed = new URL(url);
-      return parsed.origin + parsed.pathname;
-    } catch {
-      return url;
-    }
-  };
-
   const lastMessageIdRef = useRef<string | null>(null);
-  const lastBaseUrlRef = useRef<string | null>(null);
+  const lastMediaUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const currentBaseUrl = getBaseUrl(mediaUrl);
-    const didUrlChange = currentBaseUrl !== lastBaseUrlRef.current || messageId !== lastMessageIdRef.current;
-    lastBaseUrlRef.current = currentBaseUrl;
+    const didUrlChange = mediaUrl !== lastMediaUrlRef.current || messageId !== lastMessageIdRef.current;
+    lastMediaUrlRef.current = mediaUrl || null;
     lastMessageIdRef.current = messageId;
 
     if (didUrlChange) {
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        setBlobUrl(null);
+      }
       setMediaChecked(false);
       setBlobAttempted(false);
       setAudioError(null);

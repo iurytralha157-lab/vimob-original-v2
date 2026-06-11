@@ -126,6 +126,7 @@ export function useNotifications() {
   const { profile, organization } = useAuth();
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const audioSetupDone = useRef(false);
+  const notifyAfterRef = useRef(Date.now());
 
   // Initialize audio on first user interaction
   useEffect(() => {
@@ -176,12 +177,20 @@ export function useNotifications() {
   // Subscribe to realtime notifications with exponential backoff
   useEffect(() => {
     if (!profile?.id || !organization?.id) return;
+    notifyAfterRef.current = Date.now();
 
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
     const baseDelay = 1000;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let isUnmounting = false;
+
+    const isFreshRealtimeInsert = (createdAt?: string | null) => {
+      if (!createdAt) return true;
+      const createdTime = Date.parse(createdAt);
+      if (Number.isNaN(createdTime)) return true;
+      return createdTime >= notifyAfterRef.current - 5000;
+    };
 
     const setupChannel = () => {
       if (isUnmounting) return;
@@ -213,7 +222,8 @@ export function useNotifications() {
             }
 
             console.log('🔔 New notification received via Realtime:', payload);
-            
+            const shouldAlertUser = isFreshRealtimeInsert(newNotification.created_at);
+
             // Skip WhatsApp message notifications (silent)
             const isWhatsAppNotification = newNotification.type === 'whatsapp' || newNotification.type === 'message';
             const isLeadNotification = newNotification.type === 'lead' || newNotification.type === 'new_lead';
@@ -225,7 +235,9 @@ export function useNotifications() {
                 }
               : undefined;
             
-            if (isWhatsAppNotification) {
+            if (!shouldAlertUser) {
+              console.log('Skipping old realtime notification alert:', newNotification.title);
+            } else if (isWhatsAppNotification) {
               console.log('💬 WhatsApp notification (silent):', newNotification.title);
             } else if (isLeadNotification) {
               // New lead - play cha-ching sound
@@ -249,10 +261,12 @@ export function useNotifications() {
               });
             }
 
-            sendBrowserNotification(newNotification.title, {
-              body: newNotification.content || undefined,
-              data: { lead_id: newNotification.lead_id },
-            });
+            if (shouldAlertUser) {
+              sendBrowserNotification(newNotification.title, {
+                body: newNotification.content || undefined,
+                data: { lead_id: newNotification.lead_id },
+              });
+            }
 
             queryClient.invalidateQueries({ queryKey: ['notifications'] });
             queryClient.invalidateQueries({ queryKey: ['unread-notifications-count'] });
@@ -270,6 +284,7 @@ export function useNotifications() {
           
           if (status === 'SUBSCRIBED') {
             reconnectAttempts = 0;
+            notifyAfterRef.current = Date.now();
             console.log('Realtime notifications connected successfully');
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             if (isUnmounting) return;
