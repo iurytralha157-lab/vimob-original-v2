@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
           user_id: userId,
           phone: recipient,
           message: formattedMessage,
+          lead_id: leadId || null,
         }),
       });
       result = { success: resp.ok };

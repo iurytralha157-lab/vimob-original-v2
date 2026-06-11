@@ -34,6 +34,7 @@ import { AudioRecorderButton } from "@/components/whatsapp/AudioRecorderButton";
 import { useMetaConversations, useMetaMessages, useSendMetaMessage } from "@/hooks/use-meta-conversations";
 import { useMetaIntegrations } from "@/hooks/use-meta-integration";
 import { useAuth } from "@/contexts/AuthContext";
+import { useMentionNames } from "@/hooks/use-mention-names";
 
 const MAX_IMAGE_DIMENSION = 1600;
 const IMAGE_QUALITY = 0.82;
@@ -561,6 +562,8 @@ export default function Conversations() {
                               messageId={msg.id}
                               leadId={selectedLeadId || ""}
                               leadName={selectedConversation.lead?.name || selectedConversation.contact_name || undefined}
+                              conversationRemoteJid={selectedConversation.remote_jid}
+                              conversationSessionId={selectedConversation.session_id}
                               reactions={reactionsByMessageId.get(msg.message_id) || reactionsByMessageId.get(msg.id) || []}
                             />
                           </MessageErrorBoundary>
@@ -973,6 +976,8 @@ export default function Conversations() {
                               messageId={msg.id}
                               leadId={selectedLeadId || ""}
                               leadName={selectedConversation.lead?.name || selectedConversation.contact_name || undefined}
+                              conversationRemoteJid={selectedConversation.remote_jid}
+                              conversationSessionId={selectedConversation.session_id}
                               reactions={reactionsByMessageId.get(msg.message_id) || reactionsByMessageId.get(msg.id) || []}
                             />
                           </MessageErrorBoundary>
@@ -1115,6 +1120,16 @@ function ConversationItem({
     }
     return message;
   };
+  const previewMessage = formatPreviewMessage(conversation.last_message);
+  const previewMentionDigits = (previewMessage.match(/@\d{7,}/g) || []).map((mention) => mention.slice(1));
+  const previewMentionNames = useMentionNames(previewMentionDigits, {
+    groupJid: conversation.is_group ? conversation.remote_jid : null,
+    sessionId: conversation.is_group ? conversation.session_id : null,
+  });
+  const previewMessageWithNames = previewMentionDigits.reduce(
+    (text, digits) => text.replaceAll(`@${digits}`, `@${previewMentionNames[digits] || digits}`),
+    previewMessage,
+  );
 
   return <div className={cn("w-full text-left p-2 grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 hover:bg-muted/50 transition-colors group overflow-hidden", isSelected && "bg-muted")}>
       <button type="button" onClick={onClick} className="flex items-center gap-2.5 flex-1 min-w-0">
@@ -1162,7 +1177,7 @@ function ConversationItem({
               </span> : conversation.contact_presence === 'recording' ? <span className="text-[11px] text-primary truncate flex-1 text-left animate-pulse">
                 🎤 gravando áudio...
               </span> : <span className="text-[11px] text-muted-foreground truncate flex-1 text-left">
-                {formatPreviewMessage(conversation.last_message)}
+                {previewMessageWithNames}
               </span>}
           </div>
           

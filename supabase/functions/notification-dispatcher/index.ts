@@ -220,6 +220,7 @@ Deno.serve(async (req) => {
               user_id: user_id,
               phone: recipient,
               message: formattedMessage,
+              lead_id: lead_id || null,
             }),
           });
           const data = await resp.json();

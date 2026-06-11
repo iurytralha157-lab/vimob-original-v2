@@ -61,13 +61,169 @@ async function sendEvolutionGoText(
   return lastResult;
 }
 
+function normalizePhone(value: string | null | undefined) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function phoneVariants(value: string | null | undefined) {
+  const cleaned = normalizePhone(value);
+  const withoutCountry = cleaned.startsWith("55") && cleaned.length >= 12 ? cleaned.slice(2) : cleaned;
+  const variants = [cleaned, withoutCountry, withoutCountry ? `55${withoutCountry}` : ""].filter(Boolean);
+
+  if (withoutCountry.length === 11 && withoutCountry[2] === "9") {
+    const withoutNinth = `${withoutCountry.slice(0, 2)}${withoutCountry.slice(3)}`;
+    variants.push(withoutNinth, `55${withoutNinth}`);
+  } else if (withoutCountry.length === 10) {
+    const withNinth = `${withoutCountry.slice(0, 2)}9${withoutCountry.slice(2)}`;
+    variants.push(withNinth, `55${withNinth}`);
+  }
+
+  return [...new Set(variants)];
+}
+
+function getSentMessageId(data: any) {
+  return (
+    data?.key?.id ||
+    data?.data?.key?.id ||
+    data?.messageId ||
+    data?.data?.messageId ||
+    data?.id ||
+    data?.data?.id ||
+    null
+  );
+}
+
+async function recordWhatsAppNotificationMessage(
+  supabase: any,
+  params: {
+    organizationId?: string | null;
+    session: any;
+    phone: string;
+    message: string;
+    leadId?: string | null;
+    goData: any;
+  },
+) {
+  const { organizationId, session, phone, message, leadId, goData } = params;
+  if (!organizationId || !session?.id || !phone || !message) return;
+
+  const variants = phoneVariants(phone);
+  const remoteJids = variants.flatMap((variant) => [`${variant}@s.whatsapp.net`, `${variant}@c.us`]);
+  const canonicalPhone = variants.find((variant) => variant.startsWith("55")) || variants[0] || normalizePhone(phone);
+  const canonicalRemoteJid = `${canonicalPhone}@s.whatsapp.net`;
+
+  try {
+    let lead: any = null;
+    if (leadId) {
+      const { data } = await supabase
+        .from("leads")
+        .select("id, name, phone, organization_id")
+        .eq("id", leadId)
+        .maybeSingle();
+      if (data?.organization_id === organizationId) lead = data;
+    }
+
+    if (!lead) {
+      const { data: leadMatches } = await supabase
+        .from("leads")
+        .select("id, name, phone, organization_id")
+        .eq("organization_id", organizationId)
+        .in("phone", variants)
+        .limit(1);
+      lead = leadMatches?.[0] || null;
+    }
+
+    let conversation: any = null;
+    if (lead?.id) {
+      const { data } = await supabase
+        .from("whatsapp_conversations")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("lead_id", lead.id)
+        .eq("is_group", false)
+        .is("deleted_at", null)
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      conversation = data || null;
+    }
+
+    if (!conversation) {
+      const { data } = await supabase
+        .from("whatsapp_conversations")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("is_group", false)
+        .is("deleted_at", null)
+        .or(`contact_phone.in.(${variants.join(",")}),remote_jid.in.(${remoteJids.join(",")})`)
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      conversation = data || null;
+    }
+
+    if (!conversation) {
+      const { data, error } = await supabase
+        .from("whatsapp_conversations")
+        .insert({
+          session_id: session.id,
+          organization_id: organizationId,
+          remote_jid: canonicalRemoteJid,
+          contact_name: lead?.name || null,
+          contact_phone: canonicalPhone,
+          is_group: false,
+          lead_id: lead?.id || null,
+          last_message: message,
+          last_message_at: new Date().toISOString(),
+          unread_count: 0,
+        })
+        .select("*")
+        .single();
+
+      if (error) throw error;
+      conversation = data;
+    } else {
+      const update: Record<string, unknown> = {
+        session_id: session.id,
+        remote_jid: conversation.remote_jid || canonicalRemoteJid,
+        contact_phone: conversation.contact_phone || canonicalPhone,
+        last_message: message,
+        last_message_at: new Date().toISOString(),
+        unread_count: 0,
+        updated_at: new Date().toISOString(),
+      };
+      if (lead?.id && !conversation.lead_id) update.lead_id = lead.id;
+      if (lead?.name && !conversation.contact_name) update.contact_name = lead.name;
+
+      await supabase.from("whatsapp_conversations").update(update).eq("id", conversation.id);
+    }
+
+    const messageId = getSentMessageId(goData?.data || goData) || crypto.randomUUID();
+    const { error: messageError } = await supabase.from("whatsapp_messages").insert({
+      conversation_id: conversation.id,
+      session_id: session.id,
+      message_id: messageId,
+      from_me: true,
+      content: message,
+      message_type: "text",
+      status: "sent",
+      sent_at: new Date().toISOString(),
+      remote_jid: canonicalRemoteJid,
+    });
+
+    if (messageError) throw messageError;
+  } catch (error) {
+    console.warn("Could not record WhatsApp notification in CRM history:", error);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { organization_id, user_id, phone, message } = await req.json();
+    const { organization_id, user_id, phone, message, lead_id } = await req.json();
 
     if (!message || (!organization_id && !user_id && !phone)) {
       return new Response(
@@ -205,6 +361,15 @@ Deno.serve(async (req) => {
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+
+    await recordWhatsAppNotificationMessage(supabase, {
+      organizationId: organization_id,
+      session: notificationSession,
+      phone: formattedPhone,
+      message,
+      leadId: lead_id || null,
+      goData,
+    });
 
     return new Response(
       JSON.stringify({ success: true, data: goData.data }),

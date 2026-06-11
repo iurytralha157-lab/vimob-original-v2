@@ -34,6 +34,8 @@ interface MessageBubbleProps {
   messageId: string;
   leadId: string;
   leadName: string;
+  conversationRemoteJid?: string | null;
+  conversationSessionId?: string | null;
   reactions: Array<{
     emoji: string;
     senderName: string | null;
@@ -110,6 +112,8 @@ export function MessageBubble({
   messageId,
   leadId,
   leadName,
+  conversationRemoteJid,
+  conversationSessionId,
   reactions = [],
 }: MessageBubbleProps) {
   const createAttachment = useCreateLeadAttachment();
@@ -954,7 +958,12 @@ export function MessageBubble({
 
           {/* Text content */}
           {safeContent && messageType === "text" && (
-            <MessageText content={safeContent} fromMe={fromMe} />
+            <MessageText
+              content={safeContent}
+              fromMe={fromMe}
+              groupJid={isGroup ? conversationRemoteJid : null}
+              sessionId={isGroup ? conversationSessionId : null}
+            />
           )}
 
 
@@ -1012,7 +1021,17 @@ export function MessageBubble({
 // Renders message text with WhatsApp-style mentions.
 // Digit mentions (@5511999998888) are resolved to contact / lead names
 // via useMentionNames. Word mentions (@Joao) keep highlight styling.
-function MessageText({ content, fromMe }: { content: string; fromMe: boolean }) {
+function MessageText({
+  content,
+  fromMe,
+  groupJid,
+  sessionId,
+}: {
+  content: string;
+  fromMe: boolean;
+  groupJid?: string | null;
+  sessionId?: string | null;
+}) {
   const mentionRegex = /(@\d{7,}|@[\w\u00C0-\u017F]+(?:\s[\w\u00C0-\u017F]+){0,2})/g;
   const mentionTokenRegex = /^(@\d{7,}|@[\w\u00C0-\u017F]+(?:\s[\w\u00C0-\u017F]+){0,2})$/;
   const parts = content.split(mentionRegex).filter((part): part is string => typeof part === "string" && part.length > 0);
@@ -1020,7 +1039,7 @@ function MessageText({ content, fromMe }: { content: string; fromMe: boolean }) 
   const digitMentions = parts
     .filter((p) => /^@\d{7,}$/.test(p))
     .map((p) => p.slice(1));
-  const names = useMentionNames(digitMentions);
+  const names = useMentionNames(digitMentions, { groupJid, sessionId });
 
   const renderTextWithLinks = (text: string) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;

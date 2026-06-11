@@ -989,6 +989,8 @@ export function FloatingChat() {
                       messageId={msg.id}
                       leadId={activeConversation!.lead?.id || activeConversation!.lead_id || undefined}
                       leadName={activeConversation!.lead?.name || activeConversation!.contact_name || undefined}
+                      conversationRemoteJid={activeConversation!.remote_jid}
+                      conversationSessionId={activeConversation!.session_id}
                       reactions={reactionsByMessageId.get(msg.message_id) || reactionsByMessageId.get(msg.id) || []}
                     />
                   </MessageErrorBoundary>
