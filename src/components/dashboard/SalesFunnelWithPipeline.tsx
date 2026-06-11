@@ -118,7 +118,7 @@ export function SalesFunnelWithPipeline({ filters }: SalesFunnelWithPipelineProp
                 const width = Math.max(baseWidth, 35);
 
                 return (
-                  <Tooltip key={item.stage_key || item.name}>
+                  <Tooltip key={`${item.stage_key || item.name}-${index}`}>
                     <TooltipTrigger asChild>
                       <div
                         className={cn(
@@ -183,7 +183,7 @@ export function SalesFunnelWithPipeline({ filters }: SalesFunnelWithPipelineProp
           <div className="mt-4 pt-3 border-t border-border/40">
             <div className="flex flex-wrap gap-x-3 gap-y-1.5 justify-center">
               {funnelData.slice(0, 6).map((item, index) => (
-                <div key={item.stage_key || item.name} className="flex items-center gap-1.5">
+                <div key={`${item.stage_key || item.name}-${index}`} className="flex items-center gap-1.5">
                   <div
                     className={cn(
                       'w-2 h-2 rounded-full shadow-sm',

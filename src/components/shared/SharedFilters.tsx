@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Users, User, Globe, X, SlidersHorizontal, Facebook, Search, Tag as TagIcon, CircleDot } from "lucide-react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Users, User, Globe, X, SlidersHorizontal, Facebook, Search, Tag as TagIcon, CircleDot, Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { useTeams } from "@/hooks/use-teams";
 import { useOrganizationUsers } from "@/hooks/use-users";
@@ -105,6 +106,8 @@ export function SharedFilters({
   const { hasPermission } = useUserPermissions();
 
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [userFilterOpen, setUserFilterOpen] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
 
   // ✅ FIX: Usamos apenas refs para o input de busca — sem useState controlado
   // Isso evita re-renders a cada keystroke que causavam o "piscar" e perda de foco
@@ -149,6 +152,7 @@ export function SharedFilters({
     (open: boolean) => {
       if (!open) {
         commitSearch();
+        setUserFilterOpen(false);
       }
       setFiltersOpen(open);
       onFiltersOpenChange?.(open);
@@ -166,16 +170,54 @@ export function SharedFilters({
   const showUserFilter = canViewAllLeads || isTeamLeader;
 
   const activeTeams = teams.filter((team) => team.is_active !== false);
-  const availableTeams = isAdmin
+  const availableTeams = canViewAllLeads
     ? activeTeams
     : activeTeams.filter((team) => team.members?.some((member) => member.user_id === user?.id && member.is_leader));
 
-  const availableUsers = teamId
-    ? users.filter((availableUser) => {
+  const availableUsers = useMemo(
+    () => {
+      if (teamId) {
         const team = teams.find((item) => item.id === teamId);
-        return team?.members?.some((member) => member.user_id === availableUser.id);
-      })
-    : users;
+        return users.filter((availableUser) => team?.members?.some((member) => member.user_id === availableUser.id));
+      }
+
+      if (canViewAllLeads) return users;
+
+      const ledUserIds = new Set(
+        availableTeams.flatMap((team) => team.members?.map((member) => member.user_id).filter(Boolean) || []),
+      );
+      if (user?.id) ledUserIds.add(user.id);
+
+      return users.filter((availableUser) => ledUserIds.has(availableUser.id));
+    },
+    [availableTeams, canViewAllLeads, teamId, teams, user?.id, users],
+  );
+
+  useEffect(() => {
+    if (!showUserFilter || !userId || userId === "all") return;
+    if (!availableUsers.some((availableUser) => availableUser.id === userId)) {
+      onUserChange(null);
+    }
+  }, [availableUsers, onUserChange, showUserFilter, userId]);
+
+  const selectedUser = useMemo(
+    () => availableUsers.find((availableUser) => availableUser.id === userId),
+    [availableUsers, userId],
+  );
+
+  const matchingUsers = useMemo(() => {
+    const normalizedSearch = userSearch.trim().toLowerCase();
+    if (!normalizedSearch) return availableUsers;
+
+    return availableUsers.filter((availableUser) => {
+      const name = availableUser.name?.toLowerCase() || "";
+      const email = availableUser.email?.toLowerCase() || "";
+      return name.includes(normalizedSearch) || email.includes(normalizedSearch);
+    });
+  }, [availableUsers, userSearch]);
+
+  const visibleUserOptions = useMemo(() => matchingUsers.slice(0, 80), [matchingUsers]);
+  const hiddenUsersCount = Math.max(0, matchingUsers.length - visibleUserOptions.length);
 
   const hasExtraFilters =
     teamId !== null ||
@@ -325,25 +367,83 @@ export function SharedFilters({
 
                 {/* User Filter */}
                 {showUserFilter && (
-                  <Select
-                    value={userId || "all"}
-                    onValueChange={(value) => onUserChange(value === "all" ? null : value)}
-                  >
-                    <SelectTrigger
-                      className={cn("h-9 w-full text-xs", userId && userId !== "all" && "border-primary text-primary")}
+                  <Popover open={userFilterOpen} onOpenChange={setUserFilterOpen} modal={false}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={userFilterOpen}
+                        className={cn(
+                          "h-9 w-full justify-between text-xs font-normal",
+                          userId && userId !== "all" && "border-primary text-primary",
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <User className="h-3.5 w-3.5 flex-shrink-0" />
+                          <span className="truncate">{selectedUser?.name || "Todos"}</span>
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="z-[140] w-[260px] p-0"
+                      onOpenAutoFocus={(event) => event.preventDefault()}
                     >
-                      <User className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
-                      <SelectValue placeholder="Corretor" />
-                    </SelectTrigger>
-                    <SelectContent className={filterSelectContentClass}>
-                      <SelectItem value="all">Todos</SelectItem>
-                      {availableUsers.map((availableUser) => (
-                        <SelectItem key={availableUser.id} value={availableUser.id}>
-                          {availableUser.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          placeholder="Buscar corretor..."
+                          value={userSearch}
+                          onValueChange={setUserSearch}
+                        />
+                        <CommandList className="max-h-[260px]">
+                          {matchingUsers.length === 0 ? (
+                            <CommandEmpty>Nenhum corretor encontrado.</CommandEmpty>
+                          ) : (
+                            <CommandGroup>
+                              <CommandItem
+                                value="all"
+                                onSelect={() => {
+                                  onUserChange(null);
+                                  setUserSearch("");
+                                  setUserFilterOpen(false);
+                                }}
+                              >
+                                <Check className={cn("mr-2 h-3.5 w-3.5", !userId ? "opacity-100" : "opacity-0")} />
+                                Todos
+                              </CommandItem>
+                              {visibleUserOptions.map((availableUser) => (
+                                <CommandItem
+                                  key={availableUser.id}
+                                  value={`${availableUser.name || ""} ${availableUser.email || ""}`}
+                                  onSelect={() => {
+                                    onUserChange(availableUser.id);
+                                    setUserSearch("");
+                                    setUserFilterOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-3.5 w-3.5",
+                                      userId === availableUser.id ? "opacity-100" : "opacity-0",
+                                    )}
+                                  />
+                                  <span className="truncate">
+                                    {availableUser.name || availableUser.email || "Usuário"}
+                                  </span>
+                                </CommandItem>
+                              ))}
+                              {hiddenUsersCount > 0 && (
+                                <div className="px-8 py-2 text-[10px] text-muted-foreground">
+                                  Digite para buscar mais {hiddenUsersCount} corretor(es).
+                                </div>
+                              )}
+                            </CommandGroup>
+                          )}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 )}
 
                 {/* Source Filter */}

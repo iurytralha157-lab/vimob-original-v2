@@ -123,7 +123,7 @@ export function SalesFunnel({ data, isLoading }: SalesFunnelProps) {
               const width = Math.max(baseWidth, minWidth);
               
               return (
-                <Tooltip key={item.stage_key || item.name}>
+                <Tooltip key={`${item.stage_key || item.name}-${index}`}>
                   <TooltipTrigger asChild>
                     <div
                       className={cn(
@@ -198,7 +198,7 @@ export function SalesFunnel({ data, isLoading }: SalesFunnelProps) {
         <div className="mt-2 pt-2 border-t border-border/40">
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 justify-center">
             {data.slice(0, 5).map((item, index) => (
-              <div key={item.stage_key || item.name} className="flex items-center gap-1">
+              <div key={`${item.stage_key || item.name}-${index}`} className="flex items-center gap-1">
                 <div 
                   className={cn(
                     "w-2 h-2 rounded-full bg-gradient-to-r",

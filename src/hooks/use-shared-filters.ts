@@ -5,7 +5,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeadVisibility, applyVisibilityFilter } from './use-lead-visibility';
 import { DatePreset } from './use-dashboard-filters';
-import { applyLeadIdFilter, fetchDashboardTeamLeadIds } from './use-dashboard-team-leads';
 
 export interface SharedFilters {
   datePreset: DatePreset;
@@ -24,6 +23,26 @@ export interface SharedFilters {
 function applyLeadMetaOptionFilter(query: any, idColumn: string, nameColumn: string, value?: string | null) {
   if (!value) return query;
   return query.or(`${idColumn}.eq.${value},${nameColumn}.eq.${value}`, { foreignTable: 'lead_meta' });
+}
+
+async function fetchTeamMemberIds(teamId?: string | null): Promise<string[] | null> {
+  if (!teamId) return null;
+
+  const { data, error } = await supabase
+    .from('team_members')
+    .select('user_id')
+    .eq('team_id', teamId);
+
+  if (error) throw error;
+  return (data || []).map((member) => member.user_id).filter(Boolean);
+}
+
+function applyTeamMemberFilter(query: any, teamMemberIds: string[] | null) {
+  if (!teamMemberIds) return query;
+  if (teamMemberIds.length === 0) {
+    return query.eq('assigned_user_id', '00000000-0000-0000-0000-000000000000');
+  }
+  return query.in('assigned_user_id', teamMemberIds);
 }
 
 export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
@@ -63,11 +82,11 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
         .lte('created_at', dateRange.to.toISOString())
         .not('source', 'is', null);
       
-      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', userId);
-      const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
-      query = applyLeadIdFilter(query, teamLeadIds);
+      query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
+      query = applyTeamMemberFilter(query, await fetchTeamMemberIds(teamId));
 
-      const { data } = await query;
+      const { data, error } = await query;
+      if (error) throw error;
       const distinctSources = [...new Set(data?.map(l => l.source))].filter(Boolean);
       
       return distinctSources.map(s => ({
@@ -90,8 +109,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
         .lte('created_at', dateRange.to.toISOString());
       
       query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
-      const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
-      query = applyLeadIdFilter(query, teamLeadIds);
+      query = applyTeamMemberFilter(query, await fetchTeamMemberIds(teamId));
 
       const { data, error } = await query;
       if (error) throw error;
@@ -121,8 +139,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
         .lte('created_at', dateRange.to.toISOString());
 
       query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
-      const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
-      query = applyLeadIdFilter(query, teamLeadIds);
+      query = applyTeamMemberFilter(query, await fetchTeamMemberIds(teamId));
 
       const { data, error } = await query;
       if (error) throw error;
@@ -152,8 +169,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
         .lte('created_at', dateRange.to.toISOString());
 
       query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
-      const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
-      query = applyLeadIdFilter(query, teamLeadIds);
+      query = applyTeamMemberFilter(query, await fetchTeamMemberIds(teamId));
 
       const { data, error } = await query;
       if (error) throw error;
@@ -212,8 +228,7 @@ export function useSharedFilters(options?: { loadDynamicOptions?: boolean }) {
       }
 
       query = applyVisibilityFilter(query, visibility!, 'assigned_user_id', visibilityUserId);
-      const teamLeadIds = await fetchDashboardTeamLeadIds(teamId, null);
-      query = applyLeadIdFilter(query, teamLeadIds);
+      query = applyTeamMemberFilter(query, await fetchTeamMemberIds(teamId));
 
       const { data, error } = await query;
       if (error) throw error;

@@ -176,13 +176,19 @@ export function useCreateProperty() {
       if (error) throw error;
 
       // Log activity: property created (for gamification)
-      await supabase.from('activities').insert({
+      const { error: activityError } = await (supabase as any).from('activities').insert({
         user_id: user.user.id,
-        lead_id: '00000000-0000-0000-0000-000000000000', // Placeholder for non-lead activities
+        lead_id: null,
+        organization_id: organizationId,
         type: 'property_created',
         content: `Imóvel "${data.title}" (Cód: ${data.code}) foi captado`,
-        metadata: { property_id: data.id, code: data.code }
+        metadata: { property_id: data.id, code: data.code, organization_id: organizationId }
       });
+
+      if (activityError) {
+        console.warn('Erro ao registrar atividade de captação de imóvel:', activityError);
+      }
+
       return data;
     },
     onSuccess: (data) => {

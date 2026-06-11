@@ -38,7 +38,6 @@ import { useSharedFilters } from "@/hooks/use-shared-filters";
 import { useEnhancedDashboardStats, useDealsEvolutionData, useLeadSourcesData } from "@/hooks/use-dashboard-stats";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLeadVisibility, applyVisibilityFilter } from "@/hooks/use-lead-visibility";
-import { applyLeadIdFilter, fetchDashboardTeamLeadIds } from "@/hooks/use-dashboard-team-leads";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SharedFilters } from "@/components/shared/SharedFilters";
 import { datePresetOptions, sourceLabels } from "@/hooks/use-dashboard-filters";
@@ -99,10 +98,13 @@ export default function Dashboard() {
     if (filters.userId) return [filters.userId];
 
     if (filters.teamId) {
-      const { data: members } = await supabase
+      const { data: members, error } = await supabase
         .from("team_members")
         .select("user_id")
         .eq("team_id", filters.teamId);
+
+      if (error) throw error;
+
       return (members || []).map((member) => member.user_id).filter(Boolean);
     }
 
@@ -111,36 +113,52 @@ export default function Dashboard() {
     return visibility.userId ? [visibility.userId] : [];
   };
 
+  const getDashboardTeamMemberIds = async () => {
+    if (!filters.teamId) return null;
+
+    const { data: members, error } = await supabase
+      .from("team_members")
+      .select("user_id")
+      .eq("team_id", filters.teamId);
+
+    if (error) throw error;
+    return (members || []).map((member) => member.user_id).filter(Boolean);
+  };
+
+  const applyPropertyUserFilter = (query: any, propertyUserIds: string[]) => {
+    const ids = propertyUserIds.join(",");
+    return query.or(`corretor_id.in.(${ids}),cadastrado_por.in.(${ids})`);
+  };
+
+  const getDashboardPropertyIds = async (organizationId: string, propertyUserIds: string[]) => {
+    const { data, error } = await applyPropertyUserFilter(
+      supabase
+        .from("properties")
+        .select("id")
+        .eq("organization_id", organizationId),
+      propertyUserIds,
+    );
+
+    if (error) throw error;
+    return (data || []).map((property) => property.id).filter(Boolean);
+  };
+
   // Query: Contagem de Imóveis
   const { data: propertyCount = 0 } = useQuery({
-    queryKey: ["dashboard-property-count", organization?.id, filters.userId, filters.teamId, visibility],
+    queryKey: ["dashboard-property-count", organization?.id, dateFromStr, dateToStr, filters.userId, filters.teamId, visibility],
     queryFn: async () => {
       if (!organization?.id || !visibility) return 0;
       const propertyUserIds = await getDashboardPropertyUserIds();
       let query = supabase
         .from("properties")
         .select("*", { count: "exact", head: true })
-        .eq("organization_id", organization.id);
+        .eq("organization_id", organization.id)
+        .gte("created_at", dateFromStr)
+        .lte("created_at", dateToStr);
 
       if (propertyUserIds) {
         if (propertyUserIds.length === 0) return 0;
-
-        const { data: activities, error: activitiesError } = await supabase
-          .from("activities")
-          .select("metadata")
-          .eq("type", "property_created")
-          .in("user_id", propertyUserIds);
-
-        if (activitiesError) throw activitiesError;
-
-        const propertyIds = Array.from(new Set(
-          (activities || [])
-            .map((activity: any) => activity.metadata?.property_id)
-            .filter(Boolean),
-        ));
-
-        if (propertyIds.length === 0) return 0;
-        query = query.in("id", propertyIds);
+        query = applyPropertyUserFilter(query, propertyUserIds);
       }
 
       const { count, error } = await query;
@@ -166,19 +184,7 @@ export default function Dashboard() {
       if (propertyUserIds) {
         if (propertyUserIds.length === 0) return 0;
 
-        const { data: activities, error: activitiesError } = await supabase
-          .from("activities")
-          .select("metadata")
-          .eq("type", "property_created")
-          .in("user_id", propertyUserIds);
-
-        if (activitiesError) throw activitiesError;
-
-        const propertyIds = Array.from(new Set(
-          (activities || [])
-            .map((activity: any) => activity.metadata?.property_id)
-            .filter(Boolean),
-        ));
+        const propertyIds = await getDashboardPropertyIds(organization.id, propertyUserIds);
 
         if (propertyIds.length === 0) return 0;
 
@@ -202,7 +208,7 @@ export default function Dashboard() {
       if (error) throw error;
       return Number(data) || 0;
     },
-    enabled: !!organization?.id,
+    enabled: !!organization?.id && !!visibility,
     staleTime: 1000 * 60 * 5,
   });
 
@@ -237,7 +243,6 @@ export default function Dashboard() {
         filters.adId ||
         filters.tagId ||
         filters.dealStatus ||
-        filters.teamId ||
         filters.searchQuery;
 
       if (needsLeadFilter) {
@@ -272,15 +277,18 @@ export default function Dashboard() {
         }
 
         if (filters.teamId) {
-          const teamLeadIds = await fetchDashboardTeamLeadIds(filters.teamId, null);
-          leadQuery = applyLeadIdFilter(leadQuery, teamLeadIds);
+          const teamMemberIds = await getDashboardTeamMemberIds();
+          if (!teamMemberIds || teamMemberIds.length === 0) return 0;
+          leadQuery = leadQuery.in("assigned_user_id", teamMemberIds);
         }
 
         if (filters.tagId) {
           leadQuery = leadQuery.eq("lead_tags.tag_id", filters.tagId);
         }
 
-        const { data: leads } = await leadQuery;
+        const { data: leads, error: leadsError } = await leadQuery;
+        if (leadsError) throw leadsError;
+
         leadIds = (leads || []).map((l) => l.id);
         if (leadIds.length === 0) return 0;
       }
@@ -298,6 +306,12 @@ export default function Dashboard() {
       }
 
       query = applyVisibilityFilter(query, visibility, "user_id", filters.userId);
+
+      if (filters.teamId) {
+        const teamMemberIds = await getDashboardTeamMemberIds();
+        if (!teamMemberIds || teamMemberIds.length === 0) return 0;
+        query = query.in("user_id", teamMemberIds);
+      }
 
       const { count, error } = await query;
       if (error) throw error;

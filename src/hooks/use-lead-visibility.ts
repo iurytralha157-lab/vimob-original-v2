@@ -92,7 +92,7 @@ export async function checkLeadVisibility(userId: string): Promise<LeadVisibilit
  * @param query - Query do Supabase
  * @param visibility - Objeto de visibilidade retornado por checkLeadVisibility
  * @param userIdColumn - Nome da coluna que contém o ID do usuário responsável (default: 'assigned_user_id')
- * @param explicitUserId - ID de usuário explícito para filtrar (override da visibilidade)
+ * @param explicitUserId - ID de usuário explícito para filtrar, sempre limitado ao escopo visível
  * @returns Query com filtro de visibilidade aplicado
  */
 export function applyVisibilityFilter<T>(
@@ -101,9 +101,24 @@ export function applyVisibilityFilter<T>(
   userIdColumn: string = 'assigned_user_id',
   explicitUserId?: string | null
 ): T {
-  // Se foi passado um userId explícito, usar ele
   if (explicitUserId) {
-    return query.eq(userIdColumn, explicitUserId);
+    if (visibility.canViewAll) {
+      return query.eq(userIdColumn, explicitUserId);
+    }
+
+    if (visibility.teamMemberIds && visibility.teamMemberIds.length > 0) {
+      return visibility.teamMemberIds.includes(explicitUserId)
+        ? query.eq(userIdColumn, explicitUserId)
+        : query.eq(userIdColumn, '00000000-0000-0000-0000-000000000000');
+    }
+
+    if (visibility.userId) {
+      return visibility.userId === explicitUserId
+        ? query.eq(userIdColumn, explicitUserId)
+        : query.eq(userIdColumn, '00000000-0000-0000-0000-000000000000');
+    }
+
+    return query.eq(userIdColumn, '00000000-0000-0000-0000-000000000000');
   }
   
   // Se pode ver tudo, não aplicar filtro

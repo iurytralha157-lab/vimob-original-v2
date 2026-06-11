@@ -13,8 +13,7 @@ export async function fetchDashboardTeamLeadIds(
   });
 
   if (error) {
-    console.error("Error fetching dashboard team lead ids:", error);
-    return [];
+    throw error;
   }
 
   return (data || []).map((item: any) => item.lead_id).filter(Boolean);
