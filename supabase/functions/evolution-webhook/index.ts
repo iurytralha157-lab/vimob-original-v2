@@ -1089,6 +1089,26 @@ async function handleMessagesUpsert(
           // ===== AI AGENT: Auto-respond to incoming text messages =====
           if (messageType === 'text' && content) {
             try {
+              const { data: activeAgentConversation } = await supabase
+                .from("ai_agent_conversations")
+                .select("id, status")
+                .eq("conversation_id", conversation.id)
+                .eq("status", "active")
+                .maybeSingle();
+
+              if (activeAgentConversation) {
+                await supabase
+                  .from("chatbot_conversation_state")
+                  .update({
+                    automation_enabled: true,
+                    agent_status: "active",
+                    last_response_id: null,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("organization_id", session.organization_id)
+                  .eq("conversation_id", conversation.id);
+              }
+
               // Fire-and-forget: don't await so webhook responds fast
               const aiAgentCall = fetch(`${supabaseUrl}/functions/v1/ai-agent-responder`, {
                 method: "POST",
