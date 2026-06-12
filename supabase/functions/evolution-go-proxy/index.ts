@@ -156,6 +156,35 @@ function withNormalizedSentId(action: string, data: any) {
   return { data, messageId, sentMessageId: messageId };
 }
 
+function extractEvolutionError(data: any, rawText?: string): string | null {
+  const candidates = [
+    data?.error,
+    data?.message,
+    data?.detail,
+    data?.details,
+    data?.data?.error,
+    data?.data?.message,
+    data?.data?.detail,
+    data?.response?.error,
+    data?.response?.message,
+    data?.raw,
+    rawText,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (Array.isArray(candidate)) {
+      const item = candidate.find(Boolean);
+      if (item) return typeof item === "string" ? item : JSON.stringify(item);
+      continue;
+    }
+    if (typeof candidate === "object") return JSON.stringify(candidate);
+    return String(candidate);
+  }
+
+  return null;
+}
+
 function isSendAction(action: string) {
   return ["send.text", "send.media", "send.audio", "send.sticker", "send.location", "send.contact", "send.link", "send.poll"].includes(action);
 }
@@ -825,7 +854,14 @@ Deno.serve(async (req) => {
     }
 
     const responseData = withNormalizedSentId(action, finalRes.data);
-    const responsePayload: Record<string, any> = { ok: finalRes.ok, status: finalRes.status, data: responseData };
+    const providerSuccessFlag = finalRes.data?.success ?? finalRes.data?.ok ?? finalRes.data?.data?.success ?? finalRes.data?.data?.ok;
+    const semanticFailure = providerSuccessFlag === false;
+    const responseOk = finalRes.ok && !semanticFailure;
+    const providerError = responseOk ? null : extractEvolutionError(finalRes.data, finalRes.rawText);
+    const responsePayload: Record<string, any> = { ok: responseOk, status: finalRes.status, data: responseData };
+    if (!responseOk) {
+      responsePayload.error = providerError || `Evolution Go request failed with status ${finalRes.status}`;
+    }
     if (resolvedInstanceKey !== instanceKey) {
       responsePayload.resolvedInstanceKey = resolvedInstanceKey;
     }

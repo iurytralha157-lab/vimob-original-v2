@@ -16,7 +16,25 @@ interface WhatsAppSendResult {
 }
 
 function normalizeGoResponse(result: any): WhatsAppSendResult {
-  return { ok: !!result?.ok, data: result?.data, error: result?.error };
+  const data = result?.data;
+  const providerSuccessFlag = data?.success ?? data?.ok ?? data?.data?.success ?? data?.data?.ok;
+  const failed = !result?.ok || providerSuccessFlag === false;
+  const error =
+    result?.error ||
+    (failed
+      ? data?.error ||
+        data?.message ||
+        data?.data?.error ||
+        data?.data?.message ||
+        data?.response?.message ||
+        data?.raw
+      : undefined);
+
+  return {
+    ok: !failed,
+    data,
+    error: error ? String(error) : undefined,
+  };
 }
 
 function normalizeLegacyResponse(result: any): WhatsAppSendResult {
