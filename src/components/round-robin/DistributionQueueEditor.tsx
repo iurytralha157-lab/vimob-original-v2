@@ -524,6 +524,10 @@ export function DistributionQueueEditor({
       toast.error('Adicione pelo menos um critério de entrada para salvar a fila');
       return;
     }
+    if (formData.is_active && formData.members.length === 0) {
+      toast.error('Adicione pelo menos um participante antes de ativar a fila');
+      return;
+    }
     
     setSaving(true);
     try {
@@ -722,7 +726,8 @@ export function DistributionQueueEditor({
   const hasValidCriteria = formData.conditions.some(condition =>
     condition.values.some(value => value.trim())
   );
-  const canSave = !!formData.name.trim() && !!formData.target_pipeline_id && !!formData.target_stage_id && hasValidCriteria && !saving;
+  const hasRequiredMembers = !formData.is_active || formData.members.length > 0;
+  const canSave = !!formData.name.trim() && !!formData.target_pipeline_id && !!formData.target_stage_id && hasValidCriteria && hasRequiredMembers && !saving;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -942,6 +947,9 @@ export function DistributionQueueEditor({
                       </SelectContent>
                     </Select>
                   </div>
+                  {formData.is_active && formData.members.length === 0 && (
+                    <p className="text-xs text-destructive">Adicione pelo menos um participante para manter a fila ativa.</p>
+                  )}
                 </CollapsibleContent>
               </Collapsible>
 

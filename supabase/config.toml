@@ -93,6 +93,9 @@ verify_jwt = false
 [functions.notification-scheduler]
 verify_jwt = false
 
+[functions.notification-dispatcher]
+verify_jwt = true
+
 [functions.recurring-entries-generator]
 verify_jwt = false
 
@@ -115,7 +118,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.send-push-notification]
-verify_jwt = false
+verify_jwt = true
 
 [functions.whatsapp-notifier]
 verify_jwt = false
@@ -124,7 +127,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.cleanup-notifications]
-verify_jwt = false
+verify_jwt = true
 
 [functions.get-worker-config]
 verify_jwt = false

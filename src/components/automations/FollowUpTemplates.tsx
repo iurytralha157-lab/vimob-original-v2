@@ -72,9 +72,14 @@ export const FOLLOW_UP_TEMPLATES: FollowUpTemplate[] = [
 
 interface FollowUpTemplatesProps {
   onSelectTemplate: (template: FollowUpTemplate | null) => void;
+  canCreate?: boolean;
 }
 
-export function FollowUpTemplates({ onSelectTemplate }: FollowUpTemplatesProps) {
+export function FollowUpTemplates({ onSelectTemplate, canCreate = true }: FollowUpTemplatesProps) {
+  if (!canCreate) {
+    return null;
+  }
+
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">

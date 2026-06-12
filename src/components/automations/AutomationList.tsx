@@ -26,6 +26,7 @@ import { useQueryClient } from '@tanstack/react-query';
 interface AutomationListProps {
   onEdit: (automationId: string) => void;
   onViewHistory?: (automationId: string) => void;
+  canManage?: boolean;
 }
 
 function TriggerContext({ automation }: { automation: Automation }) {
@@ -63,7 +64,7 @@ function TriggerContext({ automation }: { automation: Automation }) {
   return null;
 }
 
-export function AutomationList({ onEdit, onViewHistory }: AutomationListProps) {
+export function AutomationList({ onEdit, onViewHistory, canManage = true }: AutomationListProps) {
   const { data: automations, isLoading } = useAutomations();
   const { data: executions } = useAutomationExecutions();
   const deleteAutomation = useDeleteAutomation();
@@ -83,6 +84,7 @@ export function AutomationList({ onEdit, onViewHistory }: AutomationListProps) {
 
   const handleDuplicate = async (automation: Automation, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!canManage) return;
     try {
       if (!profile?.organization_id) return;
 
@@ -151,7 +153,7 @@ export function AutomationList({ onEdit, onViewHistory }: AutomationListProps) {
             className={`group rounded-2xl cursor-pointer relative aspect-[4/3] flex items-center justify-center transition-all duration-200 overflow-hidden border border-border bg-secondary hover:bg-orange-500 hover:border-orange-500 ${
               !automation.is_active ? 'opacity-50' : ''
             }`}
-            onClick={() => onEdit(automation.id)}
+            onClick={() => canManage ? onEdit(automation.id) : onViewHistory?.(automation.id)}
           >
             <div className="flex flex-col items-center justify-center p-4 text-center w-full relative z-10">
               <div className="relative mb-2">
@@ -200,6 +202,7 @@ export function AutomationList({ onEdit, onViewHistory }: AutomationListProps) {
             </div>
 
             {/* Top-right actions (visible on hover) */}
+            {canManage && (
             <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-20" onClick={(e) => e.stopPropagation()}>
               <Switch 
                 checked={automation.is_active}
@@ -242,6 +245,7 @@ export function AutomationList({ onEdit, onViewHistory }: AutomationListProps) {
                 </AlertDialogContent>
               </AlertDialog>
             </div>
+            )}
 
             {/* Status badge - green solid for active */}
             <Badge 

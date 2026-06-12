@@ -3,25 +3,27 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
-const META_GRAPH_VERSION = import.meta.env.VITE_META_GRAPH_VERSION || "v25.0";
-
 export interface MetaIntegration {
   id: string;
   organization_id: string;
   page_id: string | null;
   page_name: string | null;
   is_connected: boolean | null;
-  access_token: string | null;
-  field_mapping: unknown;
-  form_ids: unknown;
-  campaign_property_mapping: unknown;
   last_error: string | null;
   last_sync_at: string | null;
   created_at: string;
   updated_at: string;
   leads_received: number | null;
-  selected_ad_accounts: string[] | null;
+  selected_ad_accounts: unknown;
   ad_account_id: string | null;
+  integration_type?: string | null;
+  instagram_business_account_id?: string | null;
+  instagram_username?: string | null;
+  health_status?: string | null;
+  token_status?: string | null;
+  token_expires_at?: string | null;
+  last_validated_at?: string | null;
+  webhook_subscribed_at?: string | null;
   facebook_user_id?: string | null;
   facebook_user_name?: string | null;
   page_picture_url?: string | null;
@@ -46,7 +48,7 @@ export function useMetaIntegrations() {
       if (!profile?.organization_id) return [];
 
       const { data, error } = await (supabase as any)
-        .from("meta_integrations")
+        .from("meta_integrations_public")
         .select("*")
         .eq("organization_id", profile.organization_id)
         .order("created_at", { ascending: false });
@@ -377,26 +379,16 @@ export function useMetaUpdateAdAccounts() {
   });
 }
 
-// Fetch available ad accounts for a user token or integration
+// Fetch available ad accounts for a fresh OAuth user token.
+// Existing integrations must use an Edge Function endpoint so page tokens never reach the browser.
 export function useMetaAdAccounts(userToken?: string, integrationId?: string) {
   return useQuery({
     queryKey: ["meta-ad-accounts", userToken, integrationId],
     queryFn: async () => {
-      let tokenToUse = userToken;
-      
-      if (!tokenToUse && integrationId) {
-        const { data } = await supabase
-          .from("meta_integrations")
-          .select("access_token")
-          .eq("id", integrationId)
-          .single();
-        tokenToUse = data?.access_token;
-      }
-      
-      if (!tokenToUse) return [];
+      if (!userToken) return [];
       
       const response = await fetch(
-        `https://graph.facebook.com/${META_GRAPH_VERSION}/me/adaccounts?fields=id,name,account_id&access_token=${tokenToUse}`
+        `https://graph.facebook.com/v25.0/me/adaccounts?fields=id,name,account_id&access_token=${userToken}`
       );
       
       if (!response.ok) {
@@ -406,6 +398,6 @@ export function useMetaAdAccounts(userToken?: string, integrationId?: string) {
       const data = await response.json();
       return data.data || [];
     },
-    enabled: !!userToken || !!integrationId,
+    enabled: !!userToken,
   });
 }

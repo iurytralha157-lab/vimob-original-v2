@@ -1,11 +1,33 @@
-import { Navigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserPermissions } from '@/hooks/use-user-permissions';
 import { useUserAccessScope } from '@/hooks/use-user-access-scope';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 
 interface AdminRouteProps {
   children: React.ReactNode;
   allowedPermissions?: string[];
+}
+
+function AdminAccessDenied() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardContent className="space-y-4 p-6 text-center">
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Acesso negado</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Esta área exige perfil administrativo ou uma permissão específica.
+            </p>
+          </div>
+          <Button asChild>
+            <Link to="/dashboard">Voltar para o dashboard</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 /**
@@ -38,7 +60,7 @@ export function AdminRoute({ children, allowedPermissions = [] }: AdminRouteProp
       allowedPermissions.some((permission) => ['settings_teams', 'settings_users', 'settings_pipelines'].includes(permission));
 
     if (!hasAllowedPermission && !canAccessAsTeamLeader) {
-      return <Navigate to="/dashboard" replace />;
+      return <AdminAccessDenied />;
     }
   }
 

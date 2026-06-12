@@ -952,7 +952,14 @@ function AppRoutes() {
               <Route path="dashboard" element={<GamificationDashboard />} />
               <Route path="performance" element={<GamificationPerformance />} />
               <Route path="historico" element={<GamificationHistory />} />
-              <Route path="configuracoes" element={<GamificationAdmin />} />
+              <Route
+                path="configuracoes"
+                element={
+                  <AdminRoute>
+                    <GamificationAdmin />
+                  </AdminRoute>
+                }
+              />
             </Route>
             <Route path="/gamification/*" element={<LegacyGamificationRedirect />} />
 

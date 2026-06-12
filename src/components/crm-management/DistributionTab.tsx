@@ -177,6 +177,10 @@ export function DistributionTab() {
       toast.error('Adicione pelo menos um critério antes de ativar a fila');
       return;
     }
+    if (!queue.is_active && queue.members.length === 0) {
+      toast.error('Adicione pelo menos um participante antes de ativar a fila');
+      return;
+    }
     await updateRoundRobin.mutateAsync({ id: queue.id, is_active: !queue.is_active });
   };
 

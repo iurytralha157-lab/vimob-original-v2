@@ -127,7 +127,7 @@ export function useAllMetaFormConfigs() {
 // Fetch forms from Meta Graph API via edge function
 export function useFetchPageForms() {
   return useMutation({
-    mutationFn: async ({ pageId, accessToken }: { pageId: string; accessToken: string }) => {
+    mutationFn: async ({ pageId }: { pageId: string }) => {
       const { data: sessionData } = await supabase.auth.getSession();
       
       const response = await fetch(
@@ -141,7 +141,6 @@ export function useFetchPageForms() {
           body: JSON.stringify({
             action: "get_page_forms",
             page_id: pageId,
-            access_token: accessToken,
           }),
         }
       );
@@ -249,15 +248,20 @@ export function useSaveFormConfig() {
 // Toggle form active status
 export function useToggleFormConfig() {
   const queryClient = useQueryClient();
+  const { profile } = useAuth();
 
   return useMutation({
     mutationFn: async ({ formId, isActive, integrationId }: { formId: string; isActive: boolean; integrationId: string }) => {
+      if (!profile?.organization_id) throw new Error("No organization");
+
       const { error } = await (supabase as any)
         .from("meta_form_configs")
         .update({ 
           is_active: isActive,
           updated_at: new Date().toISOString()
         })
+        .eq("organization_id", profile.organization_id)
+        .eq("integration_id", integrationId)
         .eq("form_id", formId);
 
       if (error) throw error;
@@ -275,12 +279,17 @@ export function useToggleFormConfig() {
 // Delete form configuration
 export function useDeleteFormConfig() {
   const queryClient = useQueryClient();
+  const { profile } = useAuth();
 
   return useMutation({
     mutationFn: async ({ formId, integrationId }: { formId: string; integrationId: string }) => {
+      if (!profile?.organization_id) throw new Error("No organization");
+
       const { error } = await (supabase as any)
         .from("meta_form_configs")
         .delete()
+        .eq("organization_id", profile.organization_id)
+        .eq("integration_id", integrationId)
         .eq("form_id", formId);
 
       if (error) throw error;

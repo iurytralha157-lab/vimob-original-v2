@@ -86,7 +86,7 @@ import { useTags } from '@/hooks/use-tags';
 import { useAssignLeadRoundRobin } from '@/hooks/use-assign-lead-roundrobin';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCanEditCadences } from '@/hooks/use-can-edit-cadences';
-import { useUserAccessScope } from '@/hooks/use-user-access-scope';
+import { useLeadVisibility } from '@/hooks/use-lead-visibility';
 
 import { useHasPermission } from '@/hooks/use-organization-roles';
 import { notifyLeadMoved } from '@/hooks/use-lead-notifications';
@@ -107,6 +107,8 @@ const formatCompactCurrency = (value: number): string => {
   }
   return `R$${value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
 };
+
+const NO_VISIBLE_USER_ID = '00000000-0000-0000-0000-000000000000';
 
 type LeadDialogBoundaryProps = {
   leadId?: string | null;
@@ -234,6 +236,7 @@ export default function Pipelines() {
   const isDraggingRef = useRef(false);
   const [confirmationDialogOpen, setConfirmationDialogOpen] = useState(false);
   const [pendingDragResult, setPendingDragResult] = useState<DropResult | null>(null);
+  const [contractResourceConfirmed, setContractResourceConfirmed] = useState(false);
 
   const { data: pipelines = [], isLoading: pipelinesLoading } = usePipelines();
   const createPipeline = useCreatePipeline();
@@ -251,7 +254,8 @@ export default function Pipelines() {
   }, [pipelines, selectedPipelineId]);
   
   // Check if user has lead_view_all permission
-  const { data: hasLeadViewAll = false, isLoading: permissionLoading } = useHasPermission('lead_view_all');
+  const { isLoading: permissionLoading } = useHasPermission('lead_view_all');
+  const { data: leadVisibility, isLoading: leadVisibilityLoading } = useLeadVisibility(profile?.id);
   
   // Check if user has pipeline_lock permission (restricts drag-and-drop)
   const { data: hasPipelineLock = false } = useHasPermission('pipeline_lock');
@@ -259,40 +263,47 @@ export default function Pipelines() {
   // Determine if drag should be disabled: user has pipeline_lock AND is not admin
   const isDragDisabled = hasPipelineLock && !isAdmin;
   
-  // Check if user is a team leader (can edit cadences = is admin OR team leader)
-  const isTeamLeader = useCanEditCadences();
-  const accessScope = useUserAccessScope();
-  const scopedTeamUserIds = !isAdmin && !hasLeadViewAll && accessScope.isTeamLeader
-    ? accessScope.ledUserIds
-    : undefined;
-  const hasTeamUserScope = Array.isArray(scopedTeamUserIds);
+  const scopedVisibleUserIds = useMemo(() => {
+    if (!leadVisibility || leadVisibility.canViewAll) return undefined;
+    if (leadVisibility.teamMemberIds) return leadVisibility.teamMemberIds;
+    if (leadVisibility.userId) return [leadVisibility.userId];
+    return [];
+  }, [leadVisibility]);
+  const hasUserScope = Array.isArray(scopedVisibleUserIds);
   const selectedFilterUserId = filterUser === 'all' ? undefined : (filterUser || undefined);
-  const effectivePipelineFilterUser = hasTeamUserScope
-    ? (selectedFilterUserId && scopedTeamUserIds.includes(selectedFilterUserId) ? selectedFilterUserId : undefined)
+  const effectivePipelineFilterUser = hasUserScope
+    ? (selectedFilterUserId ? (scopedVisibleUserIds.includes(selectedFilterUserId) ? selectedFilterUserId : NO_VISIBLE_USER_ID) : undefined)
     : selectedFilterUserId;
+
+  useEffect(() => {
+    if (!hasUserScope || !selectedFilterUserId) return;
+    if (scopedVisibleUserIds.includes(selectedFilterUserId)) return;
+
+    setFilterUser(scopedVisibleUserIds.length === 1 ? scopedVisibleUserIds[0] : 'all');
+  }, [hasUserScope, selectedFilterUserId, scopedVisibleUserIds, setFilterUser]);
   
   // Set initial filter based on user role, permissions, AND team leadership
   // Wait for permission to load before deciding the filter
   useEffect(() => {
-    if (!profile.id || permissionLoading) return;
+    if (!profile.id || permissionLoading || leadVisibilityLoading || !leadVisibility) return;
     // Só inicializa se o filtro ainda não foi definido pelo usuário
     if (filterUser !== null) return;
 
-    const canSeeExpandedScope = isAdmin || hasLeadViewAll || isTeamLeader;
+    const canSeeExpandedScope = leadVisibility.canViewAll || Boolean(leadVisibility.teamMemberIds?.length);
 
     if (canSeeExpandedScope) {
     setFilterUser('all');
     } else {
     setFilterUser(profile.id);
     }
-  }, [profile.id, isAdmin, hasLeadViewAll, permissionLoading, isTeamLeader]);
+  }, [profile.id, permissionLoading, leadVisibilityLoading, leadVisibility, filterUser, setFilterUser]);
   
   // Date range is now handled by FilterContext
 
 
   const { data: baseStages = [], isLoading: baseStagesLoading } = useStages(selectedPipelineId || undefined);
 
-  const shouldLoadPipelineLeads = !!selectedPipelineId && filterUser !== null && !permissionLoading;
+  const shouldLoadPipelineLeads = !!selectedPipelineId && filterUser !== null && !permissionLoading && !leadVisibilityLoading && !!leadVisibility;
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const { data: stagesWithLeads = [], isLoading: leadsLoading, refetch } = useStagesWithLeads(
@@ -307,7 +318,7 @@ export default function Pipelines() {
       filterAdSet: filterAdSet && filterAdSet !== 'all' ? filterAdSet : undefined,
       filterAd: filterAd && filterAd !== 'all' ? filterAd : undefined,
       filterSource: filterSource && filterSource !== 'all' ? filterSource : undefined,
-      filterUserIds: scopedTeamUserIds,
+      filterUserIds: scopedVisibleUserIds,
     },
     { enabled: shouldLoadPipelineLeads }
   );
@@ -319,8 +330,8 @@ export default function Pipelines() {
   }, [baseStages, stagesWithLeads]);
 
   const { data: users = [] } = useOrganizationUsers();
-  const visibleUsers = hasTeamUserScope
-    ? users.filter((candidate) => scopedTeamUserIds.includes(candidate.id))
+  const visibleUsers = hasUserScope
+    ? users.filter((candidate) => scopedVisibleUserIds.includes(candidate.id))
     : users;
   const { data: allTags = [] } = useTags();
   // createLead agora ? gerenciado pelo CreateLeadDialog
@@ -354,10 +365,10 @@ export default function Pipelines() {
         filterAdSet: filterAdSet && filterAdSet !== 'all' ? filterAdSet : undefined,
         filterAd: filterAd && filterAd !== 'all' ? filterAd : undefined,
         filterSource: filterSource && filterSource !== 'all' ? filterSource : undefined,
-        filterUserIds: scopedTeamUserIds,
+        filterUserIds: scopedVisibleUserIds,
       },
     });
-  }, [selectedPipelineId, stages, loadMoreLeads, effectivePipelineFilterUser, dateRange, filterTag, filterDealStatus, deferredSearchQuery, filterCampaign, filterAdSet, filterAd, filterSource, scopedTeamUserIds]);
+  }, [selectedPipelineId, stages, loadMoreLeads, effectivePipelineFilterUser, dateRange, filterTag, filterDealStatus, deferredSearchQuery, filterCampaign, filterAdSet, filterAd, filterSource, scopedVisibleUserIds]);
 
   // Real-time subscription for leads and tags updates
   useEffect(() => {
@@ -548,6 +559,7 @@ export default function Pipelines() {
       (targetStage.name.toLowerCase().includes('fechamento') || targetStage.name.toLowerCase().includes('contrato'))
     ) {
       setPendingDragResult(result);
+      setContractResourceConfirmed(false);
       setConfirmationDialogOpen(true);
       return;
     }
@@ -555,7 +567,10 @@ export default function Pipelines() {
     if (executeLeadMove) executeLeadMove(result);
   }, [stages]);
 
-  const executeLeadMove = useCallback(async (result: DropResult) => {
+  const executeLeadMove = useCallback(async (
+    result: DropResult,
+    options?: { isOwnResource?: boolean }
+  ) => {
     // Marcar que estamos em processo de drag (bloqueia refetch da subscription)
     isDraggingRef.current = true;
     
@@ -611,7 +626,7 @@ export default function Pipelines() {
     const effectiveFilterAd = filterAd !== 'all' ? filterAd : undefined;
     const effectiveFilterSource = filterSource !== 'all' ? filterSource : undefined;
     const effectiveFilterUser = effectivePipelineFilterUser;
-    const effectiveScopedUserIds = scopedTeamUserIds?.join(',');
+    const effectiveScopedUserIds = scopedVisibleUserIds?.join(',');
 
     const queryKey = [
       'stages-with-leads', 
@@ -679,16 +694,34 @@ export default function Pipelines() {
       const persistedLead = persistedStage?.leads?.find((lead: any) => lead.id === draggableId);
       const persistedStageEnteredAt = persistedLead?.stage_entered_at || new Date().toISOString();
 
-      // Update lead stage in database first
       const updateResult = await supabase
-        .from('leads')
-        .update({ 
-          stage_id: newStageId,
-          stage_entered_at: persistedStageEnteredAt,
-        })
-        .eq('id', draggableId);
+        .rpc('move_lead_stage' as any, {
+          p_lead_id: draggableId,
+          p_stage_id: newStageId,
+          p_is_own_resource: options?.isOwnResource ?? null,
+          p_stage_entered_at: persistedStageEnteredAt,
+        });
       
       if (updateResult.error) throw updateResult.error;
+
+      const movedLeadFromRpc = updateResult.data as any;
+      if (movedLeadFromRpc) {
+        queryClient.setQueryData(queryKey, (old: any[] | undefined) => {
+          if (!old) return old;
+          return old.map(stage => ({
+            ...stage,
+            leads: (stage.leads || []).map((lead: any) =>
+              lead.id === draggableId
+                ? {
+                    ...lead,
+                    ...movedLeadFromRpc,
+                    stage: lead.stage,
+                  }
+                : lead
+            ),
+          }));
+        });
+      }
 
       if (isSameStage) {
         toast.success('Ordem do lead atualizada');
@@ -696,76 +729,19 @@ export default function Pipelines() {
         return;
       }
       
-      // Fetch stage automations separately (don't block on failure)
-      let automationsResult: any = { data: [] };
-      try {
-        automationsResult = await supabase
-          .from('stage_automations')
-          .select('automation_type, action_config')
-          .eq('stage_id', newStageId)
-          .eq('is_active', true);
-      } catch (e) {
-        console.warn('Failed to fetch stage automations:', e);
-      }
-      
-      // Apply deal_status from automation as a SECOND optimistic update
-      const automations = automationsResult.data || [];
-      const statusAutomation = automations.find(
-        (a: any) => a.automation_type === 'change_deal_status_on_enter'
-      );
-      const actionConfig = statusAutomation?.action_config as Record<string, unknown> | null | undefined;
-      const newDealStatus = actionConfig?.deal_status as string | undefined;
-      const assigneeAutomation = automations.find(
-        (a: any) => a.automation_type === 'change_assignee_on_enter'
-      );
-      const assigneeConfig = assigneeAutomation?.action_config as Record<string, unknown> | null | undefined;
-      const newAssignedUserId = assigneeConfig?.target_user_id as string | undefined;
-
-      if (newDealStatus || newAssignedUserId) {
-        const automationUpdate: Record<string, unknown> = {};
-
-        if (newDealStatus) {
-          automationUpdate.deal_status = newDealStatus;
-          automationUpdate.won_at = newDealStatus === 'won' ? new Date().toISOString() : null;
-          automationUpdate.lost_at = newDealStatus === 'lost' ? new Date().toISOString() : null;
-        }
-
-        if (newAssignedUserId) {
-          automationUpdate.assigned_user_id = newAssignedUserId;
-        }
-
-        const automationResult = await supabase
-          .from('leads')
-          .update(automationUpdate)
-          .eq('id', draggableId);
-
-        if (automationResult.error) throw automationResult.error;
-      }
-      
-      if (newDealStatus || newAssignedUserId) {
-        queryClient.setQueryData(queryKey, (old: any[] | undefined) => {
-          if (!old) return old;
-          return old.map(stage => ({
-            ...stage,
-            leads: (stage.leads || []).map((l: any) => 
-              l.id === draggableId ? {
-                ...l,
-                ...(newDealStatus ? {
-                  deal_status: newDealStatus,
-                  won_at: newDealStatus === 'won' ? new Date().toISOString() : null,
-                  lost_at: newDealStatus === 'lost' ? new Date().toISOString() : null,
-                } : {}),
-                ...(newAssignedUserId ? { assigned_user_id: newAssignedUserId } : {}),
-              } : l
-            ),
-          }));
-        });
-      }
-      
       // Invalidar cache de activities
       queryClient.invalidateQueries({ queryKey: ['activities', draggableId] });
       queryClient.invalidateQueries({ queryKey: ['lead-timeline', draggableId] });
-      // Toast din?mico baseado nas automa?es
+      const sourceStage = stages.find(s => s.id === oldStageId);
+      const originalLead = sourceStage?.leads?.find((l: any) => l.id === draggableId);
+      const newDealStatus = movedLeadFromRpc?.deal_status && movedLeadFromRpc.deal_status !== originalLead?.deal_status
+        ? movedLeadFromRpc.deal_status as string
+        : null;
+      const wasAssigneeChanged = Boolean(
+        movedLeadFromRpc?.assigned_user_id &&
+        movedLeadFromRpc.assigned_user_id !== originalLead?.assigned_user_id
+      );
+
       if (newDealStatus) {
         const statusLabels: Record<string, string> = {
           won: 'Ganho',
@@ -774,14 +750,14 @@ export default function Pipelines() {
         };
         const statusLabel = statusLabels[newDealStatus] || newDealStatus;
         toast.success(`Lead alterado para ${statusLabel}`, {
-          description: `Movido para ${newStage.name}`
+          description: `Movido para ${newStage?.name || 'nova etapa'}`
         });
-      } else if (newAssignedUserId) {
-        toast.success(`Lead movido para ${newStage.name}`, {
+      } else if (wasAssigneeChanged) {
+        toast.success(`Lead movido para ${newStage?.name || 'nova etapa'}`, {
           description: 'Responsável atualizado pela automação da coluna'
         });
       } else {
-        toast.success(`Lead movido para ${newStage.name}`);
+        toast.success(`Lead movido para ${newStage?.name || 'nova etapa'}`);
       }
       
       // Hist?rico e automa?es visuais s?o disparados pelos triggers do banco.
@@ -790,7 +766,7 @@ export default function Pipelines() {
       if (isTelecom && profile.organization_id && selectedPipelineId) {
         // Buscar dados do lead para obter nome e assigned_user_id
         const sourceStage = stages.find(s => s.id === oldStageId);
-        const movedLead = sourceStage.leads.find((l: any) => l.id === draggableId);
+        const movedLead = sourceStage?.leads?.find((l: any) => l.id === draggableId);
         
         if (movedLead) {
           notifyLeadMoved({
@@ -798,8 +774,8 @@ export default function Pipelines() {
             leadName: movedLead.name,
             organizationId: profile.organization_id,
             pipelineId: selectedPipelineId,
-            fromStage: oldStage.name || 'Desconhecido',
-            toStage: newStage.name || 'Desconhecido',
+            fromStage: oldStage?.name || 'Desconhecido',
+            toStage: newStage?.name || 'Desconhecido',
             assignedUserId: movedLead.assigned_user_id,
           }).catch(err => console.error('Erro ao notificar movimenta?o:', err));
         }
@@ -819,7 +795,7 @@ export default function Pipelines() {
         isDraggingRef.current = false;
       }, 500);
     }
-  }, [stages, dateRange, filterTag, filterDealStatus, searchQuery, filterCampaign, filterAdSet, filterAd, filterSource, selectedPipelineId, effectivePipelineFilterUser, scopedTeamUserIds, queryClient, isTelecom, profile]);
+  }, [stages, dateRange, filterTag, filterDealStatus, searchQuery, filterCampaign, filterAdSet, filterAd, filterSource, selectedPipelineId, effectivePipelineFilterUser, scopedVisibleUserIds, queryClient, isTelecom, profile]);
 
   // handleCreateLead agora ? gerenciado pelo CreateLeadDialog
 
@@ -906,9 +882,9 @@ export default function Pipelines() {
           .or(`name.ilike.%${deferredSearch}%,phone.ilike.%${deferredSearch}%`)
           .limit(50);
 
-        if (hasTeamUserScope) {
-          query = scopedTeamUserIds.length > 0
-            ? query.in('assigned_user_id', scopedTeamUserIds)
+        if (hasUserScope) {
+          query = scopedVisibleUserIds.length > 0
+            ? query.in('assigned_user_id', scopedVisibleUserIds)
             : query.eq('id', '00000000-0000-0000-0000-000000000000');
         }
         
@@ -946,7 +922,7 @@ export default function Pipelines() {
     
     doSearch();
     return () => { cancelled = true; };
-  }, [deferredSearch, hasMoreLeads, selectedPipelineId, hasTeamUserScope, scopedTeamUserIds]);
+  }, [deferredSearch, hasMoreLeads, selectedPipelineId, hasUserScope, scopedVisibleUserIds]);
   
 
   
@@ -1573,7 +1549,13 @@ export default function Pipelines() {
           />
         )}
       </div>
-      <Dialog open={confirmationDialogOpen} onOpenChange={setConfirmationDialogOpen}>
+      <Dialog open={confirmationDialogOpen} onOpenChange={(open) => {
+        setConfirmationDialogOpen(open);
+        if (!open) {
+          setPendingDragResult(null);
+          setContractResourceConfirmed(false);
+        }
+      }}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Confirma?o de Contrato</DialogTitle>
@@ -1587,6 +1569,8 @@ export default function Pipelines() {
                 type="checkbox" 
                 id="recurso_proprio" 
                 className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                checked={contractResourceConfirmed}
+                onChange={(event) => setContractResourceConfirmed(event.target.checked)}
               />
               <Label htmlFor="recurso_proprio" className="text-sm font-medium leading-none">
                 Confirmo que o cliente possui recurso próprio validado.
@@ -1597,15 +1581,17 @@ export default function Pipelines() {
             <Button variant="outline" onClick={() => {
               setConfirmationDialogOpen(false);
               setPendingDragResult(null);
+              setContractResourceConfirmed(false);
             }}>
               Cancelar
             </Button>
-            <Button onClick={() => {
+            <Button disabled={!contractResourceConfirmed} onClick={() => {
               if (pendingDragResult) {
-                executeLeadMove(pendingDragResult);
+                executeLeadMove(pendingDragResult, { isOwnResource: true });
               }
               setConfirmationDialogOpen(false);
               setPendingDragResult(null);
+              setContractResourceConfirmed(false);
             }}>
               Confirmar e Mover
             </Button>

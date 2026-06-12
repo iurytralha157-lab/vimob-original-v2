@@ -100,6 +100,54 @@ interface CreateQueueInput {
   ai_agent_id?: string | null;
 }
 
+const isRedistributionEnabled = (settings?: QueueSettings | Record<string, any> | null) =>
+  !!settings && typeof settings === 'object' && !Array.isArray(settings) && !!settings.enable_redistribution;
+
+async function syncPipelineRedistributionSettings(
+  pipelineId?: string | null,
+  preferredSettings?: QueueSettings,
+) {
+  if (!pipelineId) return;
+
+  const { data: activeQueues, error: queuesError } = await supabase
+    .from('round_robins')
+    .select('settings')
+    .eq('target_pipeline_id', pipelineId)
+    .eq('is_active', true);
+
+  if (queuesError) throw queuesError;
+
+  const enabledQueues = (activeQueues || []).filter(queue =>
+    isRedistributionEnabled(queue.settings as Record<string, any> | null)
+  );
+
+  if (enabledQueues.length === 0) {
+    const { error } = await supabase
+      .from('pipelines')
+      .update({ pool_enabled: false })
+      .eq('id', pipelineId);
+
+    if (error) throw error;
+    return;
+  }
+
+  const settings = isRedistributionEnabled(preferredSettings)
+    ? preferredSettings
+    : enabledQueues[0].settings as QueueSettings;
+
+  const { error } = await supabase
+    .from('pipelines')
+    .update({
+      pool_enabled: true,
+      pool_timeout_minutes: settings.redistribution_timeout_minutes ?? 10,
+      pool_warning_minutes: settings.redistribution_warning_minutes ?? 2,
+      pool_max_redistributions: settings.redistribution_max_attempts ?? 3,
+    } as any)
+    .eq('id', pipelineId);
+
+  if (error) throw error;
+}
+
 export function useCreateQueueAdvanced() {
   const queryClient = useQueryClient();
   
@@ -154,26 +202,6 @@ export function useCreateQueueAdvanced() {
       
       if (rrError) throw rrError;
       
-      // Sync redistribution settings to pipeline
-      if (input.target_pipeline_id) {
-        if (input.settings.enable_redistribution) {
-          await supabase
-            .from('pipelines')
-            .update({
-              pool_enabled: true,
-              pool_timeout_minutes: input.settings.redistribution_timeout_minutes ?? 10,
-              pool_warning_minutes: input.settings.redistribution_warning_minutes ?? 2,
-              pool_max_redistributions: input.settings.redistribution_max_attempts ?? 3,
-              pool_enabled_at: new Date().toISOString(),
-            })
-            .eq('id', input.target_pipeline_id);
-        } else {
-          await supabase
-            .from('pipelines')
-            .update({ pool_enabled: false })
-            .eq('id', input.target_pipeline_id);
-        }
-      }
       const validConditions = input.conditions.filter(c => c.values.length > 0);
       
       if (validConditions.length > 0) {
@@ -274,6 +302,11 @@ export function useCreateQueueAdvanced() {
           if (membersError) throw membersError;
         }
       }
+
+      await syncPipelineRedistributionSettings(
+        input.target_pipeline_id,
+        input.is_active ? input.settings : undefined,
+      );
       
       return roundRobin;
     },
@@ -295,6 +328,14 @@ export function useUpdateQueueAdvanced() {
     mutationFn: async ({ id, ...input }: CreateQueueInput & { id: string }) => {
       // Validate no duplicate conditions across queues (exclude current queue)
       await validateUniqueConditions(input.conditions, id);
+
+      const { data: previousQueue, error: previousQueueError } = await supabase
+        .from('round_robins')
+        .select('target_pipeline_id')
+        .eq('id', id)
+        .single();
+
+      if (previousQueueError) throw previousQueueError;
       
       // Combine settings with schedule (schedule é opcional)
       const fullSettings = {
@@ -327,27 +368,6 @@ export function useUpdateQueueAdvanced() {
         .eq('id', id);
       
       if (rrError) throw rrError;
-      
-      // Sync redistribution settings to pipeline
-      if (input.target_pipeline_id) {
-        if (input.settings.enable_redistribution) {
-          await supabase
-            .from('pipelines')
-            .update({
-              pool_enabled: true,
-              pool_timeout_minutes: input.settings.redistribution_timeout_minutes ?? 10,
-              pool_warning_minutes: input.settings.redistribution_warning_minutes ?? 2,
-              pool_max_redistributions: input.settings.redistribution_max_attempts ?? 3,
-              pool_enabled_at: new Date().toISOString(),
-            })
-            .eq('id', input.target_pipeline_id);
-        } else {
-          await supabase
-            .from('pipelines')
-            .update({ pool_enabled: false })
-            .eq('id', input.target_pipeline_id);
-        }
-      }
       
       // Delete existing rules and recreate
       await supabase
@@ -488,6 +508,15 @@ export function useUpdateQueueAdvanced() {
         await supabase
           .from('round_robin_members')
           .insert(membersToInsert);
+      }
+
+      await syncPipelineRedistributionSettings(
+        input.target_pipeline_id,
+        input.is_active ? input.settings : undefined,
+      );
+
+      if (previousQueue?.target_pipeline_id && previousQueue.target_pipeline_id !== input.target_pipeline_id) {
+        await syncPipelineRedistributionSettings(previousQueue.target_pipeline_id);
       }
       
       return { id };

@@ -59,12 +59,27 @@ export const usePushNotifications = () => {
       // Save to Supabase
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single();
+
+        if (userError || !userData?.organization_id) {
+          console.error('Error loading user organization for push subscription:', userError);
+          return sub;
+        }
+
+        const token = JSON.stringify(sub.toJSON());
         const { error } = await (supabase as any)
-          .from('push_subscriptions')
+          .from('push_tokens')
           .upsert({
             user_id: user.id,
-            subscription: sub.toJSON(),
-          }, { onConflict: 'user_id' });
+            organization_id: userData.organization_id,
+            token,
+            platform: 'web',
+            is_active: true,
+          }, { onConflict: 'user_id,token' });
 
         if (error) console.error('Error saving subscription to Supabase:', error);
       }
@@ -83,10 +98,13 @@ export const usePushNotifications = () => {
         
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
+          const token = JSON.stringify(subscription.toJSON());
           await (supabase as any)
-            .from('push_subscriptions')
-            .delete()
-            .eq('user_id', user.id);
+            .from('push_tokens')
+            .update({ is_active: false, updated_at: new Date().toISOString() })
+            .eq('user_id', user.id)
+            .eq('platform', 'web')
+            .eq('token', token);
         }
       }
     } catch (err) {

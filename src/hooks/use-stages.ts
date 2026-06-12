@@ -189,12 +189,8 @@ export async function buildPipelineLeadQueryFilters(params: {
       const fromISO = filters.dateRange.from.toISOString();
       const toISO = filters.dateRange.to.toISOString();
       query = query
-        .or(
-          [
-            `and(created_at.gte.${fromISO},created_at.lte.${toISO})`,
-            `and(last_entry_at.gte.${fromISO},last_entry_at.lte.${toISO})`,
-          ].join(',')
-        );
+        .gte('created_at', fromISO)
+        .lte('created_at', toISO);
     }
     if (filteredLeadIds) {
       query = query.in('id', filteredLeadIds);
@@ -252,6 +248,7 @@ export function useStagesWithLeads(
     filterAdSet?: string;
     filterAd?: string;
     filterSource?: string;
+    filterUserIds?: string[];
   },
   options?: {
     enabled?: boolean;

@@ -128,6 +128,8 @@ export default function GamificationHistory() {
                 ) : (
                   history.map((item) => {
                     const actionType = item.action_type || item.event_type;
+                    const metadata = item.metadata as Record<string, any> | null;
+                    const sourceModule = metadata?.source_module || item.source_module || 'system';
                     return (
                       <TableRow key={item.id}>
                         <TableCell className="font-medium whitespace-nowrap">
@@ -142,9 +144,9 @@ export default function GamificationHistory() {
                           +{item.points_earned}
                         </TableCell>
                          <TableCell className="text-sm">
-                          {item.metadata?.count ? (
+                          {metadata?.count ? (
                             <span className="text-muted-foreground">
-                              {item.metadata.count}
+                              {metadata.count}
                               {item.metadata.unit_points && ` × ${item.metadata.unit_points} pts`}
                               {item.metadata.source && ` • Origem: ${item.metadata.source}`}
                             </span>
@@ -154,7 +156,7 @@ export default function GamificationHistory() {
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary" className="text-[10px] uppercase">
-                            {SOURCE_LABELS[item.source_module] || item.source_module || 'Sistema'}
+                            {SOURCE_LABELS[sourceModule] || sourceModule}
                           </Badge>
                         </TableCell>
                       </TableRow>

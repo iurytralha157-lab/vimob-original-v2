@@ -9,6 +9,7 @@ import { FollowUpBuilderEdit } from "@/components/automations/FollowUpBuilderEdi
 import { ExecutionHistory } from "@/components/automations/ExecutionHistory";
 import { LayoutGrid, Zap, History } from "lucide-react";
 import { useAutomations } from "@/hooks/use-automations";
+import { useHasPermission } from "@/hooks/use-organization-roles";
 
 type ViewMode = "list" | "build-followup" | "edit-existing";
 
@@ -20,15 +21,21 @@ export default function Automations() {
   const [historyAutomationId, setHistoryAutomationId] = useState<string | undefined>(undefined);
   const hasInitialized = useRef(false);
   const { data: automations } = useAutomations();
+  const { data: canEditAutomations = false } = useHasPermission("automations_edit");
 
   // Muda para aba de automações apenas na primeira carga,
   // evitando redirecionar o usuário se ele navegar para outra aba depois
   useEffect(() => {
+    if (!canEditAutomations && activeTab === "templates") {
+      setActiveTab("automations");
+      return;
+    }
+
     if (!hasInitialized.current && automations && automations.length > 0) {
       setActiveTab("automations");
       hasInitialized.current = true;
     }
-  }, [automations]);
+  }, [activeTab, automations, canEditAutomations]);
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);
@@ -36,11 +43,13 @@ export default function Automations() {
   };
 
   const handleEditAutomation = (automationId: string) => {
+    if (!canEditAutomations) return;
     setEditingAutomationId(automationId);
     setViewMode("edit-existing");
   };
 
   const handleSelectTemplate = (template: FollowUpTemplate | null) => {
+    if (!canEditAutomations) return;
     setSelectedTemplate(template);
     setViewMode("build-followup");
   };
@@ -84,7 +93,7 @@ export default function Automations() {
   }
 
   const tabs: AnimatedTabItem[] = [
-    { value: "templates", label: "Modelos", icon: LayoutGrid },
+    ...(canEditAutomations ? [{ value: "templates", label: "Modelos", icon: LayoutGrid }] : []),
     {
       value: "automations",
       label: "Minhas Automações",
@@ -101,11 +110,11 @@ export default function Automations() {
           <AnimatedTabNav tabs={tabs} activeTab={activeTab} onTabChange={handleTabChange} />
 
           <TabsContent value="templates" className="mt-6">
-            <FollowUpTemplates onSelectTemplate={handleSelectTemplate} />
+            <FollowUpTemplates onSelectTemplate={handleSelectTemplate} canCreate={canEditAutomations} />
           </TabsContent>
 
           <TabsContent value="automations" className="mt-6">
-            <AutomationList onEdit={handleEditAutomation} onViewHistory={handleViewHistory} />
+            <AutomationList onEdit={handleEditAutomation} onViewHistory={handleViewHistory} canManage={canEditAutomations} />
           </TabsContent>
 
           <TabsContent value="history" className="mt-6">

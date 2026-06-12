@@ -568,7 +568,9 @@ export default function Contacts() {
           ) : (
             <div className="overflow-x-auto">
               {isLoading ? (
-                <TableSkeleton />
+                <Table>
+                  <TableSkeleton />
+                </Table>
               ) : contacts.length === 0 ? (
                 <EmptyState
                   hasActiveFilters={!!hasActiveFilters}

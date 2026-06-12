@@ -191,6 +191,9 @@ CREATE TABLE public.teams (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   name text NOT NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  logo_url text,
+  created_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
   created_at timestamptz DEFAULT now()
 );
 
@@ -200,7 +203,8 @@ CREATE TABLE public.team_members (
   team_id uuid NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   is_leader boolean DEFAULT false,
-  created_at timestamptz DEFAULT now()
+  created_at timestamptz DEFAULT now(),
+  UNIQUE (team_id, user_id)
 );
 
 -- 4.8 Pipelines
@@ -217,7 +221,8 @@ CREATE TABLE public.team_pipelines (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   team_id uuid NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
   pipeline_id uuid NOT NULL REFERENCES public.pipelines(id) ON DELETE CASCADE,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (team_id, pipeline_id)
 );
 
 -- 4.10 Estágios do Pipeline
@@ -401,6 +406,7 @@ CREATE TABLE public.round_robins (
   strategy round_robin_strategy NOT NULL DEFAULT 'simple',
   is_active boolean DEFAULT true,
   last_assigned_index integer DEFAULT 0,
+  created_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -568,6 +574,8 @@ CREATE INDEX idx_lead_tasks_due_date ON public.lead_tasks(due_date);
 CREATE INDEX idx_stages_pipeline ON public.stages(pipeline_id);
 CREATE INDEX idx_team_members_team ON public.team_members(team_id);
 CREATE INDEX idx_team_members_user ON public.team_members(user_id);
+CREATE INDEX idx_teams_org_active ON public.teams(organization_id, is_active);
+CREATE UNIQUE INDEX tags_org_normalized_name_key ON public.tags(organization_id, lower(btrim(name)));
 CREATE INDEX idx_properties_organization ON public.properties(organization_id);
 CREATE INDEX idx_properties_code ON public.properties(code);
 CREATE INDEX idx_notifications_user ON public.notifications(user_id);

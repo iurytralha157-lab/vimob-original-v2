@@ -145,7 +145,8 @@ const allNavItems: NavItem[] = [{
   icon: Zap,
   labelKey: 'automations',
   path: '/automations',
-  module: 'automations'
+  module: 'automations',
+  permission: 'automations_view'
 }, {
   icon: HardHat,
   labelKey: 'obras',

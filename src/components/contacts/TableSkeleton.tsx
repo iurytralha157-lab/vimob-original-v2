@@ -10,6 +10,10 @@ export function TableSkeleton({ rows = 10 }: TableSkeletonProps) {
     <TableBody>
       {Array.from({ length: rows }).map((_, i) => (
         <TableRow key={i} className="animate-pulse">
+          {/* Seleção */}
+          <TableCell>
+            <Skeleton className="h-4 w-4 rounded" />
+          </TableCell>
           {/* Contato */}
           <TableCell>
             <div className="space-y-2">

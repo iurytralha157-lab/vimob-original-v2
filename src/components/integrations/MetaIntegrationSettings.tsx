@@ -207,7 +207,7 @@ export function MetaIntegrationSettings({
     const grouped = new Map<string, AccountGroup>();
 
     for (const integration of integrations) {
-      const key = integration.facebook_user_id || integration.facebook_user_name || integration.access_token || integration.page_id || integration.id;
+      const key = integration.facebook_user_id || integration.facebook_user_name || integration.page_id || integration.id;
       const current = grouped.get(key) || {
         key,
         name: integration.facebook_user_name || integration.page_name || "Conta Facebook",
@@ -269,12 +269,12 @@ export function MetaIntegrationSettings({
   };
 
   const loadFormsForIntegration = async (integration: MetaIntegration) => {
-    if (!integration.page_id || !integration.access_token) {
-      toast.error("Página sem token válido para buscar formulários.");
+    if (!integration.page_id) {
+      toast.error("Página sem identificador válido para buscar formulários.");
       return;
     }
     setSelectedIntegration(integration);
-    const result = await fetchForms.mutateAsync({ pageId: integration.page_id, accessToken: integration.access_token });
+    const result = await fetchForms.mutateAsync({ pageId: integration.page_id });
     setForms(mergeFormsWithConfigured(result.forms || [], getConfiguredFormsForIntegration(integration.id)));
   };
 
@@ -398,7 +398,7 @@ export function MetaIntegrationSettings({
                   return [
                     config.form_name,
                     config.form_id,
-                    integration?.facebook_account_name,
+                    integration?.facebook_user_name,
                     integration?.page_name,
                     config.created_by_name,
                   ]

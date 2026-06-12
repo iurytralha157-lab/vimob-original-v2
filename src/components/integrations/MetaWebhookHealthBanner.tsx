@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, AlertCircle } from "lucide-react";
+import { AlertCircle, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -28,21 +28,24 @@ export function MetaWebhookHealthBanner() {
         .in("status", ["failed", "skipped"])
         .order("received_at", { ascending: false })
         .limit(200);
+
       if (error) {
-        // Tabela ainda pode não existir (migration da Fase 1 não aplicada).
         return { counts: {} as Record<string, number>, lastError: null as string | null, missing: true };
       }
+
       const counts: Record<string, number> = {};
       let lastError: string | null = null;
       for (const row of data || []) {
         counts[row.status] = (counts[row.status] || 0) + 1;
         if (!lastError && row.error_message) lastError = row.error_message;
       }
+
       return { counts, lastError, missing: false };
     },
   });
 
   if (!data || data.missing) return null;
+
   const failed = data.counts.failed || 0;
   const skipped = data.counts.skipped || 0;
   if (failed === 0 && skipped === 0) return null;
@@ -57,15 +60,13 @@ export function MetaWebhookHealthBanner() {
   return (
     <Alert variant={variant as any}>
       <Icon className="h-4 w-4" />
-      <AlertTitle>Eventos Meta nos últimos 7 dias</AlertTitle>
+      <AlertTitle>Eventos Meta nos ultimos 7 dias</AlertTitle>
       <AlertDescription className="space-y-1">
         <p>
           {parts.join(" e ")} no webhook do Meta.
-          {skipped > 0 && " Leads ignorados normalmente significam formulário sem configuração ativa."}
+          {skipped > 0 && " Leads ignorados normalmente significam formulario sem configuracao ativa."}
         </p>
-        {data.lastError && (
-          <p className="text-xs opacity-80">Último motivo: {data.lastError}</p>
-        )}
+        {data.lastError && <p className="text-xs opacity-80">Ultimo motivo: {data.lastError}</p>}
       </AlertDescription>
     </Alert>
   );

@@ -6437,6 +6437,7 @@ export type Database = {
         Row: {
           ai_agent_id: string | null
           created_at: string
+          created_by: string | null
           id: string
           is_active: boolean | null
           last_assigned_index: number | null
@@ -6452,6 +6453,7 @@ export type Database = {
         Insert: {
           ai_agent_id?: string | null
           created_at?: string
+          created_by?: string | null
           id?: string
           is_active?: boolean | null
           last_assigned_index?: number | null
@@ -6467,6 +6469,7 @@ export type Database = {
         Update: {
           ai_agent_id?: string | null
           created_at?: string
+          created_by?: string | null
           id?: string
           is_active?: boolean | null
           last_assigned_index?: number | null
@@ -6485,6 +6488,13 @@ export type Database = {
             columns: ["ai_agent_id"]
             isOneToOne: false
             referencedRelation: "ai_agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "round_robins_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
           {
@@ -7267,23 +7277,39 @@ export type Database = {
       teams: {
         Row: {
           created_at: string | null
+          created_by: string | null
           id: string
+          is_active: boolean
+          logo_url: string | null
           name: string
           organization_id: string
         }
         Insert: {
           created_at?: string | null
+          created_by?: string | null
           id?: string
+          is_active?: boolean
+          logo_url?: string | null
           name: string
           organization_id: string
         }
         Update: {
           created_at?: string | null
+          created_by?: string | null
           id?: string
+          is_active?: boolean
+          logo_url?: string | null
           name?: string
           organization_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "teams_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "teams_organization_id_fkey"
             columns: ["organization_id"]
@@ -8958,7 +8984,10 @@ export type Database = {
       }
       list_contacts_paginated: {
         Args: {
+          p_ad_id?: string
+          p_adset_id?: string
           p_assignee_id?: string
+          p_campaign_id?: string
           p_created_from?: string
           p_created_to?: string
           p_deal_status?: string
@@ -8971,6 +9000,7 @@ export type Database = {
           p_source?: string
           p_stage_id?: string
           p_tag_id?: string
+          p_team_id?: string
           p_unassigned?: boolean
         }
         Returns: {
@@ -8984,10 +9014,13 @@ export type Database = {
           last_interaction_at: string
           last_interaction_channel: string
           last_interaction_preview: string
+          last_entry_at: string
           lost_reason: string
           name: string
           phone: string
           pipeline_id: string
+          pipeline_name: string
+          reentry_count: number
           sla_status: string
           source: string
           stage_color: string
@@ -8995,6 +9028,7 @@ export type Database = {
           stage_name: string
           tags: Json
           total_count: number
+          whatsapp_avatar_url: string
         }[]
       }
       mark_overdue_financial_entries: { Args: never; Returns: undefined }

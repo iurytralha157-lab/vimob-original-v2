@@ -173,6 +173,10 @@ function isEventParticipant(event: ScheduleEvent, currentUserId?: string) {
 }
 
 function applyScheduleVisibility(events: ScheduleEvent[], currentUserId?: string, currentUserRole?: string | null) {
+  if (currentUserRole === 'admin' || currentUserRole === 'super_admin') {
+    return events;
+  }
+
   return events
     .filter((event) => event.visibility !== 'private' || isEventParticipant(event, currentUserId))
     .map((event) => {

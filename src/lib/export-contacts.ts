@@ -5,6 +5,7 @@ import { ptBR } from 'date-fns/locale';
 
 interface ExportFilters {
   search?: string;
+  teamId?: string;
   pipelineId?: string;
   stageId?: string;
   assigneeId?: string;
@@ -47,6 +48,7 @@ export async function exportContactsFiltered({
   // Fetch all contacts matching filters via RPC (up to 10000)
   const { data, error } = await (supabase as any).rpc('list_contacts_paginated', {
     p_search: filters.search || null,
+    p_team_id: filters.teamId || null,
     p_pipeline_id: filters.pipelineId || null,
     p_stage_id: filters.stageId || null,
     p_assignee_id: filters.unassigned ? null : (filters.assigneeId || null),
@@ -60,6 +62,9 @@ export async function exportContactsFiltered({
     p_sort_dir: 'desc',
     p_page: 1,
     p_limit: 10000, // Export all matching records
+    p_campaign_id: filters.campaignId || null,
+    p_adset_id: filters.adSetId || null,
+    p_ad_id: filters.adId || null,
   });
 
   if (error) {

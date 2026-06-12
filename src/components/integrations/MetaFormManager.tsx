@@ -49,7 +49,6 @@ export function MetaFormManager({ integration }: MetaFormManagerProps) {
     try {
       const result = await fetchForms.mutateAsync({
         pageId: integration.page_id,
-        accessToken: "",
       });
       setForms(result.forms || []);
     } catch (error) {

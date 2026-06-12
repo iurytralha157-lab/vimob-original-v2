@@ -134,8 +134,8 @@ export async function notifyLeadCreated({
       });
     } catch (error) {
       console.error('Erro ao disparar notificação via serviço:', error);
-      // Fallback a inserção direta se o serviço falhar (evitar perda da notificação crítica)
-      await supabase.from('notifications').insert(notification);
+      // Escrita direta desativada para manter o isolamento por RLS.
+      console.warn('Fallback direto em notifications desativado; use notification-dispatcher para preservar RLS.');
     }
   }
 
@@ -289,7 +289,7 @@ export async function notifyLeadMoved({
       });
     } catch (error) {
       console.error('Erro ao disparar notificação de movimentação:', error);
-      await supabase.from('notifications').insert(notification);
+      console.warn('Fallback direto em notifications desativado; use notification-dispatcher para preservar RLS.');
     }
   }
 }

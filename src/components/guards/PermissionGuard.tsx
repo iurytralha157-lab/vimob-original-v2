@@ -1,11 +1,33 @@
-import { Navigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useHasPermission } from '@/hooks/use-organization-roles';
 import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 
 interface PermissionGuardProps {
   permission: string;
   children: React.ReactNode;
   fallbackPath?: string;
+}
+
+function AccessDenied({ fallbackPath }: { fallbackPath: string }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardContent className="space-y-4 p-6 text-center">
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Acesso negado</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Seu cargo não possui permissão para acessar esta área.
+            </p>
+          </div>
+          <Button asChild>
+            <Link to={fallbackPath}>Voltar para uma área permitida</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 /**
@@ -42,7 +64,7 @@ export function PermissionGuard({
 
   // Check permission for regular users
   if (!hasPermission) {
-    return <Navigate to={fallbackPath} replace />;
+    return <AccessDenied fallbackPath={fallbackPath} />;
   }
 
   return <>{children}</>;

@@ -20,5 +20,11 @@ export const ACTION_LABELS: Record<string, string> = {
 export const SOURCE_LABELS: Record<string, string> = {
   system: 'Sistema',
   manual: 'Manual',
+  manual_entry: 'LanÃ§amento Manual',
+  prospecting_report: 'RelatÃ³rio de ProspecÃ§Ã£o',
+  activity: 'Atividade',
+  crm: 'CRM',
+  telephony: 'Telefonia',
+  schedule: 'Agenda',
   automation: 'Automação',
 };
