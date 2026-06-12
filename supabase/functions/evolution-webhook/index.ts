@@ -892,12 +892,20 @@ async function handleMessagesUpsert(
       // Check if message already exists with sender_name 'Automação' to avoid stopping on our own messages
       const { data: existingAutomationMsg } = await supabase
         .from("whatsapp_messages")
-        .select("sender_name")
+        .select("sender_name, client_message_id")
         .eq("session_id", session.id)
         .eq("message_id", messageId)
         .maybeSingle();
       
-      const isAutomationMessage = existingAutomationMsg?.sender_name === "Automação";
+      const existingSenderName = normalizeText(existingAutomationMsg?.sender_name || "");
+      const existingClientMessageId = String(existingAutomationMsg?.client_message_id || "");
+      const isAutomationMessage =
+        existingSenderName === "automacao"
+        || existingSenderName.includes("jhenny")
+        || existingSenderName.includes("jenny")
+        || existingSenderName === "ia"
+        || existingSenderName === "ai"
+        || existingClientMessageId.startsWith("jhenny-");
 
       // Insert message (upsert to handle duplicates)
       const { data: insertedMessage, error: msgError } = await supabase
@@ -2459,4 +2467,12 @@ async function handleStopFollowUpOnReply(
   } catch (error) {
     console.error("Error in handleStopFollowUpOnReply:", error);
   }
+}
+
+function normalizeText(value: string) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 }
