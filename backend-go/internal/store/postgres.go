@@ -37,6 +37,8 @@ type ConversationState struct {
 	AutomationEnabled bool      `json:"automation_enabled"`
 	LastResponseID    string    `json:"last_response_id,omitempty"`
 	AgentStatus       string    `json:"agent_status"`
+	ContextResetAt    time.Time `json:"context_reset_at,omitempty"`
+	HasContextReset   bool      `json:"has_context_reset"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
@@ -157,16 +159,17 @@ func (s *Store) UpsertConversationState(ctx context.Context, state ConversationS
 	_, err := s.pool.Exec(ctx, `
 		insert into chatbot_conversation_state (
 			organization_id, conversation_id, channel, automation_enabled,
-			last_response_id, agent_status, updated_at
+			last_response_id, agent_status, context_reset_at, updated_at
 		)
-		values ($1,$2,$3,$4,$5,$6,now())
+		values ($1,$2,$3,$4,$5,$6,$7,now())
 		on conflict (organization_id, conversation_id) do update set
 			channel = excluded.channel,
 			automation_enabled = excluded.automation_enabled,
 			last_response_id = coalesce(excluded.last_response_id, chatbot_conversation_state.last_response_id),
 			agent_status = excluded.agent_status,
+			context_reset_at = coalesce(excluded.context_reset_at, chatbot_conversation_state.context_reset_at),
 			updated_at = now()
-	`, state.OrganizationID, state.ConversationID, state.Channel, state.AutomationEnabled, nullIfEmpty(state.LastResponseID), state.AgentStatus)
+	`, state.OrganizationID, state.ConversationID, state.Channel, state.AutomationEnabled, nullIfEmpty(state.LastResponseID), state.AgentStatus, nullIfZeroTime(state.ContextResetAt))
 	return err
 }
 
@@ -174,7 +177,11 @@ func (s *Store) GetConversationState(ctx context.Context, conversationID string)
 	var state ConversationState
 	err := s.pool.QueryRow(ctx, `
 		select organization_id, conversation_id, channel, automation_enabled,
-		       coalesce(last_response_id, ''), agent_status, updated_at
+		       coalesce(last_response_id, ''),
+		       agent_status,
+		       coalesce(context_reset_at, 'epoch'::timestamptz),
+		       context_reset_at is not null,
+		       updated_at
 		from chatbot_conversation_state
 		where conversation_id = $1
 	`, conversationID).Scan(
@@ -184,6 +191,8 @@ func (s *Store) GetConversationState(ctx context.Context, conversationID string)
 		&state.AutomationEnabled,
 		&state.LastResponseID,
 		&state.AgentStatus,
+		&state.ContextResetAt,
+		&state.HasContextReset,
 		&state.UpdatedAt,
 	)
 	if err != nil {
@@ -505,6 +514,10 @@ func (s *Store) BuildAutoReplyContext(ctx context.Context, organizationID string
 	}
 
 	var sections []string
+	historySince := time.Unix(0, 0)
+	if state, ok, err := s.GetConversationState(ctx, conversationID); err == nil && ok && state.HasContextReset {
+		historySince = state.ContextResetAt
+	}
 
 	if leadText, err := s.leadContext(ctx, organizationID, conversationID); err == nil && leadText != "" {
 		sections = append(sections, leadText)
@@ -512,7 +525,7 @@ func (s *Store) BuildAutoReplyContext(ctx context.Context, organizationID string
 	if propertyText, err := s.propertyContext(ctx, organizationID, message); err == nil && propertyText != "" {
 		sections = append(sections, propertyText)
 	}
-	if historyText, err := s.recentConversationContext(ctx, conversationID, maxMessages); err == nil && historyText != "" {
+	if historyText, err := s.recentConversationContext(ctx, conversationID, maxMessages, historySince); err == nil && historyText != "" {
 		sections = append(sections, historyText)
 	}
 
@@ -644,16 +657,17 @@ func (s *Store) leadContext(ctx context.Context, organizationID string, conversa
 	return strings.TrimSpace(b.String()), nil
 }
 
-func (s *Store) recentConversationContext(ctx context.Context, conversationID string, limit int) (string, error) {
+func (s *Store) recentConversationContext(ctx context.Context, conversationID string, limit int, since time.Time) (string, error) {
 	rows, err := s.pool.Query(ctx, `
 		select coalesce(from_me, false), coalesce(content, '')
 		from whatsapp_messages
 		where conversation_id = $1
 		  and message_type = 'text'
 		  and coalesce(content, '') <> ''
+		  and sent_at >= $3
 		order by sent_at desc
 		limit $2
-	`, conversationID, limit)
+	`, conversationID, limit, since)
 	if err != nil {
 		return "", err
 	}
@@ -1000,6 +1014,13 @@ func nullIfEmpty(value string) *string {
 	return &value
 }
 
+func nullIfZeroTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	return &value
+}
+
 const schemaSQL = `
 create table if not exists chatbot_conversation_state (
 	id bigserial primary key,
@@ -1009,10 +1030,14 @@ create table if not exists chatbot_conversation_state (
 	automation_enabled boolean not null default true,
 	last_response_id text,
 	agent_status text not null default 'pending',
+	context_reset_at timestamptz,
 	created_at timestamptz not null default now(),
 	updated_at timestamptz not null default now(),
 	unique (organization_id, conversation_id)
 );
+
+alter table chatbot_conversation_state
+	add column if not exists context_reset_at timestamptz;
 
 create table if not exists chatbot_inbound_messages (
 	id bigserial primary key,

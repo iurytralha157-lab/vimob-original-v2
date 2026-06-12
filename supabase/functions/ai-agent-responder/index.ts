@@ -99,7 +99,9 @@ Deno.serve(async (req) => {
     });
 
     const historyLimit = Math.min(DEFAULT_HISTORY_LIMIT, Math.max(4, agent.max_messages_before_handoff || DEFAULT_HISTORY_LIMIT));
-    const history = await getCompactHistory(supabase, conversation_id, message, historyLimit);
+    const conversationResetAt = await getConversationResetAt(supabase, conversation_id);
+    const historySince = conversationResetAt || agentConv?.context_reset_at || agentConv?.started_at || null;
+    const history = await getCompactHistory(supabase, conversation_id, message, historyLimit, historySince);
     const memorySummary = buildMemorySummary({
       previous: agentConv?.memory_summary || "",
       lead,
@@ -199,6 +201,15 @@ async function getAgentConversation(supabase: any, conversationId: string) {
     .eq("conversation_id", conversationId)
     .maybeSingle();
   return data || null;
+}
+
+async function getConversationResetAt(supabase: any, conversationId: string) {
+  const { data } = await supabase
+    .from("chatbot_conversation_state")
+    .select("context_reset_at")
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
+  return data?.context_reset_at || null;
 }
 
 async function resolveLead(
@@ -618,14 +629,20 @@ async function moveLeadToVisitStage(supabase: any, lead: any, organizationId: st
     .eq("organization_id", organizationId);
 }
 
-async function getCompactHistory(supabase: any, conversationId: string, currentMessage: string, limit: number) {
-  const { data } = await supabase
+async function getCompactHistory(supabase: any, conversationId: string, currentMessage: string, limit: number, since?: string | null) {
+  let query = supabase
     .from("whatsapp_messages")
     .select("content, from_me, message_type, sent_at, created_at")
     .eq("conversation_id", conversationId)
     .eq("message_type", "text")
     .order("sent_at", { ascending: false })
     .limit(limit);
+
+  if (since) {
+    query = query.gte("sent_at", since);
+  }
+
+  const { data } = await query;
 
   const history = (data || [])
     .reverse()
