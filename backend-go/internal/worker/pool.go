@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -186,32 +187,41 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		return
 	}
 
-	sentMessageID, err := p.sendWhatsAppText(ctx, conv.SessionID, number, reply.Reply)
-	if err != nil {
-		p.logger.Error("auto reply send failed", "error", err, "conversation_id", job.ConversationID)
-		_ = p.store.UpsertConversationState(ctx, store.ConversationState{
-			OrganizationID:    job.OrganizationID,
-			ConversationID:    job.ConversationID,
-			Channel:           "whatsapp",
-			AutomationEnabled: true,
-			AgentStatus:       "auto_reply_send_failed",
-		})
-		return
+	chunks := splitWhatsAppReply(reply.Reply)
+	fullReply := strings.Join(chunks, "\n\n")
+	lastSentAt := time.Now()
+	for i, chunk := range chunks {
+		if i > 0 {
+			time.Sleep(700 * time.Millisecond)
+		}
+		sentMessageID, err := p.sendWhatsAppText(ctx, conv.SessionID, number, chunk)
+		if err != nil {
+			p.logger.Error("auto reply send failed", "error", err, "conversation_id", job.ConversationID)
+			_ = p.store.UpsertConversationState(ctx, store.ConversationState{
+				OrganizationID:    job.OrganizationID,
+				ConversationID:    job.ConversationID,
+				Channel:           "whatsapp",
+				AutomationEnabled: true,
+				AgentStatus:       "auto_reply_send_failed",
+			})
+			return
+		}
+		lastSentAt = time.Now()
+
+		if err := p.store.RecordAIWhatsAppMessage(ctx, job.ConversationID, conv.SessionID, sentMessageID, chunk); err != nil {
+			p.logger.Error("auto reply history write failed", "error", err, "conversation_id", job.ConversationID)
+			_ = p.store.UpsertConversationState(ctx, store.ConversationState{
+				OrganizationID:    job.OrganizationID,
+				ConversationID:    job.ConversationID,
+				Channel:           "whatsapp",
+				AutomationEnabled: true,
+				AgentStatus:       "auto_reply_history_failed",
+			})
+			return
+		}
 	}
 
-	if err := p.store.RecordAIWhatsAppMessage(ctx, job.ConversationID, conv.SessionID, sentMessageID, reply.Reply); err != nil {
-		p.logger.Error("auto reply history write failed", "error", err, "conversation_id", job.ConversationID)
-		_ = p.store.UpsertConversationState(ctx, store.ConversationState{
-			OrganizationID:    job.OrganizationID,
-			ConversationID:    job.ConversationID,
-			Channel:           "whatsapp",
-			AutomationEnabled: true,
-			AgentStatus:       "auto_reply_history_failed",
-		})
-		return
-	}
-
-	if shouldNotifyHumanHandoff(body, reply.Reply) {
+	if shouldNotifyHumanHandoff(body, fullReply) {
 		p.notifyHumanHandoff(ctx, job.OrganizationID, job.ConversationID, "lead_ready_for_human")
 		_ = p.store.UpsertConversationState(ctx, store.ConversationState{
 			OrganizationID:    job.OrganizationID,
@@ -224,7 +234,7 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		return
 	}
 
-	p.scheduleIdleFollowUp(ctx, job.OrganizationID, job.ConversationID, conv.SessionID, number, time.Now())
+	p.scheduleIdleFollowUp(ctx, job.OrganizationID, job.ConversationID, conv.SessionID, number, lastSentAt)
 
 	_ = p.store.UpsertConversationState(ctx, store.ConversationState{
 		OrganizationID:    job.OrganizationID,
@@ -302,18 +312,26 @@ func (p *Pool) notifyHumanHandoff(ctx context.Context, organizationID string, co
 		return
 	}
 
-	if err := p.store.CreateHandoffNotification(ctx, organizationID, conversationID, target, reason); err != nil {
+	summary, err := p.store.BuildHandoffSummary(ctx, conversationID, 8)
+	if err != nil {
+		p.logger.Warn("handoff summary lookup failed", "error", err, "conversation_id", conversationID)
+	}
+
+	if err := p.store.CreateHandoffNotification(ctx, organizationID, conversationID, target, reason, summary); err != nil {
 		p.logger.Error("handoff system notification failed", "error", err, "conversation_id", conversationID)
 	}
 	if strings.TrimSpace(p.supabaseURL) == "" || strings.TrimSpace(p.supabaseServiceRoleKey) == "" {
 		return
 	}
 
-	message := strings.TrimSpace(target.Name)
-	if message == "" {
-		message = "Um lead"
+	leadName := strings.TrimSpace(target.Name)
+	if leadName == "" {
+		leadName = "Um lead"
 	}
-	message = "Jhenny qualificou um lead: " + message + ". Ele pediu atendimento humano. Abra a conversa para continuar."
+	message := "Jhenny qualificou um lead: " + leadName + ". Ele pediu atendimento humano. Abra a conversa para continuar."
+	if strings.TrimSpace(summary) != "" {
+		message += "\n\nContexto:\n" + truncateText(summary, 700)
+	}
 
 	payload, err := json.Marshal(map[string]any{
 		"organization_id": organizationID,
@@ -340,6 +358,13 @@ func (p *Pool) notifyHumanHandoff(ctx context.Context, organizationID string, co
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		p.logger.Warn("handoff whatsapp notification returned non-2xx", "status", resp.StatusCode, "conversation_id", conversationID)
+		return
+	}
+	var decoded map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err == nil {
+		if success, ok := decoded["success"].(bool); ok && !success {
+			p.logger.Warn("handoff whatsapp notification returned failure", "response", decoded, "conversation_id", conversationID)
+		}
 	}
 }
 
@@ -455,6 +480,70 @@ func isMediaPlaceholder(value string) bool {
 	}
 }
 
+var markdownLinkPattern = regexp.MustCompile(`\[[^\]]+\]\((https?://[^)\s]+)\)`)
+
+func splitWhatsAppReply(reply string) []string {
+	reply = strings.TrimSpace(markdownLinkPattern.ReplaceAllString(reply, "$1"))
+	if reply == "" {
+		return []string{"Certo, vou seguir por aqui."}
+	}
+
+	reply = strings.ReplaceAll(reply, "\r\n", "\n")
+	reply = strings.ReplaceAll(reply, "\r", "\n")
+
+	var chunks []string
+	var current []string
+	for _, line := range strings.Split(reply, "\n") {
+		if strings.TrimSpace(line) == "" {
+			if len(current) > 0 {
+				chunks = append(chunks, strings.TrimSpace(strings.Join(current, "\n")))
+				current = nil
+			}
+			continue
+		}
+		current = append(current, line)
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, strings.TrimSpace(strings.Join(current, "\n")))
+	}
+	if len(chunks) == 0 {
+		chunks = []string{reply}
+	}
+
+	chunks = splitLongReplyChunks(chunks, 900)
+	if len(chunks) > 5 {
+		merged := append([]string{}, chunks[:4]...)
+		merged = append(merged, strings.Join(chunks[4:], "\n\n"))
+		chunks = merged
+	}
+	return chunks
+}
+
+func splitLongReplyChunks(chunks []string, limit int) []string {
+	var result []string
+	for _, chunk := range chunks {
+		chunk = strings.TrimSpace(chunk)
+		if chunk == "" {
+			continue
+		}
+		for len(chunk) > limit {
+			cut := strings.LastIndexAny(chunk[:limit], ".!?")
+			if cut < limit/2 {
+				cut = strings.LastIndex(chunk[:limit], " ")
+			}
+			if cut < limit/2 {
+				cut = limit
+			}
+			result = append(result, strings.TrimSpace(chunk[:cut+1]))
+			chunk = strings.TrimSpace(chunk[cut+1:])
+		}
+		if chunk != "" {
+			result = append(result, chunk)
+		}
+	}
+	return result
+}
+
 func shouldNotifyHumanHandoff(userMessage string, aiReply string) bool {
 	user := strings.ToLower(strings.TrimSpace(userMessage))
 	reply := strings.ToLower(strings.TrimSpace(aiReply))
@@ -467,6 +556,14 @@ func shouldNotifyHumanHandoff(userMessage string, aiReply string) bool {
 		"chamar um consultor",
 		"pode chamar",
 		"pode encaminhar",
+		"sim pode encaminhar",
+		"sim, pode encaminhar",
+		"sim pode chamar",
+		"sim, pode chamar",
+		"manda para o consultor",
+		"manda pro consultor",
+		"encaminha para o consultor",
+		"encaminha pro consultor",
 		"me liga",
 		"pode me ligar",
 		"vamos marcar",
@@ -485,7 +582,9 @@ func shouldNotifyHumanHandoff(userMessage string, aiReply string) bool {
 		"vou chamar um corretor",
 		"vou chamar um atendente",
 		"vou encaminhar",
+		"vou te encaminhar",
 		"vou passar para a equipe",
+		"vou passar seu contato",
 		"vou confirmar com a equipe",
 		"um consultor vai",
 		"um corretor vai",
@@ -504,4 +603,15 @@ func nullIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+func truncateText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return value[:limit]
+	}
+	return value[:limit-3] + "..."
 }

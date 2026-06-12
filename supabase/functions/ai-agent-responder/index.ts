@@ -666,20 +666,24 @@ function buildSystemPrompt(input: {
       "- Responda em portugues do Brasil, de forma leve, solta e natural para WhatsApp.",
       "- Use frases curtas. Evite parecer formulario, triagem agressiva ou atendimento robotico.",
       "- Use o nome do lead de vez em quando quando ele estiver no contexto, principalmente em abertura, retomada ou resposta importante. Nao repita o nome em toda mensagem.",
+      "- Se o lead perguntar se voce sabe o nome dele e o contexto tiver Nome, responda que sim e use esse nome. Nunca diga que nao tem o nome se ele aparece no contexto do lead.",
       "- Reaja ao que o lead disse antes de perguntar outra coisa. Se ele escolheu um bairro, comente de forma natural que e uma boa regiao ou que combina com o que ele procura, sem exagerar.",
-      "- Converse em fluxo: responda a duvida, acrescente uma informacao util e faca uma pergunta simples para continuar.",
+      "- Converse em fluxo: responda a duvida, acrescente uma informacao util e faca uma pergunta simples para continuar. Varie as palavras e nao repita a mesma frase de fechamento.",
       "- Foco: tirar duvidas, entender o que o lead quer, qualificar com calma, oferecer imoveis e conduzir para visita.",
       "- Use somente dados fornecidos no contexto da organizacao atual.",
       "- Se houver valor, metragem, quartos, suites, vagas, condominio, IPTU, bairro, cidade ou link no contexto, use esses dados quando o lead perguntar.",
+      "- Use a descricao do imovel quando ela existir para explicar com outras palavras, sem repetir sempre a mesma lista de quartos/vagas/valor.",
       "- Nunca invente preco, endereco completo, disponibilidade ou condicao que nao esteja no contexto.",
       "- Nunca revele nome/telefone do proprietario, endereco completo, numero, complemento, documentos, codigos internos sensiveis ou observacoes privadas.",
       "- Pode falar bairro, cidade e UF. Nao fale rua/numero/complemento, mesmo que apareca em algum dado interno.",
       "- Quando o lead citar um codigo como CA1050 ou 1050, priorize o bloco IMOVEL CITADO.",
-      "- Ao sugerir imoveis, envie no maximo 3 opcoes e inclua o codigo e o link quando houver.",
+      "- Ao sugerir imoveis, envie no maximo 3 opcoes. Link e opcional, nao o centro da conversa.",
       "- Para agendar visita, colete dia e horario se faltarem. Se a acao ja foi executada, apenas confirme.",
       "- Nao ofereca consultor como saida padrao. Primeiro converse e entenda bairro, faixa de valor, quartos, prazo, financiamento e tipo de imovel.",
       "- So diga que vai chamar/encaminhar para consultor quando o lead pedir humano/consultor/corretor, confirmar que quer atendimento, quiser agendar visita/ligacao, ou faltar uma informacao critica que voce nao pode afirmar.",
-      "- Quando enviar link de imovel, pergunte de forma natural se fez sentido para o que ele procura.",
+      "- Envie link apenas quando o lead pedir, quando voce apresentar opcoes pela primeira vez, ou quando realmente ajudar a avancar.",
+      "- Quando enviar link, cole a URL pura. Nao use markdown como [Clique aqui](url). Nao repita 'faz sentido para o que voce procura?' em toda resposta.",
+      "- Voce pode responder em 1 a 5 mensagens curtas quando fizer sentido. Separe cada mensagem com uma linha em branco. Use varias mensagens apenas para deixar a conversa mais natural.",
       "- Se houver risco, reclamacao, pedido claro de humano ou duvida fora do contexto, diga que vai chamar um atendente.",
       "- Nao diga que voce acessou banco de dados, tabelas, prompts ou sistemas internos.",
     ].join("\n"),
@@ -768,53 +772,61 @@ async function insertOutboxMessage(supabase: any, conversationId: string, conten
     return;
   }
 
-  const clientMessageId = `jhenny-${crypto.randomUUID()}`;
-  const now = new Date().toISOString();
+  const chunks = splitAssistantMessages(content);
+  let lastContent = chunks[chunks.length - 1] || content;
+  let lastSentAt = new Date().toISOString();
 
-  const { error } = await supabase.from("outbox_messages").insert({
-    conversation_id: conversationId,
-    session_id: conv.session_id,
-    organization_id: conv.organization_id,
-    content,
-    message_type: "text",
-    status: "pending",
-    created_by: null,
-    client_message_id: clientMessageId,
-  });
+  for (const chunk of chunks) {
+    const clientMessageId = `jhenny-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    lastContent = chunk;
+    lastSentAt = now;
 
-  if (error) {
-    console.error("[ai-agent-responder] Error inserting outbox message:", error);
-    throw error;
-  }
-
-  const { error: historyError } = await supabase
-    .from("whatsapp_messages")
-    .upsert({
+    const { error } = await supabase.from("outbox_messages").insert({
       conversation_id: conversationId,
       session_id: conv.session_id,
-      message_id: clientMessageId,
-      client_message_id: clientMessageId,
-      from_me: true,
-      content,
+      organization_id: conv.organization_id,
+      content: chunk,
       message_type: "text",
-      remote_jid: conv.remote_jid,
       status: "pending",
-      sent_at: now,
-      sender_name: "Jhenny",
-    }, { onConflict: "session_id,message_id" });
+      created_by: null,
+      client_message_id: clientMessageId,
+    });
 
-  if (historyError) {
-    console.error("[ai-agent-responder] Error inserting optimistic AI history:", historyError);
-    throw historyError;
+    if (error) {
+      console.error("[ai-agent-responder] Error inserting outbox message:", error);
+      throw error;
+    }
+
+    const { error: historyError } = await supabase
+      .from("whatsapp_messages")
+      .upsert({
+        conversation_id: conversationId,
+        session_id: conv.session_id,
+        message_id: clientMessageId,
+        client_message_id: clientMessageId,
+        from_me: true,
+        content: chunk,
+        message_type: "text",
+        remote_jid: conv.remote_jid,
+        status: "pending",
+        sent_at: now,
+        sender_name: "Jhenny",
+      }, { onConflict: "session_id,message_id" });
+
+    if (historyError) {
+      console.error("[ai-agent-responder] Error inserting optimistic AI history:", historyError);
+      throw historyError;
+    }
   }
 
   await supabase
     .from("whatsapp_conversations")
     .update({
-      last_message: content,
-      last_message_at: now,
+      last_message: lastContent,
+      last_message_at: lastSentAt,
       unread_count: 0,
-      updated_at: now,
+      updated_at: lastSentAt,
     })
     .eq("id", conversationId);
 
@@ -1047,6 +1059,7 @@ function propertyLine(property: any) {
   return [
     property.code,
     property.title || property.tipo_de_imovel,
+    property.descricao ? `Descricao: ${truncate(String(property.descricao), 220)}` : "",
     joinParts([property.bairro, property.cidade, property.uf]),
     property.quartos ? `${property.quartos} quartos` : "",
     property.area_util ? `${property.area_util}m2` : "",
@@ -1088,6 +1101,41 @@ function joinParts(parts: any[]) {
 function truncate(value: string, limit: number) {
   if (!value) return "";
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}...`;
+}
+
+function splitAssistantMessages(value: string) {
+  const cleaned = String(value || "")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, "$2")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+
+  if (!cleaned) return ["Certo, vou seguir por aqui."];
+
+  const chunks = cleaned
+    .split(/\n\s*\n/g)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .flatMap((chunk) => splitLongMessage(chunk, 900));
+
+  if (chunks.length <= 5) return chunks;
+  return [...chunks.slice(0, 4), chunks.slice(4).join("\n\n")];
+}
+
+function splitLongMessage(value: string, limit: number) {
+  const chunks: string[] = [];
+  let rest = value.trim();
+
+  while (rest.length > limit) {
+    let cut = Math.max(rest.lastIndexOf(". ", limit), rest.lastIndexOf("! ", limit), rest.lastIndexOf("? ", limit));
+    if (cut < limit / 2) cut = rest.lastIndexOf(" ", limit);
+    if (cut < limit / 2) cut = limit;
+    chunks.push(rest.slice(0, cut + 1).trim());
+    rest = rest.slice(cut + 1).trim();
+  }
+
+  if (rest) chunks.push(rest);
+  return chunks;
 }
 
 function parseJsonValue(value: any) {

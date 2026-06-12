@@ -65,6 +65,7 @@ type recentMessage struct {
 type propertySummary struct {
 	Code         string
 	Title        string
+	Description  string
 	PropertyType string
 	DealType     string
 	Neighborhood string
@@ -415,7 +416,7 @@ func (s *Store) ResolveHandoffTarget(ctx context.Context, conversationID string)
 	return target, target.UserID != "", nil
 }
 
-func (s *Store) CreateHandoffNotification(ctx context.Context, organizationID string, conversationID string, target HandoffTarget, reason string) error {
+func (s *Store) CreateHandoffNotification(ctx context.Context, organizationID string, conversationID string, target HandoffTarget, reason string, summary string) error {
 	if strings.TrimSpace(organizationID) == "" || strings.TrimSpace(target.UserID) == "" {
 		return nil
 	}
@@ -427,6 +428,9 @@ func (s *Store) CreateHandoffNotification(ctx context.Context, organizationID st
 	content += " foi qualificado pela Jhenny e pediu atendimento humano."
 	if reason != "" {
 		content += " Motivo: " + reason + "."
+	}
+	if strings.TrimSpace(summary) != "" {
+		content += "\n\nContexto:\n" + truncate(summary, 900)
 	}
 
 	_, err := s.pool.Exec(ctx, `
@@ -450,6 +454,49 @@ func (s *Store) CreateHandoffNotification(ctx context.Context, organizationID st
 		)
 	`, organizationID, target.UserID, target.LeadID, content)
 	return err
+}
+
+func (s *Store) BuildHandoffSummary(ctx context.Context, conversationID string, limit int) (string, error) {
+	if limit <= 0 || limit > 12 {
+		limit = 8
+	}
+	rows, err := s.pool.Query(ctx, `
+		select coalesce(from_me, false), coalesce(content, '')
+		from whatsapp_messages
+		where conversation_id = $1
+		  and message_type = 'text'
+		  and coalesce(content, '') <> ''
+		order by sent_at desc
+		limit $2
+	`, conversationID, limit)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var messages []recentMessage
+	for rows.Next() {
+		var msg recentMessage
+		if err := rows.Scan(&msg.FromMe, &msg.Content); err != nil {
+			return "", err
+		}
+		messages = append(messages, msg)
+	}
+	if len(messages) == 0 {
+		return "", rows.Err()
+	}
+
+	var b strings.Builder
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].FromMe {
+			b.WriteString("Jhenny: ")
+		} else {
+			b.WriteString("Lead: ")
+		}
+		b.WriteString(truncate(messages[i].Content, 180))
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String()), rows.Err()
 }
 
 func (s *Store) BuildAutoReplyContext(ctx context.Context, organizationID string, conversationID string, message string, maxMessages int) (string, error) {
@@ -736,6 +783,7 @@ func propertySummarySQL() string {
 		select
 			coalesce(code, ''),
 			coalesce(title, ''),
+			coalesce(descricao, ''),
 			coalesce(tipo_de_imovel, ''),
 			coalesce(tipo_de_negocio, ''),
 			coalesce(bairro, ''),
@@ -762,6 +810,7 @@ func scanPropertySummaries(rows pgx.Rows) ([]propertySummary, error) {
 		if err := rows.Scan(
 			&property.Code,
 			&property.Title,
+			&property.Description,
 			&property.PropertyType,
 			&property.DealType,
 			&property.Neighborhood,
@@ -795,6 +844,7 @@ func propertySection(title string, properties []propertySummary) string {
 		b.WriteString(joinNonEmpty(" | ",
 			property.Code,
 			firstNonEmpty(property.Title, property.PropertyType),
+			prefixIfPresent(truncate(property.Description, 220), "Descricao: "),
 			joinNonEmpty(", ", property.Neighborhood, property.City, property.State),
 			suffixIfPresent(property.Bedrooms, " quartos"),
 			suffixIfPresent(property.Suites, " suites"),
