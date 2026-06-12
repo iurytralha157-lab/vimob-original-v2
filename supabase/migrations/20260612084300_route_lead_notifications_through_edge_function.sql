@@ -54,6 +54,8 @@ begin
     raise notice 'Falha ao disparar lead-notification-dispatcher para novo lead: %', SQLERRM;
   end;
 
+  return NEW;
+
   v_notified := array_append(v_notified, NEW.assigned_user_id);
 
   for v_user in

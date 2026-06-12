@@ -130,17 +130,8 @@ Deno.serve(async (req) => {
     };
 
     const targetUserIds = new Set<string>();
-    if (typedLead.assigned_user_id) targetUserIds.add(typedLead.assigned_user_id);
-
-    const { data: whatsappUsers } = await supabase
-      .from("users")
-      .select("id")
-      .eq("organization_id", typedLead.organization_id)
-      .eq("is_active", true)
-      .not("whatsapp", "is", null);
-
-    for (const user of whatsappUsers || []) {
-      if (user.id) targetUserIds.add(user.id);
+    if (typedLead.assigned_user_id) {
+      targetUserIds.add(typedLead.assigned_user_id);
     }
 
     const results = [];

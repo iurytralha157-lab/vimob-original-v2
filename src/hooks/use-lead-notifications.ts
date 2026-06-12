@@ -52,6 +52,28 @@ export async function notifyLeadCreated({
     });
   }
 
+  for (const notification of notifications) {
+    try {
+      await notificationService.send({
+        eventKey: 'new_lead_received',
+        organizationId: notification.organization_id,
+        userId: notification.user_id,
+        leadId: notification.lead_id,
+        variables: {
+          lead_name: leadName,
+          source: sourceLabel,
+          campaign_name: leadContext.campaignName,
+          lead_created_at: leadContext.createdAtLabel
+        },
+        dedupeKey: `new_lead_received:${notification.lead_id}:${notification.user_id}`,
+      });
+    } catch (error) {
+      console.error('Erro ao disparar notificacao de novo lead para o responsavel:', error);
+    }
+  }
+
+  return;
+
   // 2. Buscar líderes das equipes vinculadas à pipeline
   if (pipelineId) {
     try {
@@ -118,33 +140,6 @@ export async function notifyLeadCreated({
     }
   } catch (error) {
     console.error('Erro ao buscar administradores:', error);
-  }
-
-  try {
-    const { data: whatsappUsers } = await supabase
-      .from('users')
-      .select('id')
-      .eq('organization_id', organizationId)
-      .eq('is_active', true)
-      .not('whatsapp', 'is', null);
-
-    if (whatsappUsers) {
-      for (const whatsappUser of whatsappUsers) {
-        if (!notifiedUserIds.has(whatsappUser.id)) {
-          notifiedUserIds.add(whatsappUser.id);
-          notifications.push({
-            user_id: whatsappUser.id,
-            organization_id: organizationId,
-            lead_id: leadId,
-            title: 'Novo lead no CRM',
-            content: `${leadName} entrou no CRM (origem: ${sourceLabel})`,
-            type: 'lead',
-          });
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Erro ao buscar usuarios com WhatsApp:', error);
   }
 
   // Use centralized service for each notification to ensure template usage and logging
