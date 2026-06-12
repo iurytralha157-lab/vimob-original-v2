@@ -12,8 +12,39 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Loader2, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+function getLogStatusMeta(status: string | null | undefined) {
+  switch (status) {
+    case "sent":
+      return {
+        label: "Sucesso",
+        className: "bg-green-500/10 text-green-500 hover:bg-green-500/20 border-green-500/20",
+        icon: CheckCircle2,
+      };
+    case "queued":
+      return {
+        label: "Enfileirado",
+        className: "bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 border-amber-500/20",
+        icon: Clock,
+      };
+    case "failed":
+    case "error":
+      return {
+        label: "Falha",
+        className: "bg-destructive/10 text-destructive hover:bg-destructive/20 border-destructive/20",
+        icon: AlertCircle,
+      };
+    default:
+      return {
+        label: status || "Pendente",
+        className: "bg-muted text-muted-foreground hover:bg-muted border-border",
+        icon: Clock,
+      };
+  }
+}
+
 export function NotificationLogsTable() {
   const [selectedLog, setSelectedLog] = useState<any>(null);
   const { data: logs, isLoading, error } = useQuery({
@@ -76,7 +107,11 @@ export function NotificationLogsTable() {
                 </TableCell>
               </TableRow>
             ) : (
-              logs?.map((log: any) => (
+              logs?.map((log: any) => {
+                const statusMeta = getLogStatusMeta(log.status);
+                const StatusIcon = statusMeta.icon;
+
+                return (
                 <TableRow key={log.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedLog(log)}>
                   <TableCell className="whitespace-nowrap text-xs">
                     {format(new Date(log.created_at), "dd/MM HH:mm:ss", { locale: ptBR })}
@@ -94,17 +129,10 @@ export function NotificationLogsTable() {
                     {log.recipient}
                   </TableCell>
                   <TableCell>
-                    {log.status === "sent" ? (
-                      <Badge className="bg-green-500/10 text-green-500 hover:bg-green-500/20 border-green-500/20 text-[10px] h-5 gap-1">
-                        <CheckCircle2 className="h-2 w-2" />
-                        Sucesso
-                      </Badge>
-                    ) : (
-                      <Badge variant="destructive" className="text-[10px] h-5 gap-1">
-                        <AlertCircle className="h-2 w-2" />
-                        Falha
-                      </Badge>
-                    )}
+                    <Badge className={`${statusMeta.className} text-[10px] h-5 gap-1`}>
+                      <StatusIcon className="h-2 w-2" />
+                      {statusMeta.label}
+                    </Badge>
                   </TableCell>
                   <TableCell className="font-mono text-[10px] text-muted-foreground">
                     {log.payload?.executionTime || 'N/A'}
@@ -113,7 +141,8 @@ export function NotificationLogsTable() {
                      {log.is_test && <Badge variant="secondary" className="text-[8px] h-4">Teste</Badge>}
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             )}
           </TableBody>
         </Table>

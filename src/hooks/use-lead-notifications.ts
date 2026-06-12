@@ -37,6 +37,7 @@ export async function notifyLeadCreated({
   }[] = [];
 
   const sourceLabel = getSourceLabel(source);
+  const leadContext = await getLeadNotificationContext(leadId);
 
   // 1. Notificar o vendedor atribuído
   if (assignedUserId) {
@@ -119,6 +120,33 @@ export async function notifyLeadCreated({
     console.error('Erro ao buscar administradores:', error);
   }
 
+  try {
+    const { data: whatsappUsers } = await supabase
+      .from('users')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('is_active', true)
+      .not('whatsapp', 'is', null);
+
+    if (whatsappUsers) {
+      for (const whatsappUser of whatsappUsers) {
+        if (!notifiedUserIds.has(whatsappUser.id)) {
+          notifiedUserIds.add(whatsappUser.id);
+          notifications.push({
+            user_id: whatsappUser.id,
+            organization_id: organizationId,
+            lead_id: leadId,
+            title: 'Novo lead no CRM',
+            content: `${leadName} entrou no CRM (origem: ${sourceLabel})`,
+            type: 'lead',
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Erro ao buscar usuarios com WhatsApp:', error);
+  }
+
   // Use centralized service for each notification to ensure template usage and logging
   for (const notification of notifications) {
     try {
@@ -129,8 +157,11 @@ export async function notifyLeadCreated({
         leadId: notification.lead_id,
         variables: {
           lead_name: leadName,
-          source: sourceLabel
-        }
+          source: sourceLabel,
+          campaign_name: leadContext.campaignName,
+          lead_created_at: leadContext.createdAtLabel
+        },
+        dedupeKey: `new_lead_received:${notification.lead_id}:${notification.user_id}`,
       });
     } catch (error) {
       console.error('Erro ao disparar notificação via serviço:', error);
@@ -154,6 +185,58 @@ function getSourceLabel(source: string): string {
     import: 'Importação',
   };
   return labels[source] || source;
+}
+
+async function getLeadNotificationContext(leadId: string) {
+  const fallback = {
+    campaignName: 'Não informado',
+    createdAtLabel: formatLeadNotificationDate(new Date()),
+  };
+
+  try {
+    const [{ data: lead }, { data: meta }] = await Promise.all([
+      supabase
+        .from('leads')
+        .select('created_at, utm_campaign')
+        .eq('id', leadId)
+        .maybeSingle(),
+      supabase
+        .from('lead_meta')
+        .select('campaign_name, utm_campaign')
+        .eq('lead_id', leadId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    const campaignName = meta?.campaign_name || meta?.utm_campaign || lead?.utm_campaign || fallback.campaignName;
+    const createdAtLabel = lead?.created_at
+      ? formatLeadNotificationDate(new Date(lead.created_at))
+      : fallback.createdAtLabel;
+
+    return { campaignName, createdAtLabel };
+  } catch (error) {
+    console.error('Erro ao buscar contexto da notificacao de lead:', error);
+    return fallback;
+  }
+}
+
+function formatLeadNotificationDate(date: Date) {
+  const datePart = new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'America/Sao_Paulo',
+  }).format(date);
+
+  const timePart = new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'America/Sao_Paulo',
+  }).format(date);
+
+  return `${datePart} | ${timePart}`;
 }
 
 // ==================== Notificação de Lead Movido (Telecom Only) ====================

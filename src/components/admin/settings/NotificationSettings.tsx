@@ -30,7 +30,8 @@ import {
   Mail,
   Edit2,
   Save,
-  Lightbulb
+  Lightbulb,
+  Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -68,6 +69,36 @@ const EVENT_KEY_OPTIONS = [
   { value: 'update_phone_reminder', label: 'Atualização de Telefone', category: 'Sistema' },
   { value: 'test_push', label: 'Teste de Push', category: 'Sistema' },
 ];
+
+function getDispatchLogStatus(status: string | null | undefined) {
+  switch (status) {
+    case 'sent':
+      return {
+        label: 'Sucesso',
+        className: 'bg-green-500/10 text-green-600',
+        icon: CheckCircle2,
+      };
+    case 'queued':
+      return {
+        label: 'Enfileirado',
+        className: 'bg-amber-500/10 text-amber-600',
+        icon: Clock,
+      };
+    case 'failed':
+    case 'error':
+      return {
+        label: 'Erro',
+        className: 'bg-destructive/10 text-destructive',
+        icon: XCircle,
+      };
+    default:
+      return {
+        label: status || 'Pendente',
+        className: 'bg-muted text-muted-foreground',
+        icon: Clock,
+      };
+  }
+}
 
 export function NotificationSettings({ filterSlug }: { filterSlug?: string }) {
   const { isSuperAdmin, user, profile } = useAuth();
@@ -834,7 +865,11 @@ export function NotificationSettings({ filterSlug }: { filterSlug?: string }) {
                   </thead>
                   <tbody>
                     {logs.length > 0 ? (
-                      logs.map((log) => (
+                      logs.map((log) => {
+                        const statusMeta = getDispatchLogStatus(log.status);
+                        const StatusIcon = statusMeta.icon;
+
+                        return (
                         <tr key={log.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                           <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                             <div className="flex flex-col">
@@ -861,17 +896,10 @@ export function NotificationSettings({ filterSlug }: { filterSlug?: string }) {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
-                              {log.status === 'sent' ? (
-                                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 w-fit">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  <span className="text-[10px] font-medium">Sucesso</span>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-destructive/10 text-destructive w-fit">
-                                  <XCircle className="h-3 w-3" />
-                                  <span className="text-[10px] font-medium">Erro</span>
-                                </div>
-                              )}
+                              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full ${statusMeta.className} w-fit`}>
+                                <StatusIcon className="h-3 w-3" />
+                                <span className="text-[10px] font-medium">{statusMeta.label}</span>
+                              </div>
                               {log.payload?.executionTime && (
                                 <span className="text-[9px] text-muted-foreground font-mono">
                                   ({log.payload.executionTime})
@@ -893,7 +921,8 @@ export function NotificationSettings({ filterSlug }: { filterSlug?: string }) {
                             </Button>
                           </td>
                         </tr>
-                      ))
+                        );
+                      })
                     ) : (
                       <tr>
                         <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">

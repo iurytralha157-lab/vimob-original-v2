@@ -130,6 +130,14 @@ function normalizePhoneNumber(phone: string): string {
   return digits;
 }
 
+function isValidBrazilianWhatsAppNumber(phone: string | null | undefined): phone is string {
+  if (!phone) return false;
+  if (/<[^>]+>|dummy data|test lead|undefined|null/i.test(phone)) return false;
+
+  const normalized = normalizePhoneNumber(phone);
+  return /^55\d{10,11}$/.test(normalized);
+}
+
 async function getEvolutionConnectionState(
   evolutionApiUrl: string,
   evolutionApiKey: string,
@@ -642,6 +650,7 @@ async function markFailed(supabase: any, executionId: string, error: string) {
 }
 
 function translateError(error: string): string {
+  if (error.includes("Telefone WhatsApp invalido")) return "Telefone WhatsApp invalido ou de teste";
   if (error.includes("exists") && error.includes("false")) return "Número WhatsApp inválido ou não cadastrado";
   if (error.includes("Connection refused") || error.includes("ECONNREFUSED")) return "Falha na conexão com WhatsApp";
   if (error.includes("timeout") || error.includes("ETIMEDOUT")) return "Tempo limite excedido";
@@ -783,6 +792,9 @@ async function processActionNode(
         const { data: lead } = await supabase
           .from("leads").select("phone, name").eq("id", execution.lead_id).single();
         if (!lead?.phone) { console.log("Lead has no phone"); return; }
+        if (!isValidBrazilianWhatsAppNumber(lead.phone)) {
+          throw new Error(`Telefone WhatsApp invalido para o lead: ${lead.phone}`);
+        }
 
         const messageContent = await replaceVariables(
           supabase,
@@ -824,6 +836,9 @@ async function processActionNode(
         .select("*, session:whatsapp_sessions(*)")
         .eq("id", execution.conversation_id).single();
       if (!conv?.session) { console.log("Conversation/session not found"); return; }
+      if (!isValidBrazilianWhatsAppNumber(conv.contact_phone)) {
+        throw new Error(`Telefone WhatsApp invalido para a conversa: ${conv.contact_phone || "vazio"}`);
+      }
 
       const messageContent = await replaceVariables(
         supabase,
