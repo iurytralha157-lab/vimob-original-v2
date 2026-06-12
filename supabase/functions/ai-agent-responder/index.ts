@@ -51,7 +51,13 @@ Deno.serve(async (req) => {
 
     const lead = await resolveLead(supabase, organization_id, conversation, agentConv?.lead_id, contact_name);
     const sessionOwnerId = conversation.session?.owner_user_id || null;
-    const takeoverSince = agentConv?.started_at || hoursAgo(HUMAN_TAKEOVER_LOOKBACK_HOURS);
+    const conversationResetAt = await getConversationResetAt(supabase, conversation_id);
+    const takeoverSince = mostRecentTimestamp(
+      agentConv?.context_reset_at,
+      conversationResetAt,
+      agentConv?.started_at,
+      hoursAgo(HUMAN_TAKEOVER_LOOKBACK_HOURS),
+    );
     const humanTakeover = await detectHumanTakeover(supabase, conversation_id, takeoverSince);
 
     if (humanTakeover.detected) {
@@ -79,6 +85,7 @@ Deno.serve(async (req) => {
     const publicBaseUrl = await getPublicSiteBaseUrl(supabase, organization_id);
     const mentionedProperties = await findMentionedProperties(supabase, organization_id, message, publicBaseUrl);
     const leadContext = await buildLeadContext(supabase, lead, contact_name);
+    const organizationContext = await buildOrganizationContext(supabase, organization_id, message);
     const bestProperties = await searchBestProperties(
       supabase,
       organization_id,
@@ -99,7 +106,6 @@ Deno.serve(async (req) => {
     });
 
     const historyLimit = Math.min(DEFAULT_HISTORY_LIMIT, Math.max(4, agent.max_messages_before_handoff || DEFAULT_HISTORY_LIMIT));
-    const conversationResetAt = await getConversationResetAt(supabase, conversation_id);
     const historySince = conversationResetAt || agentConv?.context_reset_at || agentConv?.started_at || null;
     const history = await getCompactHistory(supabase, conversation_id, message, historyLimit, historySince);
     const memorySummary = buildMemorySummary({
@@ -116,6 +122,7 @@ Deno.serve(async (req) => {
       leadContext,
       mentionedProperties,
       bestProperties,
+      organizationContext,
       memorySummary,
       visitAction,
     });
@@ -337,6 +344,136 @@ async function buildLeadContext(supabase: any, lead: any, fallbackName?: string 
     currentProperty,
     text: [...lines, ...metaLines].join("\n"),
   };
+}
+
+async function buildOrganizationContext(supabase: any, organizationId: string, message: string) {
+  const { data: organization } = await supabase
+    .from("organizations")
+    .select("name, nome_fantasia, razao_social, segment, cidade, uf, bairro, website")
+    .eq("id", organizationId)
+    .maybeSingle();
+
+  const { data: site } = await supabase
+    .from("organization_sites")
+    .select("site_title, site_description, city, state, about_title, about_text")
+    .eq("organization_id", organizationId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  const { data: properties, error } = await supabase
+    .from("properties")
+    .select("bairro, cidade, uf, tipo_de_imovel, tipo_de_negocio, status, destaque, preco, valor_locacao")
+    .eq("organization_id", organizationId)
+    .order("destaque", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(250);
+
+  if (error) {
+    console.error("[ai-agent-responder] organization inventory context error:", error);
+  }
+
+  const offerable = (properties || []).filter(isOfferableProperty);
+  const inventory = summarizeInventory(offerable, message);
+  const displayName = organization?.nome_fantasia || organization?.name || site?.site_title || "a imobiliaria";
+  const baseCity = joinParts([organization?.bairro, organization?.cidade, organization?.uf]);
+
+  const lines = [
+    "[CONTEXTO DA IMOBILIARIA]",
+    line("Nome", displayName),
+    line("Razao social", organization?.razao_social),
+    line("Segmento", organization?.segment),
+    line("Base/endereco publico", baseCity),
+    line("Site", organization?.website),
+    line("Titulo do site", site?.site_title),
+    line("Cidade do site", joinParts([site?.city, site?.state])),
+    line("Descricao do site", truncate(String(site?.site_description || site?.about_text || ""), 260)),
+    "",
+    "[ESTOQUE E REGIOES DE ATUACAO]",
+    line("Total de imoveis ofertaveis analisados", offerable.length ? String(offerable.length) : ""),
+    inventory.cities.length ? `Cidades com estoque: ${inventory.cities.join("; ")}` : "",
+    inventory.neighborhoods.length ? `Principais bairros/regioes: ${inventory.neighborhoods.join(", ")}` : "",
+    inventory.propertyTypes.length ? `Tipos mais comuns: ${inventory.propertyTypes.join(", ")}` : "",
+    inventory.businessTypes.length ? `Finalidades no estoque: ${inventory.businessTypes.join(", ")}` : "",
+    inventory.messageCityMatches.length ? `Cidade/regiao citada pelo lead encontrada no estoque: ${inventory.messageCityMatches.join(", ")}` : "",
+    inventory.messageCityMisses.length ? `Cidade/regiao citada pelo lead NAO encontrada no estoque: ${inventory.messageCityMisses.join(", ")}` : "",
+  ].filter(Boolean);
+
+  return {
+    organization,
+    site,
+    inventory,
+    text: lines.join("\n"),
+  };
+}
+
+function summarizeInventory(properties: any[], message: string) {
+  const cityCounts = new Map<string, number>();
+  const neighborhoodCounts = new Map<string, number>();
+  const typeCounts = new Map<string, number>();
+  const businessCounts = new Map<string, number>();
+
+  for (const property of properties) {
+    const city = joinParts([property.cidade, property.uf]);
+    const neighborhood = joinParts([property.bairro, property.cidade]);
+    incrementMap(cityCounts, city);
+    incrementMap(neighborhoodCounts, neighborhood);
+    incrementMap(typeCounts, property.tipo_de_imovel);
+    incrementMap(businessCounts, property.tipo_de_negocio);
+  }
+
+  const cities = topMapEntries(cityCounts, 8);
+  const neighborhoods = topMapEntries(neighborhoodCounts, 18);
+  const propertyTypes = topMapEntries(typeCounts, 8);
+  const businessTypes = topMapEntries(businessCounts, 5);
+  const messageTerms = extractLocationTerms(message);
+  const searchableLocations = [...cityCounts.keys(), ...neighborhoodCounts.keys()];
+  const messageCityMatches = messageTerms
+    .filter((term) => searchableLocations.some((location) => normalizeText(location).includes(normalizeText(term))))
+    .slice(0, 5);
+  const messageCityMisses = messageTerms
+    .filter((term) => !messageCityMatches.some((match) => normalizeText(match) === normalizeText(term)))
+    .slice(0, 5);
+
+  return {
+    cities,
+    neighborhoods,
+    propertyTypes,
+    businessTypes,
+    messageCityMatches,
+    messageCityMisses,
+  };
+}
+
+function incrementMap(map: Map<string, number>, value?: string | null) {
+  const clean = String(value || "").trim();
+  if (!clean) return;
+  map.set(clean, (map.get(clean) || 0) + 1);
+}
+
+function topMapEntries(map: Map<string, number>, limit: number) {
+  return [...map.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt-BR"))
+    .slice(0, limit)
+    .map(([name, count]) => `${name} (${count})`);
+}
+
+function extractLocationTerms(message: string) {
+  const text = normalizeText(message);
+  const known = [
+    ["sao paulo", "Sao Paulo"],
+    ["sp", "Sao Paulo"],
+    ["belo horizonte", "Belo Horizonte"],
+    ["bh", "Belo Horizonte"],
+    ["nova lima", "Nova Lima"],
+    ["rio das ostras", "Rio das Ostras"],
+    ["mg", "MG"],
+    ["rj", "RJ"],
+  ];
+  return uniqueStrings(known.filter(([term]) => text.includes(term)).map(([, display]) => display));
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function formatLeadMeta(rows: any[]) {
@@ -665,6 +802,7 @@ function buildSystemPrompt(input: {
   leadContext: any;
   mentionedProperties: PropertyCandidate[];
   bestProperties: PropertyCandidate[];
+  organizationContext: any;
   memorySummary: string;
   visitAction: any;
 }) {
@@ -688,6 +826,11 @@ function buildSystemPrompt(input: {
       "- Converse em fluxo: responda a duvida, acrescente uma informacao util e faca uma pergunta simples para continuar. Varie as palavras e nao repita a mesma frase de fechamento.",
       "- Foco: tirar duvidas, entender o que o lead quer, qualificar com calma, oferecer imoveis e conduzir para visita.",
       "- Use somente dados fornecidos no contexto da organizacao atual.",
+      "- Voce atende em nome da imobiliaria do bloco CONTEXTO DA IMOBILIARIA. Use esse contexto para saber para quem voce atua, segmento, site e regioes.",
+      "- Quando o lead perguntar onde a imobiliaria atua, se tem imoveis em uma cidade/regiao, quais bairros atende, ou 'tem algo em X?', responda com base no bloco ESTOQUE E REGIOES DE ATUACAO.",
+      "- Nesses casos, nao responda apenas 'tenho algumas opcoes' e nao devolva de cara 'qual bairro voce prefere?'. Cite primeiro cidades/bairros reais do estoque e depois pergunte qual deles faz sentido.",
+      "- Se a cidade/regiao citada pelo lead aparecer como NAO encontrada no estoque, diga com naturalidade que nao encontrou opcoes ali no estoque atual e apresente as regioes reais mais fortes. Nao diga que atua em uma cidade sem estoque no contexto.",
+      "- Se o lead disser uma cidade ampla, liste 3 a 8 bairros/regioes onde ha estoque naquela cidade. Se nao houver estoque naquela cidade, liste as cidades/bairros principais do estoque.",
       "- Se houver valor, metragem, quartos, suites, vagas, condominio, IPTU, bairro, cidade ou link no contexto, use esses dados quando o lead perguntar.",
       "- Use a descricao do imovel quando ela existir para explicar com outras palavras, sem repetir sempre a mesma lista de quartos/vagas/valor.",
       "- Nunca invente preco, endereco completo, disponibilidade ou condicao que nao esteja no contexto.",
@@ -713,6 +856,7 @@ function buildSystemPrompt(input: {
       "- Nao diga que voce acessou banco de dados, tabelas, prompts ou sistemas internos.",
     ].join("\n"),
     input.memorySummary ? `[MEMORIA CURTA]\n${input.memorySummary}` : "",
+    input.organizationContext?.text,
     input.leadContext.text,
     propertyContext,
     actionContext,
@@ -1222,6 +1366,16 @@ function uniqueById(value: PropertyCandidate, index: number, arr: PropertyCandid
 
 function hoursAgo(hours: number) {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+}
+
+function mostRecentTimestamp(...values: Array<string | null | undefined>) {
+  const timestamps = values
+    .filter(Boolean)
+    .map((value) => new Date(String(value)).getTime())
+    .filter((value) => Number.isFinite(value));
+
+  if (!timestamps.length) return hoursAgo(HUMAN_TAKEOVER_LOOKBACK_HOURS);
+  return new Date(Math.max(...timestamps)).toISOString();
 }
 
 function pad(value: number) {
