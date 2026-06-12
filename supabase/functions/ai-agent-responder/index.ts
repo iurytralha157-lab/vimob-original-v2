@@ -154,7 +154,7 @@ Deno.serve(async (req) => {
     await logAIInteraction(supabase, {
       organizationId: organization_id,
       conversationId: conversation_id,
-      agentId: agent.id,
+      agentId: null,
       model: aiResult.model,
       promptTokens: aiResult.promptTokens,
       completionTokens: aiResult.completionTokens,

@@ -109,6 +109,81 @@ async function triggerAutomationsForIncomingMessage(input: {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function recoverAIAgentIfBackendSkipped(input: {
+  session: any;
+  conversation: any;
+  message: string | null;
+  contactName: string | null;
+  receivedAt: string;
+}) {
+  if (!input.message) return;
+
+  await sleep(15000);
+
+  const { data: recentAIMessage } = await supabase
+    .from("whatsapp_messages")
+    .select("id")
+    .eq("conversation_id", input.conversation.id)
+    .eq("from_me", true)
+    .gte("sent_at", input.receivedAt)
+    .or("sender_name.ilike.%Jhenny%,sender_name.ilike.%Jenny%,sender_name.ilike.Automa%")
+    .limit(1);
+
+  if (recentAIMessage?.length) return;
+
+  const { data: state } = await supabase
+    .from("chatbot_conversation_state")
+    .select("id, automation_enabled, agent_status")
+    .eq("organization_id", input.session.organization_id)
+    .eq("conversation_id", input.conversation.id)
+    .maybeSingle();
+
+  if (state?.automation_enabled !== false || state?.agent_status !== "handed_off_human") return;
+
+  const { data: activeAgentConversation } = await supabase
+    .from("ai_agent_conversations")
+    .select("id")
+    .eq("conversation_id", input.conversation.id)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (!activeAgentConversation) return;
+
+  await supabase
+    .from("chatbot_conversation_state")
+    .update({
+      automation_enabled: true,
+      agent_status: "active",
+      last_response_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("organization_id", input.session.organization_id)
+    .eq("conversation_id", input.conversation.id);
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-agent-responder`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SERVICE_KEY}`,
+    },
+    body: JSON.stringify({
+      conversation_id: input.conversation.id,
+      session_id: input.session.id,
+      organization_id: input.session.organization_id,
+      message: input.message,
+      contact_name: input.contactName,
+    }),
+  });
+
+  if (!response.ok) {
+    console.error("ai-agent-responder recovery error:", await response.text());
+  }
+}
+
 function normalizePhone(jidOrNumber: string): string {
   return String(jidOrNumber || "").replace(/@.*/, "").replace(/:.*/, "").replace(/\D/g, "");
 }
@@ -1330,6 +1405,16 @@ async function handleSingleMessageUpsert(session: any, m: any) {
       contactPhone: normalizePhone(remoteJid),
       contactName: senderName,
     }));
+
+    if (messageType === "text" && content) {
+      runInBackground(recoverAIAgentIfBackendSkipped({
+        session,
+        conversation: conv,
+        message: content,
+        contactName: senderName,
+        receivedAt: sentAt,
+      }));
+    }
   }
 
   // If we got base64 media, hand off to media-worker via storage
