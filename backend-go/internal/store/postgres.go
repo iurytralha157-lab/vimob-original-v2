@@ -284,6 +284,21 @@ func (s *Store) HasRecentHumanTakeover(ctx context.Context, conversationID strin
 	return exists, err
 }
 
+func (s *Store) HasInboundMessageSince(ctx context.Context, conversationID string, since time.Time) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+		select exists (
+			select 1
+			from whatsapp_messages
+			where conversation_id = $1
+			  and coalesce(from_me, false) = false
+			  and sent_at > $2
+			limit 1
+		)
+	`, conversationID, since).Scan(&exists)
+	return exists, err
+}
+
 func (s *Store) GetAIResolvedConfig(ctx context.Context, organizationID string, fallbackModel string) (AIResolvedConfig, error) {
 	var cfg AIResolvedConfig
 	err := s.pool.QueryRow(ctx, `

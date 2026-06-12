@@ -224,6 +224,8 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		return
 	}
 
+	p.scheduleIdleFollowUp(ctx, job.OrganizationID, job.ConversationID, conv.SessionID, number, time.Now())
+
 	_ = p.store.UpsertConversationState(ctx, store.ConversationState{
 		OrganizationID:    job.OrganizationID,
 		ConversationID:    job.ConversationID,
@@ -232,6 +234,61 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		AgentStatus:       "auto_replied",
 	})
 	p.logger.Info("auto reply sent", "organization_id", job.OrganizationID, "conversation_id", job.ConversationID, "model", reply.Model, "latency_ms", reply.LatencyMS)
+}
+
+func (p *Pool) scheduleIdleFollowUp(ctx context.Context, organizationID string, conversationID string, sessionID string, number string, sentAt time.Time) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(number) == "" {
+		return
+	}
+
+	go func() {
+		timer := time.NewTimer(10 * time.Minute)
+		defer timer.Stop()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+
+		replied, err := p.store.HasInboundMessageSince(ctx, conversationID, sentAt)
+		if err != nil {
+			p.logger.Warn("idle follow-up inbound check failed", "error", err, "conversation_id", conversationID)
+			return
+		}
+		if replied {
+			return
+		}
+
+		humanTakeover, err := p.store.HasRecentHumanTakeover(ctx, conversationID, sentAt)
+		if err != nil {
+			p.logger.Warn("idle follow-up human takeover check failed", "error", err, "conversation_id", conversationID)
+			return
+		}
+		if humanTakeover {
+			return
+		}
+
+		text := "Conseguiu dar uma olhada? Me fala se fez sentido pra voce ou se quer que eu busque outra opcao."
+		sentMessageID, err := p.sendWhatsAppText(ctx, sessionID, number, text)
+		if err != nil {
+			p.logger.Warn("idle follow-up send failed", "error", err, "conversation_id", conversationID)
+			return
+		}
+		if err := p.store.RecordAIWhatsAppMessage(ctx, conversationID, sessionID, sentMessageID, text); err != nil {
+			p.logger.Warn("idle follow-up history write failed", "error", err, "conversation_id", conversationID)
+			return
+		}
+
+		_ = p.store.UpsertConversationState(ctx, store.ConversationState{
+			OrganizationID:    organizationID,
+			ConversationID:    conversationID,
+			Channel:           "whatsapp",
+			AutomationEnabled: true,
+			AgentStatus:       "idle_follow_up_sent",
+		})
+		p.logger.Info("idle follow-up sent", "organization_id", organizationID, "conversation_id", conversationID)
+	}()
 }
 
 func (p *Pool) notifyHumanHandoff(ctx context.Context, organizationID string, conversationID string, reason string) {
