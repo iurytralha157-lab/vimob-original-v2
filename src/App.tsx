@@ -79,6 +79,7 @@ const FinancialDRE = lazy(() => import("./pages/FinancialDRE"));
 const MetaSettings = lazy(() => import("./pages/MetaSettings"));
 const WhatsAppInboundRules = lazy(() => import("./pages/WhatsAppInboundRules"));
 const Automations = lazy(() => import("./pages/Automations"));
+const AIConsole = lazy(() => import("./pages/AIConsole"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const GamificationLayout = lazy(() => import("./pages/gamification/GamificationLayout"));
 const GamificationDashboard = lazy(() => import("./pages/gamification/GamificationDashboard"));
@@ -710,6 +711,18 @@ function AppRoutes() {
               element={
                 <ProtectedRoute>
                   <Conversations />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/ia"
+              element={
+                <ProtectedRoute>
+                  <ModuleGuard module="ai_agent">
+                    <AdminRoute>
+                      <AIConsole />
+                    </AdminRoute>
+                  </ModuleGuard>
                 </ProtectedRoute>
               }
             />

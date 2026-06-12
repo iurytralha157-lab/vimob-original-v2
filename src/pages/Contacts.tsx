@@ -310,6 +310,15 @@ export default function Contacts() {
     return sortDir === "asc" ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />;
   };
 
+  const LeadCountBadge = () => (
+    <div
+      className="flex h-9 shrink-0 items-center rounded-md bg-orange-500 px-3 text-sm font-semibold text-white shadow-sm"
+      aria-label="Total de leads filtrados"
+    >
+      {isLoading ? "..." : totalCount.toLocaleString("pt-BR")} leads
+    </div>
+  );
+
   const handleFilterChange =
     <T,>(setter: (value: T) => void) =>
     (value: T) => {
@@ -384,6 +393,8 @@ export default function Contacts() {
               <XCircle className="h-4 w-4" />
             </Button>
 
+            <LeadCountBadge />
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button data-tour="contacts-import" variant="outline" size="icon" className="shrink-0">
@@ -406,6 +417,8 @@ export default function Contacts() {
           <div className="bg-card rounded-xl p-1.5 px-3 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between gap-3 w-full">
               <div className="flex items-center gap-2">
+                <LeadCountBadge />
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button data-tour="contacts-import" variant="outline" size="sm" className="h-9 gap-2 font-medium border-none hover:bg-muted">

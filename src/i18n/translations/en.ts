@@ -34,6 +34,7 @@ export const en = {
     contacts: 'Contacts',
     schedule: 'Schedule',
     conversations: 'Conversations',
+    aiAgent: 'Jhenny AI',
     properties: 'Properties',
     propertiesAll: 'All Properties',
     propertiesRentals: 'Rentals',

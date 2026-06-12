@@ -116,10 +116,9 @@ export function StagesEditorDialog({
         };
       });
 
-      // We use upsert to handle both new and existing stages
-      const { error } = await supabase
-        .from('stages')
-        .upsert(stagesToUpsert, { onConflict: 'id' });
+      const { error } = await supabase.rpc('reorder_stages', {
+        p_stages: stagesToUpsert,
+      });
 
       if (error) throw error;
 

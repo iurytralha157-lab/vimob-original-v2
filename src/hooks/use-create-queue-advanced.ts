@@ -85,6 +85,10 @@ interface QueueSettings {
   preserve_position?: boolean;
   require_checkin?: boolean;
   reentry_behavior?: 'redistribute' | 'keep_assignee';
+  ai_first_contact_enabled?: boolean;
+  ai_first_contact_session_id?: string | null;
+  ai_first_contact_prompt?: string;
+  ai_first_contact_delay_minutes?: number;
 }
 
 interface CreateQueueInput {

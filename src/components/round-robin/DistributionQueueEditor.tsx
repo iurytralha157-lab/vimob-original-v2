@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
@@ -49,7 +50,8 @@ import {
   Globe,
   Webhook,
   MessageSquare,
-  GripVertical
+  GripVertical,
+  Bot
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePipelines, useStages } from '@/hooks/use-stages';
@@ -92,6 +94,10 @@ interface QueueSettings {
   preserve_position?: boolean;
   require_checkin?: boolean;
   reentry_behavior?: 'redistribute' | 'keep_assignee';
+  ai_first_contact_enabled?: boolean;
+  ai_first_contact_session_id?: string | null;
+  ai_first_contact_prompt?: string;
+  ai_first_contact_delay_minutes?: number;
 }
 
 interface RuleCondition {
@@ -309,6 +315,10 @@ export function DistributionQueueEditor({
       redistribution_max_attempts: 10,
       preserve_position: true,
       require_checkin: false,
+      ai_first_contact_enabled: false,
+      ai_first_contact_session_id: null,
+      ai_first_contact_prompt: '',
+      ai_first_contact_delay_minutes: 0,
     },
     conditions: [],
     members: [],
@@ -387,6 +397,10 @@ export function DistributionQueueEditor({
           redistribution_max_attempts: 10,
           preserve_position: true,
           require_checkin: false,
+          ai_first_contact_enabled: false,
+          ai_first_contact_session_id: null,
+          ai_first_contact_prompt: '',
+          ai_first_contact_delay_minutes: 0,
           ...(queue.settings || {}),
         },
         conditions: existingConditions,
@@ -406,6 +420,10 @@ export function DistributionQueueEditor({
           redistribution_max_attempts: 10,
           preserve_position: true,
           require_checkin: false,
+          ai_first_contact_enabled: false,
+          ai_first_contact_session_id: null,
+          ai_first_contact_prompt: '',
+          ai_first_contact_delay_minutes: 0,
         },
         conditions: [],
         members: [],
@@ -528,6 +546,10 @@ export function DistributionQueueEditor({
       toast.error('Adicione pelo menos um participante antes de ativar a fila');
       return;
     }
+    if (formData.settings.ai_first_contact_enabled && !formData.settings.ai_first_contact_session_id) {
+      toast.error('Selecione o WhatsApp que a IA vai usar no primeiro atendimento');
+      return;
+    }
     
     setSaving(true);
     try {
@@ -538,6 +560,7 @@ export function DistributionQueueEditor({
     }
   };
   const totalWeight = formData.members.reduce((sum, m) => sum + m.weight, 0);
+  const connectedWhatsAppSessions = whatsappSessions.filter(session => session.is_active && session.status === 'connected');
 
   const renderConditionValueSelector = (condition: RuleCondition) => {
     switch (condition.type) {
@@ -1037,6 +1060,108 @@ export function DistributionQueueEditor({
                             }))}
                           />
                           <p className="text-[11px] text-muted-foreground">0 sem limite.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible open={openSections.includes('ai-first-contact')} onOpenChange={() => toggleSection('ai-first-contact')}>
+                <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/40">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-4 w-4 text-primary" />
+                    <span className="font-medium">Primeiro atendimento IA</span>
+                    {formData.settings.ai_first_contact_enabled && <Badge variant="secondary" className="text-xs">Ativo</Badge>}
+                  </div>
+                  <ChevronDown className={cn('h-4 w-4 transition-transform', openSections.includes('ai-first-contact') && 'rotate-180')} />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-4 px-1 pt-4">
+                  <div className="space-y-4 rounded-lg border p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <Label>Jhenny inicia a conversa</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Quando um lead entrar por esta fila, a IA envia uma primeira mensagem com nome e interesse do lead.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={!!formData.settings.ai_first_contact_enabled}
+                        onCheckedChange={(checked) => setFormData(prev => ({
+                          ...prev,
+                          settings: {
+                            ...prev.settings,
+                            ai_first_contact_enabled: checked,
+                            ai_first_contact_delay_minutes: prev.settings.ai_first_contact_delay_minutes ?? 0,
+                          },
+                        }))}
+                      />
+                    </div>
+
+                    {formData.settings.ai_first_contact_enabled && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px]">
+                          <div className="space-y-2">
+                            <Label>WhatsApp de saida</Label>
+                            <Select
+                              value={formData.settings.ai_first_contact_session_id || ''}
+                              onValueChange={value => setFormData(prev => ({
+                                ...prev,
+                                settings: {
+                                  ...prev.settings,
+                                  ai_first_contact_session_id: value,
+                                },
+                              }))}
+                            >
+                              <SelectTrigger className={!formData.settings.ai_first_contact_session_id ? 'border-destructive' : ''}>
+                                <SelectValue placeholder="Selecione uma conexao..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {connectedWhatsAppSessions.map(session => (
+                                  <SelectItem key={session.id} value={session.id}>
+                                    {session.display_name || session.phone_number || session.instance_name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {connectedWhatsAppSessions.length === 0 && (
+                              <p className="text-xs text-destructive">Conecte um WhatsApp antes de ativar o primeiro atendimento.</p>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Delay</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={5}
+                              value={formData.settings.ai_first_contact_delay_minutes ?? 0}
+                              onChange={e => setFormData(prev => ({
+                                ...prev,
+                                settings: {
+                                  ...prev.settings,
+                                  ai_first_contact_delay_minutes: Math.max(0, Math.min(5, Number(e.target.value) || 0)),
+                                },
+                              }))}
+                            />
+                            <p className="text-[11px] text-muted-foreground">Minutos.</p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Pergunta curta da primeira mensagem</Label>
+                          <Textarea
+                            rows={4}
+                            value={formData.settings.ai_first_contact_prompt || ''}
+                            onChange={e => setFormData(prev => ({
+                              ...prev,
+                              settings: {
+                                ...prev.settings,
+                                ai_first_contact_prompt: e.target.value,
+                              },
+                            }))}
+                            placeholder="Ex: Voce procura para morar ou investir?"
+                          />
                         </div>
                       </div>
                     )}

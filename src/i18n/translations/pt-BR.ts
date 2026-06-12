@@ -34,6 +34,7 @@ export const ptBR = {
     contacts: 'Contatos',
     schedule: 'Agenda',
     conversations: 'Conversas',
+    aiAgent: 'Jhenny IA',
     properties: 'Imóveis',
     propertiesAll: 'Todos os Imóveis',
     propertiesRentals: 'Aluguel',

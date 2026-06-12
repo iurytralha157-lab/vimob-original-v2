@@ -39,6 +39,7 @@ import {
   Trophy,
   History as HistoryIcon,
   HardHat,
+  Bot,
 } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { AnimatedIcon } from '@/components/icons/AnimatedIcon';
@@ -69,6 +70,7 @@ const allNavItems: NavItem[] = [
 
   { icon: Kanban, labelKey: 'pipelines', path: '/crm/pipelines', module: 'crm' },
   { icon: WhatsAppIcon, labelKey: 'conversations', path: '/crm/conversas', module: 'whatsapp' },
+  { icon: Bot, labelKey: 'aiAgent', path: '/ia', module: 'ai_agent', adminOnly: true },
   { icon: Users, labelKey: 'contacts', path: '/crm/contacts', module: 'crm' },
   { 
     icon: DollarSign, 

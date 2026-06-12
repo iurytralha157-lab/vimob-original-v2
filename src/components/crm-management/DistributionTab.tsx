@@ -26,6 +26,7 @@ import {
   Loader2,
   Shuffle,
   UsersRound,
+  Bot,
 } from 'lucide-react';
 import { useRoundRobins, useUpdateRoundRobin, useDeleteRoundRobin, RoundRobin as RoundRobinType } from '@/hooks/use-round-robins';
 import { useTeams } from '@/hooks/use-teams';
@@ -345,6 +346,12 @@ export function DistributionTab() {
                           {queue.settings?.enable_redistribution && (
                             <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                               Redistribuição ativa
+                            </Badge>
+                          )}
+                          {queue.settings?.ai_first_contact_enabled && (
+                            <Badge variant="outline" className="h-5 gap-1 px-1.5 text-[10px]">
+                              <Bot className="h-3 w-3" />
+                              IA primeiro atendimento
                             </Badge>
                           )}
                         </div>

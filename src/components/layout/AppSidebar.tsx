@@ -1,4 +1,4 @@
-import { LayoutDashboard, Kanban, Building2, Shuffle, HelpCircle, ChevronDown, ChevronLeft, ChevronRight, Users, MessageSquare, Calendar, DollarSign, FileText, Receipt, TrendingUp, BarChart3, Zap, Package, MapPin, UserCheck, Globe, PieChart, Trophy, History as HistoryIcon, CreditCard, HardHat, Workflow, Compass, ShoppingCart, Inbox } from 'lucide-react';
+import { LayoutDashboard, Kanban, Building2, Shuffle, HelpCircle, ChevronDown, ChevronLeft, ChevronRight, Users, MessageSquare, Calendar, DollarSign, FileText, Receipt, TrendingUp, BarChart3, Zap, Package, MapPin, UserCheck, Globe, PieChart, Trophy, History as HistoryIcon, CreditCard, HardHat, Workflow, Compass, ShoppingCart, Inbox, Bot } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon';
 import { AnimatedIcon } from '@/components/icons/AnimatedIcon';
 import GLOBE_JSON from '@/components/icons/globe-icon.json';
@@ -48,6 +48,12 @@ const allNavItems: NavItem[] = [{
   labelKey: 'conversations',
   path: '/crm/conversas',
   module: 'whatsapp'
+}, {
+  icon: Bot,
+  labelKey: 'aiAgent',
+  path: '/ia',
+  module: 'ai_agent',
+  adminOnly: true
 }, {
   icon: Users,
   labelKey: 'contacts',
