@@ -434,12 +434,12 @@ func (s *Store) CreateHandoffNotification(ctx context.Context, organizationID st
 	if content == "" {
 		content = "Um lead"
 	}
-	content += " foi qualificado pela Jhenny e pediu atendimento humano."
+	content = "Jhenny identificou que " + content + " precisa de um corretor."
 	if reason != "" {
 		content += " Motivo: " + reason + "."
 	}
 	if strings.TrimSpace(summary) != "" {
-		content += "\n\nContexto:\n" + truncate(summary, 900)
+		content += "\n\nResumo:\n" + truncate(summary, 600)
 	}
 
 	_, err := s.pool.Exec(ctx, `
@@ -449,7 +449,7 @@ func (s *Store) CreateHandoffNotification(ctx context.Context, organizationID st
 			$2::uuid,
 			nullif($3, '')::uuid,
 			'ai_handoff',
-			'Jhenny pediu atendimento',
+			'Jhenny chamou um corretor',
 			$4,
 			false
 		where not exists (
@@ -466,15 +466,54 @@ func (s *Store) CreateHandoffNotification(ctx context.Context, organizationID st
 }
 
 func (s *Store) BuildHandoffSummary(ctx context.Context, conversationID string, limit int) (string, error) {
-	if limit <= 0 || limit > 12 {
-		limit = 8
+	if limit <= 0 || limit > 6 {
+		limit = 4
 	}
+
+	var name string
+	var propertyCode string
+	var valueRange string
+	var targetValue string
+	var neighborhood string
+	var city string
+	var state string
+	var initialMessage string
+
+	err := s.pool.QueryRow(ctx, `
+		select
+			coalesce(l.name, wc.contact_name, 'Lead'),
+			coalesce(l.property_code, ''),
+			coalesce(l.faixa_valor_imovel, ''),
+			coalesce(l.valor_interesse::text, ''),
+			coalesce(l.bairro, ''),
+			coalesce(l.cidade, ''),
+			coalesce(l.uf, ''),
+			coalesce(l.message, l.initial_message, '')
+		from whatsapp_conversations wc
+		left join leads l on l.id = wc.lead_id
+		where wc.id = $1
+		limit 1
+	`, conversationID).Scan(
+		&name,
+		&propertyCode,
+		&valueRange,
+		&targetValue,
+		&neighborhood,
+		&city,
+		&state,
+		&initialMessage,
+	)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+
 	rows, err := s.pool.Query(ctx, `
-		select coalesce(from_me, false), coalesce(content, '')
+		select coalesce(content, '')
 		from whatsapp_messages
 		where conversation_id = $1
 		  and message_type = 'text'
 		  and coalesce(content, '') <> ''
+		  and coalesce(from_me, false) = false
 		order by sent_at desc
 		limit $2
 	`, conversationID, limit)
@@ -483,34 +522,39 @@ func (s *Store) BuildHandoffSummary(ctx context.Context, conversationID string, 
 	}
 	defer rows.Close()
 
-	var messages []recentMessage
+	var messages []string
 	for rows.Next() {
-		var msg recentMessage
-		if err := rows.Scan(&msg.FromMe, &msg.Content); err != nil {
+		var content string
+		if err := rows.Scan(&content); err != nil {
 			return "", err
 		}
-		messages = append(messages, msg)
-	}
-	if len(messages) == 0 {
-		return "", rows.Err()
+		messages = append(messages, truncate(content, 140))
 	}
 
 	var b strings.Builder
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].FromMe {
-			b.WriteString("Jhenny: ")
-		} else {
-			b.WriteString("Lead: ")
+	writeContextLine(&b, "Lead", name)
+	writeContextLine(&b, "Imovel citado/cadastrado", propertyCode)
+	writeContextLine(&b, "Faixa/valor", joinNonEmpty(" / ", valueRange, formatCurrencyBRL(targetValue)))
+	writeContextLine(&b, "Regiao", joinNonEmpty(", ", neighborhood, city, state))
+	writeContextLine(&b, "Mensagem inicial", truncate(initialMessage, 120))
+	if len(messages) > 0 {
+		var leadLines []string
+		for i := len(messages) - 1; i >= 0; i-- {
+			if strings.TrimSpace(messages[i]) != "" {
+				leadLines = append(leadLines, strings.TrimSpace(messages[i]))
+			}
 		}
-		b.WriteString(truncate(messages[i].Content, 180))
-		b.WriteString("\n")
+		writeContextLine(&b, "Ultimas intencoes do lead", strings.Join(leadLines, " | "))
 	}
-	return strings.TrimSpace(b.String()), rows.Err()
+	if strings.TrimSpace(b.String()) == "" {
+		return "", rows.Err()
+	}
+	return truncate(strings.TrimSpace(b.String()), 700), rows.Err()
 }
 
 func (s *Store) BuildAutoReplyContext(ctx context.Context, organizationID string, conversationID string, message string, maxMessages int) (string, error) {
-	if maxMessages <= 0 || maxMessages > 12 {
-		maxMessages = 8
+	if maxMessages <= 0 || maxMessages > 4 {
+		maxMessages = 4
 	}
 
 	var sections []string
@@ -619,7 +663,7 @@ func (s *Store) leadContext(ctx context.Context, organizationID string, conversa
 	writeContextLine(&b, "Imovel de interesse", propertyCode)
 	writeContextLine(&b, "Pipeline", pipelineName)
 	writeContextLine(&b, "Coluna", stageName)
-	writeContextLine(&b, "Mensagem inicial", truncate(initialMessage, 240))
+	writeContextLine(&b, "Mensagem inicial", truncate(initialMessage, 180))
 
 	rows, err := s.pool.Query(ctx, `
 		select
@@ -630,7 +674,7 @@ func (s *Store) leadContext(ctx context.Context, organizationID string, conversa
 		from lead_meta
 		where lead_id = $1
 		order by created_at desc
-		limit 2
+		limit 1
 	`, leadID)
 	if err == nil {
 		defer rows.Close()
@@ -650,7 +694,7 @@ func (s *Store) leadContext(ctx context.Context, organizationID string, conversa
 			writeContextLine(&b, "Formulario", formName)
 			writeContextLine(&b, "Campanha", campaign)
 			writeContextLine(&b, "Anuncio", adName)
-			writeContextLine(&b, "Notas do formulario", truncate(notes, 320))
+			writeContextLine(&b, "Notas do formulario", truncate(notes, 180))
 		}
 	}
 
@@ -690,11 +734,11 @@ func (s *Store) recentConversationContext(ctx context.Context, conversationID st
 	for i := len(messages) - 1; i >= 0; i-- {
 		label := "Lead"
 		if messages[i].FromMe {
-			label = "Jhenny/atendente"
+			label = "Jhenny/equipe"
 		}
 		b.WriteString(label)
 		b.WriteString(": ")
-		b.WriteString(truncate(messages[i].Content, 360))
+		b.WriteString(truncate(messages[i].Content, 180))
 		b.WriteString("\n")
 	}
 	return strings.TrimSpace(b.String()), nil
@@ -704,11 +748,12 @@ func (s *Store) propertyContext(ctx context.Context, organizationID string, mess
 	var sections []string
 
 	publicBaseURL, _ := s.publicSiteBaseURL(ctx, organizationID)
-	if mentioned, err := s.findMentionedProperties(ctx, organizationID, message, 4); err == nil && len(mentioned) > 0 {
+	if mentioned, err := s.findMentionedProperties(ctx, organizationID, message, 2); err == nil && len(mentioned) > 0 {
 		attachPropertyLinks(mentioned, publicBaseURL)
 		sections = append(sections, propertySection("IMOVEL CITADO NA MENSAGEM", mentioned))
+		return strings.Join(sections, "\n\n"), nil
 	}
-	if suggestions, err := s.suggestProperties(ctx, organizationID, message, 5); err == nil && len(suggestions) > 0 {
+	if suggestions, err := s.suggestProperties(ctx, organizationID, message, 3); err == nil && len(suggestions) > 0 {
 		attachPropertyLinks(suggestions, publicBaseURL)
 		sections = append(sections, propertySection("IMOVEIS PARA OFERECER", suggestions))
 	}
@@ -858,7 +903,7 @@ func propertySection(title string, properties []propertySummary) string {
 		b.WriteString(joinNonEmpty(" | ",
 			property.Code,
 			firstNonEmpty(property.Title, property.PropertyType),
-			prefixIfPresent(truncate(property.Description, 220), "Descricao: "),
+			prefixIfPresent(truncate(property.Description, 120), "Descricao: "),
 			joinNonEmpty(", ", property.Neighborhood, property.City, property.State),
 			suffixIfPresent(property.Bedrooms, " quartos"),
 			suffixIfPresent(property.Suites, " suites"),

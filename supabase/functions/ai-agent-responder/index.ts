@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const DEFAULT_HISTORY_LIMIT = 8;
+const DEFAULT_HISTORY_LIMIT = 4;
 const DEFAULT_SITE_BASE_URL = "https://vimob.vettercompany.com.br";
 const HUMAN_TAKEOVER_LOOKBACK_HOURS = 6;
 
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
 
     if (keywordMatch || limitReached) {
       const reason = keywordMatch ? "keyword" : "message_limit";
-      const handoffMsg = "Entendido. Vou chamar um atendente para continuar por aqui.";
+      const handoffMsg = "Entendido. Vou chamar um corretor para continuar por aqui.";
       await insertOutboxMessage(supabase, conversation_id, handoffMsg);
       await markHandedOff(supabase, agent, conversation_id, lead?.id || null, agentConv, reason, messageCount);
       await notifyHumanNeeded(supabase, organization_id, lead, sessionOwnerId, conversation_id, reason);
@@ -305,7 +305,7 @@ async function buildLeadContext(supabase: any, lead: any, fallbackName?: string 
     .select("form_id, form_name, campaign_name, ad_name, adset_name, platform, contact_notes, raw_payload, created_at")
     .eq("lead_id", lead.id)
     .order("created_at", { ascending: false })
-    .limit(3);
+    .limit(1);
 
   const propertyId = lead.interest_property_id || lead.property_id || null;
   const currentProperty = propertyId ? await fetchPropertyById(supabase, propertyId) : null;
@@ -326,7 +326,7 @@ async function buildLeadContext(supabase: any, lead: any, fallbackName?: string 
     line("Valor de interesse", formatCurrency(lead.valor_interesse)),
     lead.procura_financiamento ? "Busca financiamento: sim" : "",
     line("Finalidade", lead.finalidade_compra),
-    line("Mensagem inicial", lead.message || lead.initial_message),
+    line("Mensagem inicial", truncate(String(lead.message || lead.initial_message || ""), 180)),
     line("Imovel de interesse", currentProperty ? propertyLine(currentProperty) : lead.property_code),
   ].filter(Boolean);
 
@@ -351,7 +351,7 @@ function formatLeadMeta(rows: any[]) {
         line("Conjunto", row.adset_name),
         line("Anuncio", row.ad_name),
         line("Plataforma", row.platform),
-        line("Notas do formulario", row.contact_notes),
+        line("Notas do formulario", truncate(String(row.contact_notes || ""), 180)),
       ].filter(Boolean).join("\n"),
     );
 
@@ -374,7 +374,7 @@ function extractMetaAnswers(raw: any): string[] {
       return `${field.name}: ${value}`;
     })
     .filter(Boolean)
-    .slice(0, 12);
+    .slice(0, 6);
 }
 
 async function fetchPropertyById(supabase: any, propertyId: string) {
@@ -401,7 +401,7 @@ async function findMentionedProperties(
     .select(propertySelect())
     .eq("organization_id", organizationId)
     .or(orFilter)
-    .limit(8);
+    .limit(4);
 
   if (error) {
     console.error("[ai-agent-responder] property code lookup error:", error);
@@ -431,11 +431,11 @@ async function searchBestProperties(
     .eq("organization_id", organizationId)
     .order("destaque", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
-    .limit(60);
+    .limit(30);
 
   if (error) {
     console.error("[ai-agent-responder] property search error:", error);
-    return mentionedProperties.slice(0, 5);
+    return mentionedProperties.slice(0, 3);
   }
 
   const mentionedIds = new Set(mentionedProperties.map((property) => property.id));
@@ -450,7 +450,7 @@ async function searchBestProperties(
     .sort((a: PropertyCandidate, b: PropertyCandidate) => (b.score || 0) - (a.score || 0));
 
   const merged = [...mentionedProperties, ...scored].filter(uniqueById);
-  return merged.slice(0, 5);
+  return merged.slice(0, 3);
 }
 
 function propertySelect() {
@@ -648,13 +648,13 @@ async function getCompactHistory(supabase: any, conversationId: string, currentM
     .reverse()
     .map((msg: any) => ({
       role: msg.from_me ? "assistant" as const : "user" as const,
-      content: truncate(String(msg.content || ""), 900),
+      content: truncate(String(msg.content || ""), 260),
     }))
     .filter((msg: ChatMessage) => msg.content.trim() !== "");
 
   const last = history[history.length - 1];
   if (!last || last.role !== "user" || normalizeText(last.content) !== normalizeText(currentMessage)) {
-    history.push({ role: "user", content: truncate(currentMessage, 900) });
+    history.push({ role: "user", content: truncate(currentMessage, 260) });
   }
 
   return history;
@@ -696,12 +696,20 @@ function buildSystemPrompt(input: {
       "- Quando o lead citar um codigo como CA1050 ou 1050, priorize o bloco IMOVEL CITADO.",
       "- Ao sugerir imoveis, envie no maximo 3 opcoes. Link e opcional, nao o centro da conversa.",
       "- Para agendar visita, colete dia e horario se faltarem. Se a acao ja foi executada, apenas confirme.",
-      "- Nao ofereca consultor como saida padrao. Primeiro converse e entenda bairro, faixa de valor, quartos, prazo, financiamento e tipo de imovel.",
-      "- So diga que vai chamar/encaminhar para consultor quando o lead pedir humano/consultor/corretor, confirmar que quer atendimento, quiser agendar visita/ligacao, ou faltar uma informacao critica que voce nao pode afirmar.",
+      "- Use apenas corretor ou especialista para se referir a uma pessoa de atendimento.",
+      "- Nao ofereca corretor como saida padrao. Primeiro converse e entenda bairro, faixa de valor, quartos, prazo, financiamento, urgencia e tipo de imovel.",
+      "- So diga que vai chamar/encaminhar para um corretor ou especialista quando o lead pedir atendimento com uma pessoa, confirmar que quer ser atendido, quiser agendar visita/ligacao, ou faltar uma informacao critica que voce nao pode afirmar.",
+      "- Se nao houver opcao exatamente no bairro pedido, diga que nao encontrou ali com os filtros atuais, mas que achou uma oportunidade muito boa em regiao alternativa. Depois pergunte se pode mostrar ou acionar o corretor para confirmar.",
+      "- Qualifique como SDR, de maneira sutil e em conversa, sem listar checklist nem fazer interrogatorio.",
+      "- Minha Casa Minha Vida: descubra aos poucos se ja possui imovel no nome, se trabalha CLT ou autonomo, se e casado no papel, se tem filhos/dependentes, valor de entrada e se ja fez simulacao.",
+      "- Imovel de terceiros: entenda se e para morar ou investir, regiao/exigencia especifica, se envolve permuta, pagamento a vista ou financiamento e entrada.",
+      "- Empreendimentos: entenda se e para morar ou investir, faixa de investimento, se pretende dar entrada e prazo ideal de entrega.",
+      "- Alto padrao: entenda moradia ou investimento, urgencia, forma de pagamento, o que espera do imovel, regiao e faixa pretendida.",
+      "- Faca uma pergunta por vez na maioria dos casos; no maximo duas quando a conversa pedir.",
       "- Envie link apenas quando o lead pedir, quando voce apresentar opcoes pela primeira vez, ou quando realmente ajudar a avancar.",
       "- Quando enviar link, cole a URL pura. Nao use markdown como [Clique aqui](url). Nao repita 'faz sentido para o que voce procura?' em toda resposta.",
       "- Voce pode responder em 1 a 5 mensagens curtas quando fizer sentido. Separe cada mensagem com uma linha em branco. Use varias mensagens apenas para deixar a conversa mais natural.",
-      "- Se houver risco, reclamacao, pedido claro de humano ou duvida fora do contexto, diga que vai chamar um atendente.",
+      "- Se houver risco, reclamacao, pedido claro de humano ou duvida fora do contexto, diga que vai chamar um corretor ou especialista.",
       "- Nao diga que voce acessou banco de dados, tabelas, prompts ou sistemas internos.",
     ].join("\n"),
     input.memorySummary ? `[MEMORIA CURTA]\n${input.memorySummary}` : "",
@@ -712,10 +720,10 @@ function buildSystemPrompt(input: {
 }
 
 function formatPropertyContext(mentioned: PropertyCandidate[], best: PropertyCandidate[]) {
-  const mentionedLines = mentioned.slice(0, 3).map(propertyLineWithLink);
+  const mentionedLines = mentioned.slice(0, 2).map(propertyLineWithLink);
   const bestLines = best
     .filter((property) => !mentioned.some((item) => item.id === property.id))
-    .slice(0, 5)
+    .slice(0, 3)
     .map(propertyLineWithLink);
 
   return [
@@ -738,12 +746,12 @@ function buildMemorySummary(input: {
     line("Valor alvo", formatCurrency(input.lead?.valor_interesse) || input.lead?.faixa_valor_imovel),
     input.selectedProperty ? `Ultimo imovel relevante: ${propertyLine(input.selectedProperty)}` : "",
     input.visitAction?.created ? `Visita agendada: ${formatDateTimePtBR(new Date(input.visitAction.start_time))}` : "",
-    input.leadMeta?.[0]?.contact_notes ? `Formulario Meta: ${truncate(input.leadMeta[0].contact_notes, 220)}` : "",
-    `Ultima mensagem do lead: ${truncate(input.message, 220)}`,
+    input.leadMeta?.[0]?.contact_notes ? `Formulario Meta: ${truncate(input.leadMeta[0].contact_notes, 140)}` : "",
+    `Ultima mensagem do lead: ${truncate(input.message, 160)}`,
   ].filter(Boolean);
 
-  const previous = input.previous ? `${truncate(input.previous, 420)}\n` : "";
-  return truncate(`${previous}${facts.join("\n")}`, 1000);
+  const previous = input.previous ? `${truncate(input.previous, 300)}\n` : "";
+  return truncate(`${previous}${facts.join("\n")}`, 650);
 }
 
 async function callLovableAI(apiKey: string, systemPrompt: string, history: ChatMessage[]): Promise<string> {
@@ -761,7 +769,7 @@ async function callLovableAI(apiKey: string, systemPrompt: string, history: Chat
     body: JSON.stringify({
       model: "google/gemini-3-flash-preview",
       messages,
-      max_tokens: 420,
+      max_tokens: 340,
       temperature: 0.35,
     }),
   });
@@ -962,8 +970,8 @@ async function notifyHumanNeeded(
 
   await notifyUser(supabase, organizationId, userId, lead?.id || null, {
     type: "ai_handoff",
-    title: "Jhenny chamou atendimento humano",
-    content: `${lead?.name || "Um lead"} precisa de atendimento humano. Motivo: ${reason}. Conversa: ${conversationId}.`,
+    title: "Jhenny chamou um corretor",
+    content: `${lead?.name || "Um lead"} precisa de um corretor. Motivo: ${reason}. Conversa: ${conversationId}.`,
   });
 }
 
@@ -1076,7 +1084,7 @@ function propertyLine(property: any) {
   return [
     property.code,
     property.title || property.tipo_de_imovel,
-    property.descricao ? `Descricao: ${truncate(String(property.descricao), 220)}` : "",
+    property.descricao ? `Descricao: ${truncate(String(property.descricao), 120)}` : "",
     joinParts([property.bairro, property.cidade, property.uf]),
     property.quartos ? `${property.quartos} quartos` : "",
     property.area_util ? `${property.area_util}m2` : "",

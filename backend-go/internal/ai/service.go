@@ -179,11 +179,10 @@ func (s *Service) AutoReply(ctx context.Context, organizationID string, conversa
 		return AutoReplyResult{}, errors.New("human_approval_required")
 	}
 
-	state, _, _ := s.store.GetConversationState(ctx, conversationID)
 	contextText, _ := s.store.BuildAutoReplyContext(ctx, organizationID, conversationID, message, cfg.MaxContextMessages)
 
 	started := time.Now()
-	reply, usage, responseID, err := s.callOpenAI(ctx, cfg, message, contextText, state.LastResponseID)
+	reply, usage, responseID, err := s.callOpenAI(ctx, cfg, message, contextText, "")
 	latencyMS := int(time.Since(started).Milliseconds())
 	if err != nil {
 		_ = s.store.CreateAIInteractionLog(ctx, store.AIInteractionLog{
@@ -270,7 +269,7 @@ type openAIUsage struct {
 	TotalTokens  int
 }
 
-func (s *Service) callOpenAI(ctx context.Context, cfg store.AIResolvedConfig, message string, contextText string, previousResponseID string) (string, openAIUsage, string, error) {
+func (s *Service) callOpenAI(ctx context.Context, cfg store.AIResolvedConfig, message string, contextText string, _ string) (string, openAIUsage, string, error) {
 	instructions := strings.TrimSpace(strings.Join([]string{
 		cfg.SystemPrompt,
 		cfg.SafetyPrompt,
@@ -289,8 +288,16 @@ Se o lead pedir valor e o valor estiver no contexto, informe o valor. Se nao est
 Use a descricao do imovel quando ela existir para explicar com outras palavras, sem repetir sempre a mesma lista de quartos/vagas/valor.
 Nao revele dados confidenciais: nome/telefone do proprietario, endereco completo, numero, complemento, documentos, codigos internos sensiveis ou observacoes privadas.
 Pode informar apenas bairro, cidade e UF do imovel, alem do link publico quando disponivel.
-Nao ofereca consultor como saida padrao. Primeiro tente entender preferencia de bairro, faixa de valor, quartos, prazo, financiamento e tipo de imovel.
-So diga que vai chamar/encaminhar para um consultor quando o lead pedir humano/consultor/corretor, confirmar que quer atendimento, quiser agendar visita/ligacao, ou quando faltar uma informacao critica que voce nao pode afirmar.
+Use apenas "corretor" ou "especialista" para se referir a uma pessoa de atendimento.
+Nao ofereca corretor como saida padrao. Primeiro tente entender preferencia de bairro, faixa de valor, quartos, prazo, financiamento, urgencia e tipo de imovel.
+So diga que vai chamar/encaminhar para um corretor ou especialista quando o lead pedir atendimento com uma pessoa, confirmar que quer ser atendido, quiser agendar visita/ligacao, ou quando faltar uma informacao critica que voce nao pode afirmar.
+Se nao houver uma opcao exatamente no bairro pedido, diga de forma leve que nao encontrou ali com esses filtros, mas que achou uma oportunidade muito boa em uma regiao alternativa. Depois pergunte se pode mostrar ou acionar o corretor para confirmar.
+Qualifique como SDR, de maneira sutil e em conversa, sem listar checklist nem fazer interrogatorio.
+Para Minha Casa Minha Vida, descubra aos poucos: se ja possui imovel no nome, se trabalha CLT ou autonomo, se e casado no papel, se tem filhos/dependentes, valor de entrada e se ja fez simulacao.
+Para imovel de terceiros, entenda: morar ou investir, regiao/exigencia especifica, se envolve permuta, pagamento a vista ou financiamento e valor de entrada.
+Para empreendimentos, entenda: morar ou investir, faixa de investimento, se pretende dar entrada e prazo ideal de entrega.
+Para alto padrao, entenda: moradia ou investimento, urgencia, forma de pagamento, o que espera do imovel, regiao de interesse e faixa pretendida.
+Faca uma pergunta por vez na maioria dos casos; no maximo duas quando a conversa pedir. Use as respostas para avancar, nao para repetir perguntas.
 O link do imovel e uma opcao, nao o centro da conversa. Nao ofereca link toda hora. Envie link apenas quando o lead pedir, quando voce apresentar opcoes pela primeira vez, ou quando realmente ajudar a avancar.
 Quando enviar link, cole a URL pura. Nao use markdown como [Clique aqui](url). Nao repita "faz sentido para o que voce procura?" em toda resposta.
 Voce pode responder em 1 a 5 mensagens curtas quando fizer sentido. Separe cada mensagem com uma linha em branco. Use varias mensagens apenas para deixar a conversa mais natural, nao para enrolar.
@@ -309,15 +316,20 @@ Nao invente dados. Se precisar de dados nao autorizados, diga de forma curta que
 	}
 	input = append(input, map[string]string{"role": "user", "content": message})
 
+	maxOutputTokens := cfg.MaxOutputTokens
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = 320
+	}
+	if maxOutputTokens > 340 {
+		maxOutputTokens = 340
+	}
+
 	body := map[string]any{
 		"model":             cfg.Model,
 		"input":             input,
-		"store":             true,
-		"max_output_tokens": cfg.MaxOutputTokens,
+		"store":             false,
+		"max_output_tokens": maxOutputTokens,
 		"temperature":       cfg.Temperature,
-	}
-	if strings.TrimSpace(previousResponseID) != "" {
-		body["previous_response_id"] = strings.TrimSpace(previousResponseID)
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

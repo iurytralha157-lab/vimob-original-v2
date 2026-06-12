@@ -163,6 +163,7 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		return
 	}
 
+	replyStartedAt := time.Now()
 	reply, err := p.ai.AutoReply(ctx, job.OrganizationID, job.ConversationID, body)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
@@ -185,6 +186,49 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 	if number == "" {
 		p.logger.Warn("auto reply skipped: missing recipient number", "conversation_id", job.ConversationID)
 		return
+	}
+
+	if delay := humanReplyDelay(body, reply.Reply); delay > 0 {
+		p.logger.Info("auto reply waiting humanized delay", "organization_id", job.OrganizationID, "conversation_id", job.ConversationID, "delay_ms", delay.Milliseconds())
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+
+		newerInbound, err := p.store.HasInboundMessageSince(ctx, job.ConversationID, replyStartedAt)
+		if err != nil {
+			p.logger.Warn("auto reply newer inbound check failed", "error", err, "conversation_id", job.ConversationID)
+		}
+		if newerInbound {
+			_ = p.store.UpsertConversationState(ctx, store.ConversationState{
+				OrganizationID:    job.OrganizationID,
+				ConversationID:    job.ConversationID,
+				Channel:           "whatsapp",
+				AutomationEnabled: true,
+				AgentStatus:       "auto_reply_skipped_newer_inbound",
+			})
+			p.logger.Info("auto reply skipped: newer inbound during delay", "organization_id", job.OrganizationID, "conversation_id", job.ConversationID)
+			return
+		}
+
+		humanTakeover, err := p.store.HasRecentHumanTakeover(ctx, job.ConversationID, replyStartedAt)
+		if err != nil {
+			p.logger.Warn("auto reply human takeover recheck failed", "error", err, "conversation_id", job.ConversationID)
+		}
+		if humanTakeover {
+			_ = p.store.UpsertConversationState(ctx, store.ConversationState{
+				OrganizationID:    job.OrganizationID,
+				ConversationID:    job.ConversationID,
+				Channel:           "whatsapp",
+				AutomationEnabled: false,
+				AgentStatus:       "handed_off_human",
+			})
+			p.logger.Info("auto reply skipped: human takeover during delay", "organization_id", job.OrganizationID, "conversation_id", job.ConversationID)
+			return
+		}
 	}
 
 	chunks := splitWhatsAppReply(reply.Reply)
@@ -312,7 +356,7 @@ func (p *Pool) notifyHumanHandoff(ctx context.Context, organizationID string, co
 		return
 	}
 
-	summary, err := p.store.BuildHandoffSummary(ctx, conversationID, 8)
+	summary, err := p.store.BuildHandoffSummary(ctx, conversationID, 4)
 	if err != nil {
 		p.logger.Warn("handoff summary lookup failed", "error", err, "conversation_id", conversationID)
 	}
@@ -328,9 +372,9 @@ func (p *Pool) notifyHumanHandoff(ctx context.Context, organizationID string, co
 	if leadName == "" {
 		leadName = "Um lead"
 	}
-	message := "Jhenny qualificou um lead: " + leadName + ". Ele pediu atendimento humano. Abra a conversa para continuar."
+	message := "Jhenny chamou um corretor para " + leadName + ". Abra a conversa para continuar."
 	if strings.TrimSpace(summary) != "" {
-		message += "\n\nContexto:\n" + truncateText(summary, 700)
+		message += "\n\nResumo:\n" + truncateText(summary, 600)
 	}
 
 	payload, err := json.Marshal(map[string]any{
@@ -551,9 +595,14 @@ func shouldNotifyHumanHandoff(userMessage string, aiReply string) bool {
 	directRequests := []string{
 		"quero falar com consultor",
 		"quero falar com corretor",
+		"quero falar com especialista",
 		"quero falar com atendente",
 		"chama um consultor",
 		"chamar um consultor",
+		"chama um corretor",
+		"chamar um corretor",
+		"chama um especialista",
+		"chamar um especialista",
 		"pode chamar",
 		"pode encaminhar",
 		"sim pode encaminhar",
@@ -562,8 +611,12 @@ func shouldNotifyHumanHandoff(userMessage string, aiReply string) bool {
 		"sim, pode chamar",
 		"manda para o consultor",
 		"manda pro consultor",
+		"manda para o corretor",
+		"manda pro corretor",
 		"encaminha para o consultor",
 		"encaminha pro consultor",
+		"encaminha para o corretor",
+		"encaminha pro corretor",
 		"me liga",
 		"pode me ligar",
 		"vamos marcar",
@@ -578,20 +631,57 @@ func shouldNotifyHumanHandoff(userMessage string, aiReply string) bool {
 	}
 
 	replySignals := []string{
-		"vou chamar um consultor",
 		"vou chamar um corretor",
-		"vou chamar um atendente",
+		"vou chamar um especialista",
+		"vou acionar um corretor",
+		"vou acionar um especialista",
 		"vou encaminhar",
 		"vou te encaminhar",
+		"vou passar para um corretor",
+		"vou passar para um especialista",
 		"vou passar para a equipe",
 		"vou passar seu contato",
 		"vou confirmar com a equipe",
-		"um consultor vai",
 		"um corretor vai",
+		"um especialista vai",
 		"equipe vai",
 	}
 	for _, phrase := range replySignals {
 		if strings.Contains(reply, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func humanReplyDelay(userMessage string, aiReply string) time.Duration {
+	user := strings.ToLower(strings.TrimSpace(userMessage))
+	reply := strings.ToLower(strings.TrimSpace(aiReply))
+	if user == "" {
+		return 0
+	}
+
+	delay := 45 * time.Second
+	if len([]rune(userMessage)) > 80 || containsAnyText(user,
+		"imovel", "casa", "apartamento", "apto", "valor", "preco",
+		"bairro", "regiao", "financiamento", "entrada", "visita", "opcao", "opcoes",
+	) {
+		delay = 65 * time.Second
+	}
+	if containsAnyText(reply, "corretor", "especialista", "confirmar com a equipe", "agendar", "visita") {
+		delay += 15 * time.Second
+	}
+
+	delay += time.Duration(len([]rune(userMessage))%18) * time.Second
+	if delay > 100*time.Second {
+		return 100 * time.Second
+	}
+	return delay
+}
+
+func containsAnyText(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
 			return true
 		}
 	}
