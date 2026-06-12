@@ -8,9 +8,19 @@ const corsHeaders = {
 const DEFAULT_HISTORY_LIMIT = 4;
 const DEFAULT_SITE_BASE_URL = "https://vimob.vettercompany.com.br";
 const HUMAN_TAKEOVER_LOOKBACK_HOURS = 6;
+const AI_MODEL = "google/gemini-3-flash-preview";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type PropertyCandidate = Record<string, any> & { score?: number; public_url?: string | null };
+type AICompletionResult = {
+  content: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  latencyMs: number;
+  estimatedCostUsd: number;
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -132,8 +142,8 @@ Deno.serve(async (req) => {
       return json({ success: false, error: "LOVABLE_API_KEY not configured" }, 500);
     }
 
-    let aiResponse = await callLovableAI(LOVABLE_API_KEY, fullSystemPrompt, history);
-    aiResponse = appendActionConfirmation(aiResponse, visitAction);
+    const aiResult = await callLovableAI(LOVABLE_API_KEY, fullSystemPrompt, history);
+    let aiResponse = appendActionConfirmation(aiResult.content, visitAction);
 
     if (!aiResponse) {
       console.error("[ai-agent-responder] Empty AI response");
@@ -141,6 +151,28 @@ Deno.serve(async (req) => {
     }
 
     await insertOutboxMessage(supabase, conversation_id, aiResponse);
+    await logAIInteraction(supabase, {
+      organizationId: organization_id,
+      conversationId: conversation_id,
+      agentId: agent.id,
+      model: aiResult.model,
+      promptTokens: aiResult.promptTokens,
+      completionTokens: aiResult.completionTokens,
+      totalTokens: aiResult.totalTokens,
+      estimatedCostUsd: aiResult.estimatedCostUsd,
+      latencyMs: aiResult.latencyMs,
+      success: true,
+      inputPreview: message,
+      outputPreview: aiResponse,
+      metadata: {
+        source: "ai-agent-responder",
+        mode: "auto",
+        lead_id: lead?.id || null,
+        property_id: selectedProperty?.id || null,
+        property_code: selectedProperty?.code || null,
+        response_parts: splitAssistantMessages(aiResponse).length,
+      },
+    });
     await upsertAgentConversation(supabase, {
       agent,
       agentConv,
@@ -474,6 +506,23 @@ function extractLocationTerms(message: string) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function estimateTokens(text: string) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.ceil(normalized.length / 4));
+}
+
+function estimateCostUsd(model: string, promptTokens: number, completionTokens: number) {
+  const normalizedModel = normalizeText(model);
+  if (normalizedModel.includes("gemini")) {
+    return Number((((promptTokens / 1_000_000) * 0.10) + ((completionTokens / 1_000_000) * 0.40)).toFixed(8));
+  }
+  if (normalizedModel.includes("gpt-4.1-nano")) {
+    return Number((((promptTokens / 1_000_000) * 0.10) + ((completionTokens / 1_000_000) * 0.40)).toFixed(8));
+  }
+  return Number((((promptTokens / 1_000_000) * 0.15) + ((completionTokens / 1_000_000) * 0.60)).toFixed(8));
 }
 
 function formatLeadMeta(rows: any[]) {
@@ -898,12 +947,13 @@ function buildMemorySummary(input: {
   return truncate(`${previous}${facts.join("\n")}`, 650);
 }
 
-async function callLovableAI(apiKey: string, systemPrompt: string, history: ChatMessage[]): Promise<string> {
+async function callLovableAI(apiKey: string, systemPrompt: string, history: ChatMessage[]): Promise<AICompletionResult> {
   const messages = [
     { role: "system", content: systemPrompt },
     ...history,
   ];
 
+  const startedAt = Date.now();
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -911,7 +961,7 @@ async function callLovableAI(apiKey: string, systemPrompt: string, history: Chat
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-3-flash-preview",
+      model: AI_MODEL,
       messages,
       max_tokens: 340,
       temperature: 0.35,
@@ -926,7 +976,61 @@ async function callLovableAI(apiKey: string, systemPrompt: string, history: Chat
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || "";
+  const content = data.choices?.[0]?.message?.content || "";
+  const promptTokens = Number(data.usage?.prompt_tokens ?? estimateTokens(messages.map((msg) => msg.content).join("\n")));
+  const completionTokens = Number(data.usage?.completion_tokens ?? estimateTokens(content));
+  const totalTokens = Number(data.usage?.total_tokens ?? promptTokens + completionTokens);
+  const model = data.model || AI_MODEL;
+
+  return {
+    content,
+    model,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    latencyMs: Date.now() - startedAt,
+    estimatedCostUsd: estimateCostUsd(model, promptTokens, completionTokens),
+  };
+}
+
+async function logAIInteraction(supabase: any, input: {
+  organizationId: string;
+  conversationId: string;
+  agentId: string | null;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  latencyMs: number;
+  success: boolean;
+  inputPreview: string;
+  outputPreview: string;
+  metadata: Record<string, unknown>;
+  errorMessage?: string | null;
+}) {
+  const { error } = await supabase.from("ai_interaction_logs").insert({
+    organization_id: input.organizationId,
+    conversation_id: input.conversationId,
+    agent_id: input.agentId,
+    mode: "auto",
+    event_type: "auto_reply_generated",
+    model: input.model,
+    prompt_tokens: input.promptTokens,
+    completion_tokens: input.completionTokens,
+    total_tokens: input.totalTokens,
+    estimated_cost_usd: input.estimatedCostUsd,
+    latency_ms: input.latencyMs,
+    success: input.success,
+    error_message: input.errorMessage || null,
+    input_preview: truncate(input.inputPreview, 500),
+    output_preview: truncate(input.outputPreview, 500),
+    metadata: input.metadata || {},
+  });
+
+  if (error) {
+    console.error("[ai-agent-responder] Error inserting AI interaction log:", error);
+  }
 }
 
 async function insertOutboxMessage(supabase: any, conversationId: string, content: string): Promise<void> {

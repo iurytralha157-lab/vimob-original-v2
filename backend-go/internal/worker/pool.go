@@ -137,7 +137,14 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		return
 	}
 
-	humanTakeover, err := p.store.HasRecentHumanTakeover(ctx, job.ConversationID, time.Now().Add(-6*time.Hour))
+	takeoverSince := time.Now().Add(-6 * time.Hour)
+	if state, ok, stateErr := p.store.GetConversationState(ctx, job.ConversationID); stateErr != nil {
+		p.logger.Warn("auto reply state lookup failed", "error", stateErr, "conversation_id", job.ConversationID)
+	} else if ok && state.HasContextReset && state.ContextResetAt.After(takeoverSince) {
+		takeoverSince = state.ContextResetAt
+	}
+
+	humanTakeover, err := p.store.HasRecentHumanTakeover(ctx, job.ConversationID, takeoverSince)
 	if err != nil {
 		p.logger.Error("auto reply human takeover check failed", "error", err, "conversation_id", job.ConversationID)
 		return
