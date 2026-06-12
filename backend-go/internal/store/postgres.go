@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +50,13 @@ type WhatsAppConversation struct {
 	IsGroup        bool
 }
 
+type HandoffTarget struct {
+	LeadID string
+	UserID string
+	Name   string
+	Phone  string
+}
+
 type recentMessage struct {
 	FromMe  bool
 	Content string
@@ -62,8 +71,16 @@ type propertySummary struct {
 	City         string
 	State        string
 	Bedrooms    string
+	Suites       string
+	Bathrooms    string
+	ParkingSpots string
 	Area        string
+	TotalArea   string
 	Price       string
+	RentPrice   string
+	CondoFee    string
+	PropertyTax string
+	PublicURL   string
 }
 
 type AIResolvedConfig struct {
@@ -360,6 +377,66 @@ func (s *Store) RecordAIWhatsAppMessage(ctx context.Context, conversationID stri
 	return err
 }
 
+func (s *Store) ResolveHandoffTarget(ctx context.Context, conversationID string) (HandoffTarget, bool, error) {
+	var target HandoffTarget
+	err := s.pool.QueryRow(ctx, `
+		select
+			coalesce(l.id::text, ''),
+			coalesce(l.assigned_user_id::text, ws.owner_user_id::text, ''),
+			coalesce(l.name, wc.contact_name, 'Lead'),
+			coalesce(l.phone, wc.contact_phone, '')
+		from whatsapp_conversations wc
+		left join leads l on l.id = wc.lead_id
+		left join whatsapp_sessions ws on ws.id = wc.session_id
+		where wc.id = $1
+		limit 1
+	`, conversationID).Scan(&target.LeadID, &target.UserID, &target.Name, &target.Phone)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return HandoffTarget{}, false, nil
+		}
+		return HandoffTarget{}, false, err
+	}
+	return target, target.UserID != "", nil
+}
+
+func (s *Store) CreateHandoffNotification(ctx context.Context, organizationID string, conversationID string, target HandoffTarget, reason string) error {
+	if strings.TrimSpace(organizationID) == "" || strings.TrimSpace(target.UserID) == "" {
+		return nil
+	}
+
+	content := strings.TrimSpace(target.Name)
+	if content == "" {
+		content = "Um lead"
+	}
+	content += " foi qualificado pela Jhenny e pediu atendimento humano."
+	if reason != "" {
+		content += " Motivo: " + reason + "."
+	}
+
+	_, err := s.pool.Exec(ctx, `
+		insert into notifications (organization_id, user_id, lead_id, type, title, content, is_read)
+		select
+			$1::uuid,
+			$2::uuid,
+			nullif($3, '')::uuid,
+			'ai_handoff',
+			'Jhenny pediu atendimento',
+			$4,
+			false
+		where not exists (
+			select 1
+			from notifications
+			where organization_id = $1::uuid
+			  and user_id = $2::uuid
+			  and coalesce(lead_id::text, '') = coalesce(nullif($3, ''), '')
+			  and type = 'ai_handoff'
+			  and created_at >= now() - interval '10 minutes'
+		)
+	`, organizationID, target.UserID, target.LeadID, content)
+	return err
+}
+
 func (s *Store) BuildAutoReplyContext(ctx context.Context, organizationID string, conversationID string, message string, maxMessages int) (string, error) {
 	if maxMessages <= 0 || maxMessages > 12 {
 		maxMessages = 8
@@ -550,14 +627,47 @@ func (s *Store) recentConversationContext(ctx context.Context, conversationID st
 func (s *Store) propertyContext(ctx context.Context, organizationID string, message string) (string, error) {
 	var sections []string
 
+	publicBaseURL, _ := s.publicSiteBaseURL(ctx, organizationID)
 	if mentioned, err := s.findMentionedProperties(ctx, organizationID, message, 4); err == nil && len(mentioned) > 0 {
+		attachPropertyLinks(mentioned, publicBaseURL)
 		sections = append(sections, propertySection("IMOVEL CITADO NA MENSAGEM", mentioned))
 	}
-	if suggestions, err := s.suggestProperties(ctx, organizationID, 5); err == nil && len(suggestions) > 0 {
+	if suggestions, err := s.suggestProperties(ctx, organizationID, message, 5); err == nil && len(suggestions) > 0 {
+		attachPropertyLinks(suggestions, publicBaseURL)
 		sections = append(sections, propertySection("IMOVEIS PARA OFERECER", suggestions))
 	}
 
 	return strings.Join(sections, "\n\n"), nil
+}
+
+func (s *Store) publicSiteBaseURL(ctx context.Context, organizationID string) (string, error) {
+	var subdomain string
+	var customDomain string
+	var domainVerified bool
+	err := s.pool.QueryRow(ctx, `
+		select
+			coalesce(subdomain, ''),
+			coalesce(custom_domain, ''),
+			coalesce(domain_verified, false)
+		from organization_sites
+		where organization_id = $1
+		  and is_active = true
+		order by updated_at desc nulls last, created_at desc nulls last
+		limit 1
+	`, organizationID).Scan(&subdomain, &customDomain, &domainVerified)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	if customDomain != "" && domainVerified {
+		return "https://" + strings.TrimRight(customDomain, "/"), nil
+	}
+	if subdomain != "" {
+		return "https://vimob.vettercompany.com.br/sites/" + subdomain, nil
+	}
+	return "", nil
 }
 
 func (s *Store) findMentionedProperties(ctx context.Context, organizationID string, message string, limit int) ([]propertySummary, error) {
@@ -582,13 +692,23 @@ func (s *Store) findMentionedProperties(ctx context.Context, organizationID stri
 	return scanPropertySummaries(rows)
 }
 
-func (s *Store) suggestProperties(ctx context.Context, organizationID string, limit int) ([]propertySummary, error) {
+func (s *Store) suggestProperties(ctx context.Context, organizationID string, message string, limit int) ([]propertySummary, error) {
 	rows, err := s.pool.Query(ctx, propertySummarySQL()+`
 		where organization_id = $1
 		  and lower(coalesce(status, '')) not in ('inativo', 'vendido', 'locado', 'indisponivel', 'arquivado', 'excluido')
-		order by destaque desc nulls last, created_at desc
-		limit $2
-	`, organizationID, limit)
+		order by
+		  (
+		    case when nullif(bairro, '') is not null and lower($2) like '%' || lower(bairro) || '%' then 30 else 0 end
+		    + case when nullif(cidade, '') is not null and lower($2) like '%' || lower(cidade) || '%' then 16 else 0 end
+		    + case when nullif(tipo_de_imovel, '') is not null and lower($2) like '%' || lower(tipo_de_imovel) || '%' then 12 else 0 end
+		    + case when nullif(tipo_de_negocio, '') is not null and lower($2) like '%' || lower(tipo_de_negocio) || '%' then 8 else 0 end
+		    + case when quartos is not null and lower($2) like '%' || quartos::text || ' quarto%' then 8 else 0 end
+		    + case when destaque then 4 else 0 end
+		  ) desc,
+		  destaque desc nulls last,
+		  created_at desc
+		limit $3
+	`, organizationID, strings.ToLower(message), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -607,8 +727,15 @@ func propertySummarySQL() string {
 			coalesce(cidade, ''),
 			coalesce(uf, ''),
 			coalesce(quartos::text, ''),
+			coalesce(suites::text, ''),
+			coalesce(banheiros::text, ''),
+			coalesce(vagas::text, ''),
 			coalesce(area_util::text, ''),
-			coalesce(coalesce(preco, valor_locacao)::text, '')
+			coalesce(area_total::text, ''),
+			coalesce(preco::text, ''),
+			coalesce(valor_locacao::text, ''),
+			coalesce(condominio::text, ''),
+			coalesce(iptu::text, '')
 		from properties
 	`
 }
@@ -626,8 +753,15 @@ func scanPropertySummaries(rows pgx.Rows) ([]propertySummary, error) {
 			&property.City,
 			&property.State,
 			&property.Bedrooms,
+			&property.Suites,
+			&property.Bathrooms,
+			&property.ParkingSpots,
 			&property.Area,
+			&property.TotalArea,
 			&property.Price,
+			&property.RentPrice,
+			&property.CondoFee,
+			&property.PropertyTax,
 		); err != nil {
 			return nil, err
 		}
@@ -648,12 +782,33 @@ func propertySection(title string, properties []propertySummary) string {
 			firstNonEmpty(property.Title, property.PropertyType),
 			joinNonEmpty(", ", property.Neighborhood, property.City, property.State),
 			suffixIfPresent(property.Bedrooms, " quartos"),
-			suffixIfPresent(property.Area, "m2"),
-			property.Price,
+			suffixIfPresent(property.Suites, " suites"),
+			suffixIfPresent(property.Bathrooms, " banheiros"),
+			suffixIfPresent(property.ParkingSpots, " vagas"),
+			suffixIfPresent(property.Area, "m2 uteis"),
+			suffixIfPresent(property.TotalArea, "m2 totais"),
+			prefixIfPresent(formatCurrencyBRL(property.Price), "Venda: "),
+			prefixIfPresent(formatCurrencyBRL(property.RentPrice), "Locacao: "),
+			prefixIfPresent(formatCurrencyBRL(property.CondoFee), "Condominio: "),
+			prefixIfPresent(formatCurrencyBRL(property.PropertyTax), "IPTU: "),
+			prefixIfPresent(property.PublicURL, "Link: "),
 		))
 		b.WriteString("\n")
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func attachPropertyLinks(properties []propertySummary, publicBaseURL string) {
+	publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
+	if publicBaseURL == "" {
+		return
+	}
+	for i := range properties {
+		code := strings.TrimSpace(properties[i].Code)
+		if code != "" {
+			properties[i].PublicURL = publicBaseURL + "/imovel/" + code
+		}
+	}
 }
 
 var propertyCodePattern = regexp.MustCompile(`\b([A-Za-z]{1,5}\s*-?\s*\d{2,7}|\d{3,7})\b`)
@@ -713,6 +868,34 @@ func suffixIfPresent(value string, suffix string) string {
 		return ""
 	}
 	return value + suffix
+}
+
+func prefixIfPresent(value string, prefix string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return prefix + value
+}
+
+func formatCurrencyBRL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	number, err := strconv.ParseFloat(value, 64)
+	if err != nil || number <= 0 {
+		return value
+	}
+	rounded := int64(number + 0.5)
+	raw := strconv.FormatInt(rounded, 10)
+	var parts []string
+	for len(raw) > 3 {
+		parts = append([]string{raw[len(raw)-3:]}, parts...)
+		raw = raw[:len(raw)-3]
+	}
+	parts = append([]string{raw}, parts...)
+	return fmt.Sprintf("R$ %s", strings.Join(parts, "."))
 }
 
 func truncate(value string, limit int) string {

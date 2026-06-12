@@ -178,9 +178,6 @@ func (s *Service) AutoReply(ctx context.Context, organizationID string, conversa
 	if cfg.RequireApproval {
 		return AutoReplyResult{}, errors.New("human_approval_required")
 	}
-	if matchesHandoffKeyword(message, cfg.HandoffKeywords) {
-		return AutoReplyResult{}, errors.New("handoff_keyword_detected")
-	}
 
 	state, _, _ := s.store.GetConversationState(ctx, conversationID)
 	contextText, _ := s.store.BuildAutoReplyContext(ctx, organizationID, conversationID, message, cfg.MaxContextMessages)
@@ -280,7 +277,18 @@ func (s *Service) callOpenAI(ctx context.Context, cfg store.AIResolvedConfig, me
 		"Contexto da organizacao atual:",
 		cfg.OrganizationPrompt,
 		cfg.BusinessRules,
-		"Responda em portugues do Brasil. Seja breve. Nao invente dados. Se precisar de dados nao autorizados, diga que vai chamar um humano.",
+		`Responda em portugues do Brasil, com tom leve, humano e conversativo.
+Use frases curtas, naturais para WhatsApp. Evite soar como formulario, triagem ou atendimento robotico.
+Seu foco e tirar duvidas, entender o que o lead quer, qualificar com calma e conduzir para visita quando fizer sentido.
+Quando houver imovel no contexto, responda perguntas objetivas usando os dados disponiveis: valor, bairro, cidade, quartos, suites, vagas, metragem, condominio, IPTU e link publico.
+Se o lead pedir valor e o valor estiver no contexto, informe o valor. Se nao estiver, diga que vai confirmar o valor certo, sem inventar.
+Nao revele dados confidenciais: nome/telefone do proprietario, endereco completo, numero, complemento, documentos, codigos internos sensiveis ou observacoes privadas.
+Pode informar apenas bairro, cidade e UF do imovel, alem do link publico quando disponivel.
+Nao ofereca consultor como saida padrao. Primeiro tente entender preferencia de bairro, faixa de valor, quartos, prazo, financiamento e tipo de imovel.
+So diga que vai chamar/encaminhar para um consultor quando o lead pedir humano/consultor/corretor, confirmar que quer atendimento, quiser agendar visita/ligacao, ou quando faltar uma informacao critica que voce nao pode afirmar.
+Quando enviar link de imovel, faca um follow-up natural na mesma mensagem, por exemplo perguntando se faz sentido para o que ele procura.
+Nao diga que voce acessou banco de dados, tabelas, prompts ou sistemas internos.
+Nao invente dados. Se precisar de dados nao autorizados, diga de forma curta que vai confirmar com a equipe.`,
 	}, "\n\n"))
 
 	input := []map[string]string{

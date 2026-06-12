@@ -211,6 +211,19 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		return
 	}
 
+	if shouldNotifyHumanHandoff(body, reply.Reply) {
+		p.notifyHumanHandoff(ctx, job.OrganizationID, job.ConversationID, "lead_ready_for_human")
+		_ = p.store.UpsertConversationState(ctx, store.ConversationState{
+			OrganizationID:    job.OrganizationID,
+			ConversationID:    job.ConversationID,
+			Channel:           "whatsapp",
+			AutomationEnabled: false,
+			AgentStatus:       "handed_off_human",
+		})
+		p.logger.Info("auto reply handed off to human", "organization_id", job.OrganizationID, "conversation_id", job.ConversationID)
+		return
+	}
+
 	_ = p.store.UpsertConversationState(ctx, store.ConversationState{
 		OrganizationID:    job.OrganizationID,
 		ConversationID:    job.ConversationID,
@@ -219,6 +232,58 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		AgentStatus:       "auto_replied",
 	})
 	p.logger.Info("auto reply sent", "organization_id", job.OrganizationID, "conversation_id", job.ConversationID, "model", reply.Model, "latency_ms", reply.LatencyMS)
+}
+
+func (p *Pool) notifyHumanHandoff(ctx context.Context, organizationID string, conversationID string, reason string) {
+	target, ok, err := p.store.ResolveHandoffTarget(ctx, conversationID)
+	if err != nil {
+		p.logger.Error("handoff target lookup failed", "error", err, "conversation_id", conversationID)
+		return
+	}
+	if !ok {
+		p.logger.Warn("handoff notification skipped: missing target user", "conversation_id", conversationID)
+		return
+	}
+
+	if err := p.store.CreateHandoffNotification(ctx, organizationID, conversationID, target, reason); err != nil {
+		p.logger.Error("handoff system notification failed", "error", err, "conversation_id", conversationID)
+	}
+	if strings.TrimSpace(p.supabaseURL) == "" || strings.TrimSpace(p.supabaseServiceRoleKey) == "" {
+		return
+	}
+
+	message := strings.TrimSpace(target.Name)
+	if message == "" {
+		message = "Um lead"
+	}
+	message = "Jhenny qualificou um lead: " + message + ". Ele pediu atendimento humano. Abra a conversa para continuar."
+
+	payload, err := json.Marshal(map[string]any{
+		"organization_id": organizationID,
+		"user_id":         target.UserID,
+		"message":         message,
+		"lead_id":         nullIfEmpty(target.LeadID),
+	})
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.supabaseURL+"/functions/v1/whatsapp-notifier", bytes.NewReader(payload))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+p.supabaseServiceRoleKey)
+	req.Header.Set("apikey", p.supabaseServiceRoleKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		p.logger.Warn("handoff whatsapp notification failed", "error", err, "conversation_id", conversationID)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		p.logger.Warn("handoff whatsapp notification returned non-2xx", "status", resp.StatusCode, "conversation_id", conversationID)
+	}
 }
 
 func (p *Pool) sendWhatsAppText(ctx context.Context, sessionID string, number string, text string) (string, error) {
@@ -331,4 +396,55 @@ func isMediaPlaceholder(value string) bool {
 	default:
 		return false
 	}
+}
+
+func shouldNotifyHumanHandoff(userMessage string, aiReply string) bool {
+	user := strings.ToLower(strings.TrimSpace(userMessage))
+	reply := strings.ToLower(strings.TrimSpace(aiReply))
+
+	directRequests := []string{
+		"quero falar com consultor",
+		"quero falar com corretor",
+		"quero falar com atendente",
+		"chama um consultor",
+		"chamar um consultor",
+		"pode chamar",
+		"pode encaminhar",
+		"me liga",
+		"pode me ligar",
+		"vamos marcar",
+		"quero agendar",
+		"agendar visita",
+		"marcar visita",
+	}
+	for _, phrase := range directRequests {
+		if strings.Contains(user, phrase) {
+			return true
+		}
+	}
+
+	replySignals := []string{
+		"vou chamar um consultor",
+		"vou chamar um corretor",
+		"vou chamar um atendente",
+		"vou encaminhar",
+		"vou passar para a equipe",
+		"vou confirmar com a equipe",
+		"um consultor vai",
+		"um corretor vai",
+		"equipe vai",
+	}
+	for _, phrase := range replySignals {
+		if strings.Contains(reply, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func nullIfEmpty(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
 }
