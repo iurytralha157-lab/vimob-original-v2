@@ -96,6 +96,9 @@ verify_jwt = false
 [functions.notification-dispatcher]
 verify_jwt = true
 
+[functions.lead-notification-dispatcher]
+verify_jwt = false
+
 [functions.recurring-entries-generator]
 verify_jwt = false
 
