@@ -45,6 +45,17 @@ function getSentMessageId(data: any) {
   return null;
 }
 
+function isAutomationOutboxMessage(message: any) {
+  const clientMessageId = String(message?.client_message_id || "");
+  return !message?.created_by || clientMessageId.startsWith("jhenny-") || clientMessageId.startsWith("ai-");
+}
+
+function getOutboxSenderName(message: any) {
+  const clientMessageId = String(message?.client_message_id || "");
+  if (clientMessageId.startsWith("jhenny-") || clientMessageId.startsWith("ai-")) return "Jhenny";
+  return null;
+}
+
 async function sendViaEvolutionGo(
   supabaseUrl: string,
   serviceRoleKey: string,
@@ -236,6 +247,7 @@ Deno.serve(async (req) => {
           .eq("id", message.id);
 
         // ===== OPTIMISTIC UPDATE: Update existing message by client_message_id =====
+        const outboxSenderName = getOutboxSenderName(message);
         if (message.client_message_id) {
           // Try to update the optimistic message first
           const { data: existingMsg } = await supabase
@@ -270,6 +282,7 @@ Deno.serve(async (req) => {
               media_mime_type: message.media_mime_type,
               status: "sent",
               sent_at: new Date().toISOString(),
+              sender_name: outboxSenderName,
             });
           }
         } else {
@@ -285,6 +298,7 @@ Deno.serve(async (req) => {
             media_mime_type: message.media_mime_type,
             status: "sent",
             sent_at: new Date().toISOString(),
+            sender_name: outboxSenderName,
           });
         }
 
@@ -330,7 +344,7 @@ Deno.serve(async (req) => {
                 lead_id: convData.lead_id,
                 channel: "whatsapp",
                 actor_user_id: message.created_by,
-                is_automation: false,
+                is_automation: isAutomationOutboxMessage(message),
                 organization_id: message.organization_id
               })
             });
@@ -343,7 +357,8 @@ Deno.serve(async (req) => {
           // Mirror of evolution-webhook's isManualInteraction path. We cancel all
           // running/waiting executions for this lead so the automation stops the
           // moment the broker takes over the conversation from the app UI.
-          try {
+          if (message.created_by) {
+            try {
             const { data: activeExecs } = await supabase
               .from("automation_executions")
               .select("id, automation_id, automations(name)")
@@ -373,8 +388,9 @@ Deno.serve(async (req) => {
               }
               console.log(`Cancelled ${ids.length} active automation(s) due to manual reply via internal chat`);
             }
-          } catch (cancelErr) {
-            console.error("Error cancelling automations on manual reply:", cancelErr);
+            } catch (cancelErr) {
+              console.error("Error cancelling automations on manual reply:", cancelErr);
+            }
           }
         }
 

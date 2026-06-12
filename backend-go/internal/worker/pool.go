@@ -136,6 +136,23 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		return
 	}
 
+	humanTakeover, err := p.store.HasRecentHumanTakeover(ctx, job.ConversationID, time.Now().Add(-6*time.Hour))
+	if err != nil {
+		p.logger.Error("auto reply human takeover check failed", "error", err, "conversation_id", job.ConversationID)
+		return
+	}
+	if humanTakeover {
+		_ = p.store.UpsertConversationState(ctx, store.ConversationState{
+			OrganizationID:    job.OrganizationID,
+			ConversationID:    job.ConversationID,
+			Channel:           "whatsapp",
+			AutomationEnabled: false,
+			AgentStatus:       "handed_off_human",
+		})
+		p.logger.Info("auto reply skipped: human takeover detected", "organization_id", job.OrganizationID, "conversation_id", job.ConversationID)
+		return
+	}
+
 	conv, ok, err := p.store.GetWhatsAppConversation(ctx, job.ConversationID)
 	if err != nil {
 		p.logger.Error("auto reply conversation lookup failed", "error", err, "conversation_id", job.ConversationID)
@@ -169,7 +186,8 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 		return
 	}
 
-	if err := p.sendWhatsAppText(ctx, conv.SessionID, number, reply.Reply); err != nil {
+	sentMessageID, err := p.sendWhatsAppText(ctx, conv.SessionID, number, reply.Reply)
+	if err != nil {
 		p.logger.Error("auto reply send failed", "error", err, "conversation_id", job.ConversationID)
 		_ = p.store.UpsertConversationState(ctx, store.ConversationState{
 			OrganizationID:    job.OrganizationID,
@@ -177,6 +195,18 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 			Channel:           "whatsapp",
 			AutomationEnabled: true,
 			AgentStatus:       "auto_reply_send_failed",
+		})
+		return
+	}
+
+	if err := p.store.RecordAIWhatsAppMessage(ctx, job.ConversationID, conv.SessionID, sentMessageID, reply.Reply); err != nil {
+		p.logger.Error("auto reply history write failed", "error", err, "conversation_id", job.ConversationID)
+		_ = p.store.UpsertConversationState(ctx, store.ConversationState{
+			OrganizationID:    job.OrganizationID,
+			ConversationID:    job.ConversationID,
+			Channel:           "whatsapp",
+			AutomationEnabled: true,
+			AgentStatus:       "auto_reply_history_failed",
 		})
 		return
 	}
@@ -191,7 +221,7 @@ func (p *Pool) tryAutoReply(ctx context.Context, job Job) {
 	p.logger.Info("auto reply sent", "organization_id", job.OrganizationID, "conversation_id", job.ConversationID, "model", reply.Model, "latency_ms", reply.LatencyMS)
 }
 
-func (p *Pool) sendWhatsAppText(ctx context.Context, sessionID string, number string, text string) error {
+func (p *Pool) sendWhatsAppText(ctx context.Context, sessionID string, number string, text string) (string, error) {
 	payload, err := json.Marshal(map[string]any{
 		"action":     "send.text",
 		"session_id": sessionID,
@@ -201,11 +231,11 @@ func (p *Pool) sendWhatsAppText(ctx context.Context, sessionID string, number st
 		},
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.supabaseURL+"/functions/v1/evolution-go-proxy", bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+p.supabaseServiceRoleKey)
 	req.Header.Set("apikey", p.supabaseServiceRoleKey)
@@ -213,22 +243,57 @@ func (p *Pool) sendWhatsAppText(ctx context.Context, sessionID string, number st
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 
-	var decoded struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
+	var decoded map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return "", err
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&decoded)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !decoded.OK {
-		if decoded.Error != "" {
-			return errors.New(decoded.Error)
+	ok, _ := decoded["ok"].(bool)
+	errorMessage, _ := decoded["error"].(string)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !ok {
+		if errorMessage != "" {
+			return "", errors.New(errorMessage)
 		}
-		return errors.New("evolution_go_proxy_send_failed")
+		return "", errors.New("evolution_go_proxy_send_failed")
 	}
-	return nil
+	return extractSentMessageID(decoded), nil
+}
+
+func extractSentMessageID(value any) string {
+	keys := []string{
+		"sentMessageId", "messageId", "messageID", "MessageID",
+		"id", "ID", "Id",
+	}
+	nestedKeys := []string{
+		"key", "Key", "data", "Data", "message", "Message", "response", "Response",
+	}
+
+	switch v := value.(type) {
+	case map[string]any:
+		for _, key := range keys {
+			if text, ok := v[key].(string); ok && strings.TrimSpace(text) != "" {
+				return strings.TrimSpace(text)
+			}
+		}
+		for _, key := range nestedKeys {
+			if next, ok := v[key]; ok {
+				if text := extractSentMessageID(next); text != "" {
+					return text
+				}
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if text := extractSentMessageID(item); text != "" {
+				return text
+			}
+		}
+	}
+
+	return ""
 }
 
 func parseAutoOrganizations(raw string) map[string]bool {

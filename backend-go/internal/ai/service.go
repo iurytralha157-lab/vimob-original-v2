@@ -112,7 +112,7 @@ func (s *Service) Preview(ctx context.Context, input PreviewRequest) (PreviewRes
 		return result, nil
 	}
 
-	reply, usage, err := s.callOpenAI(ctx, cfg, input.Message)
+	reply, usage, _, err := s.callOpenAI(ctx, cfg, input.Message, "", "")
 	result.LatencyMS = int(time.Since(started).Milliseconds())
 	if err != nil {
 		_ = s.store.CreateAIInteractionLog(ctx, store.AIInteractionLog{
@@ -182,8 +182,11 @@ func (s *Service) AutoReply(ctx context.Context, organizationID string, conversa
 		return AutoReplyResult{}, errors.New("handoff_keyword_detected")
 	}
 
+	state, _, _ := s.store.GetConversationState(ctx, conversationID)
+	contextText, _ := s.store.BuildAutoReplyContext(ctx, organizationID, conversationID, message, cfg.MaxContextMessages)
+
 	started := time.Now()
-	reply, usage, err := s.callOpenAI(ctx, cfg, message)
+	reply, usage, responseID, err := s.callOpenAI(ctx, cfg, message, contextText, state.LastResponseID)
 	latencyMS := int(time.Since(started).Milliseconds())
 	if err != nil {
 		_ = s.store.CreateAIInteractionLog(ctx, store.AIInteractionLog{
@@ -202,6 +205,17 @@ func (s *Service) AutoReply(ctx context.Context, organizationID string, conversa
 		return AutoReplyResult{}, err
 	}
 
+	if responseID != "" {
+		_ = s.store.UpsertConversationState(ctx, store.ConversationState{
+			OrganizationID:    organizationID,
+			ConversationID:    conversationID,
+			Channel:           "whatsapp",
+			AutomationEnabled: true,
+			LastResponseID:    responseID,
+			AgentStatus:       "auto_reply_response_stored",
+		})
+	}
+
 	_ = s.store.CreateAIInteractionLog(ctx, store.AIInteractionLog{
 		OrganizationID:   organizationID,
 		ConversationID:   conversationID,
@@ -217,7 +231,7 @@ func (s *Service) AutoReply(ctx context.Context, organizationID string, conversa
 		Success:          true,
 		InputPreview:     truncate(message, 500),
 		OutputPreview:    truncate(reply, 500),
-		Metadata:         []byte(`{"provider":"openai"}`),
+		Metadata:         []byte(fmt.Sprintf(`{"provider":"openai","response_id":%q}`, responseID)),
 	})
 
 	return AutoReplyResult{
@@ -259,7 +273,7 @@ type openAIUsage struct {
 	TotalTokens  int
 }
 
-func (s *Service) callOpenAI(ctx context.Context, cfg store.AIResolvedConfig, message string) (string, openAIUsage, error) {
+func (s *Service) callOpenAI(ctx context.Context, cfg store.AIResolvedConfig, message string, contextText string, previousResponseID string) (string, openAIUsage, string, error) {
 	instructions := strings.TrimSpace(strings.Join([]string{
 		cfg.SystemPrompt,
 		cfg.SafetyPrompt,
@@ -269,39 +283,52 @@ func (s *Service) callOpenAI(ctx context.Context, cfg store.AIResolvedConfig, me
 		"Responda em portugues do Brasil. Seja breve. Nao invente dados. Se precisar de dados nao autorizados, diga que vai chamar um humano.",
 	}, "\n\n"))
 
+	input := []map[string]string{
+		{"role": "system", "content": instructions},
+	}
+	if strings.TrimSpace(contextText) != "" {
+		input = append(input, map[string]string{
+			"role":    "system",
+			"content": "Contexto operacional autorizado desta conversa:\n" + strings.TrimSpace(contextText),
+		})
+	}
+	input = append(input, map[string]string{"role": "user", "content": message})
+
 	body := map[string]any{
-		"model": cfg.Model,
-		"input": []map[string]string{
-			{"role": "system", "content": instructions},
-			{"role": "user", "content": message},
-		},
+		"model":             cfg.Model,
+		"input":             input,
+		"store":             true,
 		"max_output_tokens": cfg.MaxOutputTokens,
 		"temperature":       cfg.Temperature,
 	}
+	if strings.TrimSpace(previousResponseID) != "" {
+		body["previous_response_id"] = strings.TrimSpace(previousResponseID)
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return "", openAIUsage{}, err
+		return "", openAIUsage{}, "", err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(raw))
 	if err != nil {
-		return "", openAIUsage{}, err
+		return "", openAIUsage{}, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+s.openAIKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", openAIUsage{}, err
+		return "", openAIUsage{}, "", err
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", openAIUsage{}, fmt.Errorf("openai_error_%d: %s", resp.StatusCode, truncate(string(respBody), 600))
+		return "", openAIUsage{}, "", fmt.Errorf("openai_error_%d: %s", resp.StatusCode, truncate(string(respBody), 600))
 	}
 
 	var decoded struct {
+		ID         string `json:"id"`
 		OutputText string `json:"output_text"`
 		Output     []struct {
 			Content []struct {
@@ -316,7 +343,7 @@ func (s *Service) callOpenAI(ctx context.Context, cfg store.AIResolvedConfig, me
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		return "", openAIUsage{}, err
+		return "", openAIUsage{}, "", err
 	}
 
 	reply := strings.TrimSpace(decoded.OutputText)
@@ -334,14 +361,14 @@ func (s *Service) callOpenAI(ctx context.Context, cfg store.AIResolvedConfig, me
 		}
 	}
 	if reply == "" {
-		return "", openAIUsage{}, errors.New("empty_openai_response")
+		return "", openAIUsage{}, "", errors.New("empty_openai_response")
 	}
 
 	return reply, openAIUsage{
 		InputTokens:  decoded.Usage.InputTokens,
 		OutputTokens: decoded.Usage.OutputTokens,
 		TotalTokens:  decoded.Usage.TotalTokens,
-	}, nil
+	}, decoded.ID, nil
 }
 
 func estimateCostUSD(model string, inputTokens int, outputTokens int) float64 {

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -41,9 +42,28 @@ type WhatsAppConversation struct {
 	ID             string
 	OrganizationID string
 	SessionID      string
+	LeadID         string
 	RemoteJID      string
 	ContactPhone   string
 	IsGroup        bool
+}
+
+type recentMessage struct {
+	FromMe  bool
+	Content string
+}
+
+type propertySummary struct {
+	Code         string
+	Title        string
+	PropertyType string
+	DealType     string
+	Neighborhood string
+	City         string
+	State        string
+	Bedrooms    string
+	Area        string
+	Price       string
 }
 
 type AIResolvedConfig struct {
@@ -164,6 +184,7 @@ func (s *Store) GetWhatsAppConversation(ctx context.Context, conversationID stri
 			id,
 			organization_id,
 			session_id,
+			coalesce(lead_id::text, ''),
 			coalesce(remote_jid, ''),
 			coalesce(contact_phone, ''),
 			coalesce(is_group, false)
@@ -174,6 +195,7 @@ func (s *Store) GetWhatsAppConversation(ctx context.Context, conversationID stri
 		&conv.ID,
 		&conv.OrganizationID,
 		&conv.SessionID,
+		&conv.LeadID,
 		&conv.RemoteJID,
 		&conv.ContactPhone,
 		&conv.IsGroup,
@@ -208,6 +230,41 @@ func (s *Store) IsInboundWhatsAppMessage(ctx context.Context, conversationID str
 		return false, err
 	}
 	return !fromMe, nil
+}
+
+func (s *Store) HasRecentHumanTakeover(ctx context.Context, conversationID string, since time.Time) (bool, error) {
+	if since.IsZero() {
+		since = time.Now().Add(-6 * time.Hour)
+	}
+
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+		select
+			exists (
+				select 1
+				from whatsapp_messages
+				where conversation_id = $1
+				  and coalesce(from_me, false) = true
+				  and nullif(sender_name, '') is not null
+				  and not (
+				    lower(sender_name) like '%jhenny%'
+				    or lower(sender_name) like '%jenny%'
+				    or lower(sender_name) in ('ia', 'ai')
+				    or lower(sender_name) like 'automa%'
+				  )
+				  and sent_at >= $2
+				limit 1
+			)
+			or exists (
+				select 1
+				from outbox_messages
+				where conversation_id = $1
+				  and created_by is not null
+				  and created_at >= $2
+				limit 1
+			)
+	`, conversationID, since).Scan(&exists)
+	return exists, err
 }
 
 func (s *Store) GetAIResolvedConfig(ctx context.Context, organizationID string, fallbackModel string) (AIResolvedConfig, error) {
@@ -248,6 +305,424 @@ func (s *Store) GetAIResolvedConfig(ctx context.Context, organizationID string, 
 		&cfg.MaxContextMessages,
 	)
 	return cfg, err
+}
+
+func (s *Store) RecordAIWhatsAppMessage(ctx context.Context, conversationID string, sessionID string, messageID string, content string) error {
+	_, err := s.pool.Exec(ctx, `
+		with payload as (
+			select coalesce(nullif($3, ''), 'jhenny-' || gen_random_uuid()::text) as message_id
+		),
+		saved as (
+			insert into whatsapp_messages (
+				conversation_id,
+				session_id,
+				message_id,
+				client_message_id,
+				from_me,
+				content,
+				message_type,
+				remote_jid,
+				status,
+				sent_at,
+				sender_name
+			)
+			select
+				$1::uuid,
+				$2::uuid,
+				payload.message_id,
+				payload.message_id,
+				true,
+				$4,
+				'text',
+				wc.remote_jid,
+				'sent',
+				now(),
+				'Jhenny'
+			from payload
+			left join whatsapp_conversations wc on wc.id = $1::uuid
+			on conflict (session_id, message_id) do update
+			set
+				content = excluded.content,
+				status = 'sent',
+				sent_at = now(),
+				sender_name = 'Jhenny'
+			returning id
+		)
+		update whatsapp_conversations
+		set
+			last_message = $4,
+			last_message_at = now(),
+			unread_count = 0,
+			updated_at = now()
+		where id = $1::uuid
+		  and exists (select 1 from saved)
+	`, conversationID, sessionID, messageID, content)
+	return err
+}
+
+func (s *Store) BuildAutoReplyContext(ctx context.Context, organizationID string, conversationID string, message string, maxMessages int) (string, error) {
+	if maxMessages <= 0 || maxMessages > 12 {
+		maxMessages = 8
+	}
+
+	var sections []string
+
+	if leadText, err := s.leadContext(ctx, organizationID, conversationID); err == nil && leadText != "" {
+		sections = append(sections, leadText)
+	}
+	if propertyText, err := s.propertyContext(ctx, organizationID, message); err == nil && propertyText != "" {
+		sections = append(sections, propertyText)
+	}
+	if historyText, err := s.recentConversationContext(ctx, conversationID, maxMessages); err == nil && historyText != "" {
+		sections = append(sections, historyText)
+	}
+
+	return strings.Join(sections, "\n\n"), nil
+}
+
+func (s *Store) leadContext(ctx context.Context, organizationID string, conversationID string) (string, error) {
+	var leadID string
+	var name string
+	var phone string
+	var email string
+	var city string
+	var neighborhood string
+	var state string
+	var company string
+	var profession string
+	var income string
+	var financing bool
+	var initialMessage string
+	var propertyCode string
+	var valueRange string
+	var targetValue string
+	var stageName string
+	var pipelineName string
+
+	err := s.pool.QueryRow(ctx, `
+		select
+			l.id::text,
+			coalesce(l.name, ''),
+			coalesce(l.phone, ''),
+			coalesce(l.email, ''),
+			coalesce(l.cidade, ''),
+			coalesce(l.bairro, ''),
+			coalesce(l.uf, ''),
+			coalesce(l.empresa, ''),
+			coalesce(l.profissao, ''),
+			coalesce(l.renda_familiar, ''),
+			coalesce(l.procura_financiamento, false),
+			coalesce(l.message, l.initial_message, ''),
+			coalesce(l.property_code, ''),
+			coalesce(l.faixa_valor_imovel, ''),
+			coalesce(l.valor_interesse::text, ''),
+			coalesce(st.name, ''),
+			coalesce(p.name, '')
+		from whatsapp_conversations wc
+		join leads l on l.id = wc.lead_id
+		left join stages st on st.id = l.stage_id
+		left join pipelines p on p.id = l.pipeline_id
+		where wc.id = $1
+		  and l.organization_id = $2
+	`, conversationID, organizationID).Scan(
+		&leadID,
+		&name,
+		&phone,
+		&email,
+		&city,
+		&neighborhood,
+		&state,
+		&company,
+		&profession,
+		&income,
+		&financing,
+		&initialMessage,
+		&propertyCode,
+		&valueRange,
+		&targetValue,
+		&stageName,
+		&pipelineName,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+
+	var b strings.Builder
+	b.WriteString("[CONTEXTO DO LEAD]\n")
+	writeContextLine(&b, "Nome", name)
+	writeContextLine(&b, "Telefone", phone)
+	writeContextLine(&b, "Email", email)
+	writeContextLine(&b, "Cidade/bairro", joinNonEmpty(", ", neighborhood, city, state))
+	writeContextLine(&b, "Empresa", company)
+	writeContextLine(&b, "Profissao", profession)
+	writeContextLine(&b, "Renda familiar", income)
+	if financing {
+		b.WriteString("Busca financiamento: sim\n")
+	}
+	writeContextLine(&b, "Faixa de valor", valueRange)
+	writeContextLine(&b, "Valor de interesse", targetValue)
+	writeContextLine(&b, "Imovel de interesse", propertyCode)
+	writeContextLine(&b, "Pipeline", pipelineName)
+	writeContextLine(&b, "Coluna", stageName)
+	writeContextLine(&b, "Mensagem inicial", truncate(initialMessage, 240))
+
+	rows, err := s.pool.Query(ctx, `
+		select
+			coalesce(form_name, form_id, ''),
+			coalesce(campaign_name, ''),
+			coalesce(ad_name, ''),
+			coalesce(contact_notes, '')
+		from lead_meta
+		where lead_id = $1
+		order by created_at desc
+		limit 2
+	`, leadID)
+	if err == nil {
+		defer rows.Close()
+		first := true
+		for rows.Next() {
+			var formName string
+			var campaign string
+			var adName string
+			var notes string
+			if scanErr := rows.Scan(&formName, &campaign, &adName, &notes); scanErr != nil {
+				continue
+			}
+			if first {
+				b.WriteString("\n[RESPOSTAS E ORIGEM META]\n")
+				first = false
+			}
+			writeContextLine(&b, "Formulario", formName)
+			writeContextLine(&b, "Campanha", campaign)
+			writeContextLine(&b, "Anuncio", adName)
+			writeContextLine(&b, "Notas do formulario", truncate(notes, 320))
+		}
+	}
+
+	return strings.TrimSpace(b.String()), nil
+}
+
+func (s *Store) recentConversationContext(ctx context.Context, conversationID string, limit int) (string, error) {
+	rows, err := s.pool.Query(ctx, `
+		select coalesce(from_me, false), coalesce(content, '')
+		from whatsapp_messages
+		where conversation_id = $1
+		  and message_type = 'text'
+		  and coalesce(content, '') <> ''
+		order by sent_at desc
+		limit $2
+	`, conversationID, limit)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var messages []recentMessage
+	for rows.Next() {
+		var msg recentMessage
+		if err := rows.Scan(&msg.FromMe, &msg.Content); err != nil {
+			return "", err
+		}
+		messages = append(messages, msg)
+	}
+	if len(messages) == 0 {
+		return "", nil
+	}
+
+	var b strings.Builder
+	b.WriteString("[HISTORICO RECENTE]\n")
+	for i := len(messages) - 1; i >= 0; i-- {
+		label := "Lead"
+		if messages[i].FromMe {
+			label = "Jhenny/atendente"
+		}
+		b.WriteString(label)
+		b.WriteString(": ")
+		b.WriteString(truncate(messages[i].Content, 360))
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func (s *Store) propertyContext(ctx context.Context, organizationID string, message string) (string, error) {
+	var sections []string
+
+	if mentioned, err := s.findMentionedProperties(ctx, organizationID, message, 4); err == nil && len(mentioned) > 0 {
+		sections = append(sections, propertySection("IMOVEL CITADO NA MENSAGEM", mentioned))
+	}
+	if suggestions, err := s.suggestProperties(ctx, organizationID, 5); err == nil && len(suggestions) > 0 {
+		sections = append(sections, propertySection("IMOVEIS PARA OFERECER", suggestions))
+	}
+
+	return strings.Join(sections, "\n\n"), nil
+}
+
+func (s *Store) findMentionedProperties(ctx context.Context, organizationID string, message string, limit int) ([]propertySummary, error) {
+	codes := extractPropertyCodes(message)
+	if len(codes) == 0 {
+		return nil, nil
+	}
+	patterns := make([]string, 0, len(codes))
+	for _, code := range codes {
+		patterns = append(patterns, "%"+code+"%")
+	}
+
+	rows, err := s.pool.Query(ctx, propertySummarySQL()+`
+		where organization_id = $1
+		  and upper(regexp_replace(coalesce(code, ''), '[^A-Z0-9]', '', 'g')) ilike any($2::text[])
+		limit $3
+	`, organizationID, patterns, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPropertySummaries(rows)
+}
+
+func (s *Store) suggestProperties(ctx context.Context, organizationID string, limit int) ([]propertySummary, error) {
+	rows, err := s.pool.Query(ctx, propertySummarySQL()+`
+		where organization_id = $1
+		  and lower(coalesce(status, '')) not in ('inativo', 'vendido', 'locado', 'indisponivel', 'arquivado', 'excluido')
+		order by destaque desc nulls last, created_at desc
+		limit $2
+	`, organizationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPropertySummaries(rows)
+}
+
+func propertySummarySQL() string {
+	return `
+		select
+			coalesce(code, ''),
+			coalesce(title, ''),
+			coalesce(tipo_de_imovel, ''),
+			coalesce(tipo_de_negocio, ''),
+			coalesce(bairro, ''),
+			coalesce(cidade, ''),
+			coalesce(uf, ''),
+			coalesce(quartos::text, ''),
+			coalesce(area_util::text, ''),
+			coalesce(coalesce(preco, valor_locacao)::text, '')
+		from properties
+	`
+}
+
+func scanPropertySummaries(rows pgx.Rows) ([]propertySummary, error) {
+	var properties []propertySummary
+	for rows.Next() {
+		var property propertySummary
+		if err := rows.Scan(
+			&property.Code,
+			&property.Title,
+			&property.PropertyType,
+			&property.DealType,
+			&property.Neighborhood,
+			&property.City,
+			&property.State,
+			&property.Bedrooms,
+			&property.Area,
+			&property.Price,
+		); err != nil {
+			return nil, err
+		}
+		properties = append(properties, property)
+	}
+	return properties, rows.Err()
+}
+
+func propertySection(title string, properties []propertySummary) string {
+	var b strings.Builder
+	b.WriteString("[")
+	b.WriteString(title)
+	b.WriteString("]\n")
+	for _, property := range properties {
+		b.WriteString("- ")
+		b.WriteString(joinNonEmpty(" | ",
+			property.Code,
+			firstNonEmpty(property.Title, property.PropertyType),
+			joinNonEmpty(", ", property.Neighborhood, property.City, property.State),
+			suffixIfPresent(property.Bedrooms, " quartos"),
+			suffixIfPresent(property.Area, "m2"),
+			property.Price,
+		))
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+var propertyCodePattern = regexp.MustCompile(`\b([A-Za-z]{1,5}\s*-?\s*\d{2,7}|\d{3,7})\b`)
+
+func extractPropertyCodes(message string) []string {
+	matches := propertyCodePattern.FindAllString(message, 8)
+	result := make([]string, 0, len(matches))
+	seen := make(map[string]bool)
+	for _, match := range matches {
+		code := strings.ToUpper(strings.Map(func(r rune) rune {
+			if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+				return r
+			}
+			return -1
+		}, match))
+		if len(code) >= 3 && !seen[code] {
+			seen[code] = true
+			result = append(result, code)
+		}
+	}
+	return result
+}
+
+func writeContextLine(b *strings.Builder, label string, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	b.WriteString(label)
+	b.WriteString(": ")
+	b.WriteString(value)
+	b.WriteString("\n")
+}
+
+func joinNonEmpty(separator string, values ...string) string {
+	var parts []string
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			parts = append(parts, strings.TrimSpace(value))
+		}
+	}
+	return strings.Join(parts, separator)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func suffixIfPresent(value string, suffix string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return value + suffix
+}
+
+func truncate(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return value[:limit]
+	}
+	return value[:limit-3] + "..."
 }
 
 func (s *Store) CreateAIInteractionLog(ctx context.Context, log AIInteractionLog) error {
