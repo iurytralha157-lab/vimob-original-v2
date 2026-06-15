@@ -41,6 +41,16 @@ function phoneVariants(value: string | null | undefined) {
   return [...new Set([...baseVariants, ...brMobileVariants])];
 }
 
+function phoneMatchesVariants(value: string | null | undefined, variants: string[]) {
+  if (!variants.length) return false;
+  const valueVariants = new Set(phoneVariants(value));
+  return variants.some((variant) => valueVariants.has(variant));
+}
+
+function conversationMatchesVariants(conversation: any, variants: string[]) {
+  return phoneMatchesVariants(conversation?.contact_phone || conversation?.remote_jid, variants);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -137,17 +147,19 @@ Deno.serve(async (req) => {
 
       if (leadError) throw leadError;
 
-      // Get conversations currently or historically tied to this lead.
-      // We also match by phone so a new WhatsApp session/requisition keeps the old lead history visible.
+      const variants = phoneVariants(leadRow?.phone);
+
+      // Get conversations tied to this lead only when the phone still matches.
       const { data: linkedConversations, error: convError } = await supabase
         .from("whatsapp_conversations")
-        .select("id, session_id")
+        .select("id, session_id, contact_phone, remote_jid")
         .eq("lead_id", leadId);
 
       if (convError) throw convError;
-      let conversations = linkedConversations || [];
+      let conversations = (linkedConversations || []).filter((conversation: any) =>
+        conversationMatchesVariants(conversation, variants)
+      );
 
-      const variants = phoneVariants(leadRow?.phone);
       if (leadRow?.organization_id && variants.length > 0) {
         const jidVariants = [
           ...variants.map((phone) => `${phone}@s.whatsapp.net`),
@@ -173,9 +185,7 @@ Deno.serve(async (req) => {
         conversations = [
           ...conversations,
           ...[...(phoneConversations || []), ...(remoteConversations || [])].filter((conversation: any) => {
-            const contactPhone = normalizePhone(conversation.contact_phone);
-            const remotePhone = normalizePhone(conversation.remote_jid);
-            return variants.some((phone) => normalizePhone(phone) === contactPhone || normalizePhone(phone) === remotePhone);
+            return conversationMatchesVariants(conversation, variants);
           }),
         ];
       }
@@ -304,7 +314,20 @@ Deno.serve(async (req) => {
       conversation = data;
     }
 
+    let leadPhoneVariants: string[] = [];
+    let leadOrganizationId: string | null = null;
+
     if (!conversation && leadId) {
+      const { data: leadRowForConversation, error: leadLookupError } = await supabase
+        .from("leads")
+        .select("id, phone, organization_id")
+        .eq("id", leadId)
+        .maybeSingle();
+
+      if (leadLookupError) throw leadLookupError;
+      leadPhoneVariants = phoneVariants(leadRowForConversation?.phone);
+      leadOrganizationId = leadRowForConversation?.organization_id || null;
+
       const { data, error } = await supabase
         .from("whatsapp_conversations")
         .select(`
@@ -326,7 +349,43 @@ Deno.serve(async (req) => {
         .limit(1);
 
       if (error) throw error;
-      conversation = data?.[0] || null;
+      conversation = (data || []).find((candidate: any) =>
+        conversationMatchesVariants(candidate, leadPhoneVariants)
+      ) || null;
+    }
+
+    if (!conversation && leadId && leadOrganizationId && leadPhoneVariants.length > 0) {
+      const jidVariants = [
+        ...leadPhoneVariants.map((phone) => `${phone}@s.whatsapp.net`),
+        ...leadPhoneVariants.map((phone) => `${phone}@c.us`),
+      ];
+
+      const { data, error } = await supabase
+        .from("whatsapp_conversations")
+        .select(`
+          *,
+          session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id),
+          lead:leads!whatsapp_conversations_lead_id_fkey(
+            id,
+            name,
+            pipeline_id,
+            stage_id,
+            pipeline:pipelines(id, name),
+            stage:stages(id, name, color),
+            tags:lead_tags(tag:tags(id, name, color))
+          )
+        `)
+        .eq("organization_id", leadOrganizationId)
+        .eq("is_group", false)
+        .is("deleted_at", null)
+        .or(`contact_phone.in.(${leadPhoneVariants.join(",")}),remote_jid.in.(${jidVariants.join(",")})`)
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(10);
+
+      if (error) throw error;
+      conversation = (data || []).find((candidate: any) =>
+        conversationMatchesVariants(candidate, leadPhoneVariants)
+      ) || null;
     }
 
     if (!conversation) {

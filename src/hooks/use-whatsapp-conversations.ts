@@ -155,15 +155,20 @@ function getWhatsappMediaStoragePath(url?: string | null): string | null {
 function getPhoneVariants(phone?: string | null): string[] {
   const cleaned = (phone || "").replace(/\D/g, "");
   const normalized = normalizePhone(phone || "");
+  const normalizedWithoutTrunk = normalized.startsWith("0") && normalized.length >= 11 ? normalized.slice(1) : normalized;
   const baseVariants = [
     cleaned,
     normalized,
-    normalized ? `55${normalized}` : "",
+    normalizedWithoutTrunk,
+    normalizedWithoutTrunk ? `55${normalizedWithoutTrunk}` : "",
   ].filter(Boolean);
 
   const brMobileVariants: string[] = [];
   for (const variant of baseVariants) {
-    const local = normalizePhone(variant);
+    const normalizedVariant = normalizePhone(variant);
+    const local = normalizedVariant.startsWith("0") && normalizedVariant.length >= 11
+      ? normalizedVariant.slice(1)
+      : normalizedVariant;
     if (local.length === 11 && local[2] === "9") {
       const withoutNinthDigit = `${local.slice(0, 2)}${local.slice(3)}`;
       brMobileVariants.push(withoutNinthDigit, `55${withoutNinthDigit}`);
@@ -175,6 +180,11 @@ function getPhoneVariants(phone?: string | null): string[] {
   }
 
   return [...new Set(baseVariants.concat(brMobileVariants))];
+}
+
+function phonesMatch(a?: string | null, b?: string | null): boolean {
+  const aVariants = new Set(getPhoneVariants(a));
+  return getPhoneVariants(b).some((variant) => aVariants.has(variant));
 }
 
 function syncMissingConversationAvatars(conversations: WhatsAppConversation[], onSynced?: () => void) {
@@ -785,20 +795,20 @@ export function useSendWhatsAppMessage() {
 
       if (!conversation.lead_id && !isGroup) {
         const phoneDigits = normalizePhone(conversation.contact_phone || conversation.remote_jid || phone);
-        const tail = phoneDigits.slice(-8);
-        if (tail) {
+        const variants = getPhoneVariants(phoneDigits);
+        if (variants.length) {
           const { data: leadMatches, error: leadMatchError } = await supabase
             .from("leads")
             .select("id, name, phone")
             .eq("organization_id", session.organization_id)
-            .ilike("phone", `%${tail}%`)
+            .or(variants.map((variant) => `phone.ilike.%${variant}%`).join(","))
             .limit(10);
 
           if (leadMatchError) {
             console.error("[useSendWhatsAppMessage] Failed to resolve lead by phone before saving message:", leadMatchError);
           } else {
             const matchedLead = (leadMatches || []).find((lead: any) =>
-              normalizePhone(lead.phone || "").slice(-8) === tail,
+              phonesMatch(lead.phone || "", phoneDigits),
             );
 
             if (matchedLead?.id) {
@@ -1239,6 +1249,25 @@ export function useLinkConversationToLead() {
 
   return useMutation({
     mutationFn: async ({ conversationId, leadId }: { conversationId: string; leadId: string }) => {
+      const [{ data: conversation, error: conversationError }, { data: lead, error: leadError }] = await Promise.all([
+        supabase
+          .from("whatsapp_conversations")
+          .select("contact_phone, remote_jid")
+          .eq("id", conversationId)
+          .maybeSingle(),
+        supabase
+          .from("leads")
+          .select("phone")
+          .eq("id", leadId)
+          .maybeSingle(),
+      ]);
+
+      if (conversationError) throw conversationError;
+      if (leadError) throw leadError;
+      if (!conversation || !lead?.phone || !phonesMatch(conversation.contact_phone || conversation.remote_jid, lead.phone)) {
+        throw new Error("A conversa so pode ser vinculada ao lead quando os telefones forem iguais.");
+      }
+
       const { error } = await supabase
         .from("whatsapp_conversations")
         .update({ lead_id: leadId })
@@ -1252,6 +1281,13 @@ export function useLinkConversationToLead() {
       toast({
         title: "Conversa vinculada",
         description: "A conversa foi vinculada ao lead",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Nao foi possivel vincular",
+        description: error.message,
+        variant: "destructive",
       });
     },
   });

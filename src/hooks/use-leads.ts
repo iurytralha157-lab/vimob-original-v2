@@ -22,6 +22,41 @@ const LEAD_LIST_FIELDS = `
   assignee:users!leads_assigned_user_id_fkey(id, name, avatar_url)
 `;
 
+function phoneVariantsForMatch(value?: string | null) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return [];
+
+  const withoutCountry = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+  const local = withoutCountry.startsWith('0') && withoutCountry.length >= 11 ? withoutCountry.slice(1) : withoutCountry;
+  const variants = new Set([digits, withoutCountry, local, local ? `55${local}` : ''].filter(Boolean));
+
+  if (local.length === 11 && local[2] === '9') {
+    const withoutNinthDigit = `${local.slice(0, 2)}${local.slice(3)}`;
+    variants.add(withoutNinthDigit);
+    variants.add(`55${withoutNinthDigit}`);
+  }
+
+  if (local.length === 10) {
+    const withNinthDigit = `${local.slice(0, 2)}9${local.slice(2)}`;
+    variants.add(withNinthDigit);
+    variants.add(`55${withNinthDigit}`);
+  }
+
+  return [...variants];
+}
+
+function phonesMatch(a?: string | null, b?: string | null) {
+  const aVariants = new Set(phoneVariantsForMatch(a));
+  return phoneVariantsForMatch(b).some((variant) => aVariants.has(variant));
+}
+
+function conversationMatchesLeadPhone(
+  conversation: { contact_phone?: string | null; remote_jid?: string | null },
+  leadPhone?: string | null
+) {
+  return phonesMatch(conversation.contact_phone || conversation.remote_jid, leadPhone);
+}
+
 export function useLeads(filters?: { 
   stageId?: string; 
   assigneeId?: string; 
@@ -356,18 +391,21 @@ export function useCreateLead() {
       
       // Vincular conversas WhatsApp existentes ao novo lead
       if (lead.phone) {
-        const normalizedPhone = normalizePhone(lead.phone);
+        const matchingPhoneVariants = phoneVariantsForMatch(lead.phone);
         
-        if (normalizedPhone) {
+        if (matchingPhoneVariants.length > 0) {
           // Buscar conversas sem lead vinculado
           const { data: conversations } = await supabase
             .from('whatsapp_conversations')
-            .select('id, contact_phone')
+            .select('id, contact_phone, remote_jid')
+            .eq('organization_id', organizationId)
+            .eq('is_group', false)
+            .is('deleted_at', null)
             .is('lead_id', null);
           
           // Atualizar conversas que correspondem ao telefone
           for (const conv of conversations || []) {
-            if (conv.contact_phone && normalizePhone(conv.contact_phone) === normalizedPhone) {
+            if (conversationMatchesLeadPhone(conv, lead.phone)) {
               await supabase
                 .from('whatsapp_conversations')
                 .update({ lead_id: data.id })

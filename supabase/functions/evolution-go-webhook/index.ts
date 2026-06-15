@@ -191,9 +191,11 @@ function normalizePhone(jidOrNumber: string): string {
 function phoneVariants(p: string): string[] {
   const digits = normalizePhone(p);
   const variants = new Set<string>([digits]);
-  const local = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
+  const withoutCountry = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
+  const local = withoutCountry.startsWith("0") && withoutCountry.length >= 11 ? withoutCountry.slice(1) : withoutCountry;
 
   if (local) {
+    variants.add(withoutCountry);
     variants.add(local);
     variants.add(`55${local}`);
   }
@@ -216,11 +218,7 @@ function phoneVariants(p: string): string[] {
 function phonesMatch(a: string, b: string): boolean {
   const aVariants = new Set(phoneVariants(a));
   const bVariants = phoneVariants(b);
-  if (bVariants.some((variant) => aVariants.has(variant))) return true;
-
-  const aDigits = normalizePhone(a);
-  const bDigits = normalizePhone(b);
-  return aDigits.length >= 8 && bDigits.length >= 8 && aDigits.slice(-8) === bDigits.slice(-8);
+  return bVariants.some((variant) => aVariants.has(variant));
 }
 
 function normalizeRemoteJid(jid: string): string {
@@ -304,6 +302,35 @@ async function findLeadByPhone(organizationId: string, phone: string) {
   }
 
   return (tailMatches || []).find((lead: any) => phonesMatch(lead.phone || "", phone)) || null;
+}
+
+function conversationMatchesPhone(conversation: any, phone: string): boolean {
+  return phonesMatch(conversation?.contact_phone || conversation?.remote_jid || "", phone);
+}
+
+async function clearInvalidConversationLead(conversation: any, organizationId: string, phone: string) {
+  if (!conversation?.lead_id || !organizationId || !phone) return true;
+
+  const { data: linkedLead, error } = await supabase
+    .from("leads")
+    .select("id, phone")
+    .eq("id", conversation.lead_id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[findOrCreateConversation] lead validation error:", error);
+    return true;
+  }
+
+  if (linkedLead?.phone && phonesMatch(linkedLead.phone, phone)) return true;
+
+  await supabase
+    .from("whatsapp_conversations")
+    .update({ lead_id: null, updated_at: new Date().toISOString() })
+    .eq("id", conversation.id);
+  conversation.lead_id = null;
+  return false;
 }
 
 function getNested(obj: any, paths: string[]) {
@@ -669,6 +696,10 @@ async function findOrCreateConversation(
 
   const conv = (convs || []).find((c: any) => c.lead_id) || (convs || []).find((c: any) => c.session_id === sessionId) || (convs || [])[0];
   if (conv) {
+    const leadStillValid = !isGroup && phone
+      ? await clearInvalidConversationLead(conv, organizationId, phone)
+      : true;
+
     const update: any = {};
     // Se a conversa veio de uma session diferente (session mudou por reconexão),
     // migrar para a nova session automaticamente
@@ -679,7 +710,7 @@ async function findOrCreateConversation(
     if (groupMeta?.subject && conv.contact_name !== groupMeta.subject) update.contact_name = groupMeta.subject;
     if (groupMeta?.pictureUrl && !conv.contact_picture) update.contact_picture = groupMeta.pictureUrl;
     if (!isGroup && contactPicture && !conv.contact_picture) update.contact_picture = contactPicture;
-    if (!isGroup && contactName && !conv.contact_name) update.contact_name = contactName;
+    if (!isGroup && contactName && (!conv.contact_name || !leadStillValid)) update.contact_name = contactName;
     if (!isGroup && !conv.lead_id && phone) {
       const lead = await findLeadByPhone(organizationId, phone);
       if (lead?.id) {
@@ -704,6 +735,7 @@ async function findOrCreateConversation(
       .eq("is_group", false)
       .eq("contact_name", contactName)
       .is("deleted_at", null)
+      .is("lead_id", null)
       .limit(5);
 
     const lidConversation = (lidMatches || []).find((c: any) => isLidJid(String(c.remote_jid || "")));
@@ -717,44 +749,6 @@ async function findOrCreateConversation(
       Object.assign(lidConversation, update);
       return lidConversation;
     }
-  }
-
-  if (!isGroup && isLidJid(canonicalJid) && contactName) {
-    const { data: nameMatches } = await supabase
-      .from("whatsapp_conversations")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .eq("is_group", false)
-      .eq("contact_name", contactName)
-      .is("deleted_at", null)
-      .limit(10);
-
-    const stableMatches = (nameMatches || []).filter((c: any) => !isLidJid(String(c.remote_jid || "")));
-    const preferredMatches = stableMatches.filter((c: any) => c.lead_id);
-    const candidates = preferredMatches.length ? preferredMatches : stableMatches;
-
-    if (candidates.length === 1) {
-      const existing = candidates[0];
-      const update: any = {};
-      if (contactPicture && !existing.contact_picture) update.contact_picture = contactPicture;
-      if (Object.keys(update).length) {
-        await supabase.from("whatsapp_conversations").update(update).eq("id", existing.id);
-        Object.assign(existing, update);
-      }
-      return existing;
-    }
-
-    const { data: leadMatches } = await supabase
-      .from("whatsapp_conversations")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .eq("is_group", false)
-      .eq("contact_name", contactName)
-      .is("deleted_at", null)
-      .not("lead_id", "is", null)
-      .limit(2);
-
-    if (leadMatches?.length === 1) return leadMatches[0];
   }
 
   let leadId: string | null = null;
@@ -782,7 +776,9 @@ async function findOrCreateConversation(
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      canonicalConversation = leadConversation || null;
+      canonicalConversation = leadConversation && conversationMatchesPhone(leadConversation, phone)
+        ? leadConversation
+        : null;
     }
 
     if (!canonicalConversation && hasRealPhone) {

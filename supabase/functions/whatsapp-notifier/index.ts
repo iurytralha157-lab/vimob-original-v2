@@ -68,17 +68,23 @@ function normalizePhone(value: string | null | undefined) {
 function phoneVariants(value: string | null | undefined) {
   const cleaned = normalizePhone(value);
   const withoutCountry = cleaned.startsWith("55") && cleaned.length >= 12 ? cleaned.slice(2) : cleaned;
-  const variants = [cleaned, withoutCountry, withoutCountry ? `55${withoutCountry}` : ""].filter(Boolean);
+  const local = withoutCountry.startsWith("0") && withoutCountry.length >= 11 ? withoutCountry.slice(1) : withoutCountry;
+  const variants = [cleaned, withoutCountry, local, local ? `55${local}` : ""].filter(Boolean);
 
-  if (withoutCountry.length === 11 && withoutCountry[2] === "9") {
-    const withoutNinth = `${withoutCountry.slice(0, 2)}${withoutCountry.slice(3)}`;
+  if (local.length === 11 && local[2] === "9") {
+    const withoutNinth = `${local.slice(0, 2)}${local.slice(3)}`;
     variants.push(withoutNinth, `55${withoutNinth}`);
-  } else if (withoutCountry.length === 10) {
-    const withNinth = `${withoutCountry.slice(0, 2)}9${withoutCountry.slice(2)}`;
+  } else if (local.length === 10) {
+    const withNinth = `${local.slice(0, 2)}9${local.slice(2)}`;
     variants.push(withNinth, `55${withNinth}`);
   }
 
   return [...new Set(variants)];
+}
+
+function phonesMatch(a: string | null | undefined, b: string | null | undefined) {
+  const aVariants = new Set(phoneVariants(a));
+  return phoneVariants(b).some((variant) => aVariants.has(variant));
 }
 
 function getSentMessageId(data: any) {
@@ -100,11 +106,12 @@ async function recordWhatsAppNotificationMessage(
     session: any;
     phone: string;
     message: string;
+    contactName?: string | null;
     leadId?: string | null;
     goData: any;
   },
 ) {
-  const { organizationId, session, phone, message, leadId, goData } = params;
+  const { organizationId, session, phone, message, contactName, leadId, goData } = params;
   if (!organizationId || !session?.id || !phone || !message) return;
 
   const variants = phoneVariants(phone);
@@ -114,6 +121,7 @@ async function recordWhatsAppNotificationMessage(
 
   try {
     let lead: any = null;
+    let explicitLeadTargetMismatch = false;
     if (leadId) {
       const { data } = await supabase
         .from("leads")
@@ -123,7 +131,15 @@ async function recordWhatsAppNotificationMessage(
       if (data?.organization_id === organizationId) lead = data;
     }
 
-    if (!lead) {
+    if (lead?.id && !phonesMatch(lead.phone, phone)) {
+      console.log("Notification target phone does not match lead phone; keeping conversation unlinked from lead:", {
+        leadId: lead.id,
+      });
+      explicitLeadTargetMismatch = true;
+      lead = null;
+    }
+
+    if (!lead && !explicitLeadTargetMismatch) {
       const { data: leadMatches } = await supabase
         .from("leads")
         .select("id, name, phone, organization_id")
@@ -146,6 +162,13 @@ async function recordWhatsAppNotificationMessage(
         .limit(1)
         .maybeSingle();
       conversation = data || null;
+      if (conversation && !phonesMatch(conversation.contact_phone || conversation.remote_jid, phone)) {
+        console.log("Ignoring lead-linked notification conversation with divergent phone:", {
+          conversationId: conversation.id,
+          leadId: lead.id,
+        });
+        conversation = null;
+      }
     }
 
     if (!conversation) {
@@ -162,6 +185,16 @@ async function recordWhatsAppNotificationMessage(
       conversation = data || null;
     }
 
+    let linkedLeadMatchesTargetPhone = false;
+    if (conversation?.lead_id) {
+      const { data: linkedLead } = await supabase
+        .from("leads")
+        .select("id, phone")
+        .eq("id", conversation.lead_id)
+        .maybeSingle();
+      linkedLeadMatchesTargetPhone = !!linkedLead?.phone && phonesMatch(linkedLead.phone, phone);
+    }
+
     if (!conversation) {
       const { data, error } = await supabase
         .from("whatsapp_conversations")
@@ -169,7 +202,7 @@ async function recordWhatsAppNotificationMessage(
           session_id: session.id,
           organization_id: organizationId,
           remote_jid: canonicalRemoteJid,
-          contact_name: lead?.name || null,
+          contact_name: lead?.name || contactName || null,
           contact_phone: canonicalPhone,
           is_group: false,
           lead_id: lead?.id || null,
@@ -192,8 +225,14 @@ async function recordWhatsAppNotificationMessage(
         unread_count: 0,
         updated_at: new Date().toISOString(),
       };
+      const shouldClearInvalidLead = Boolean(conversation.lead_id && !linkedLeadMatchesTargetPhone);
       if (lead?.id && !conversation.lead_id) update.lead_id = lead.id;
-      if (lead?.name && !conversation.contact_name) update.contact_name = lead.name;
+      if (shouldClearInvalidLead) update.lead_id = null;
+      if (shouldClearInvalidLead && contactName) {
+        update.contact_name = contactName;
+      } else if ((lead?.name || contactName) && !conversation.contact_name) {
+        update.contact_name = lead?.name || contactName;
+      }
 
       await supabase.from("whatsapp_conversations").update(update).eq("id", conversation.id);
     }
@@ -209,6 +248,7 @@ async function recordWhatsAppNotificationMessage(
       status: "sent",
       sent_at: new Date().toISOString(),
       remote_jid: canonicalRemoteJid,
+      metadata: leadId ? { notification_lead_id: leadId } : {},
     });
 
     if (messageError) throw messageError;
@@ -367,6 +407,7 @@ Deno.serve(async (req) => {
       session: notificationSession,
       phone: formattedPhone,
       message,
+      contactName: targetName,
       leadId: lead_id || null,
       goData,
     });
