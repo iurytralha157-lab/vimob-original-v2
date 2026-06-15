@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import { WhatsAppIcon } from "@/components/icons/WhatsAppIcon";
 import { WhatsAppTab } from "@/components/settings/WhatsAppTab";
 import { WebhooksTab } from "@/components/settings/WebhooksTab";
@@ -57,7 +58,42 @@ export function IntegrationsTab({
     };
 
     const params = new URLSearchParams(window.location.search);
+    const status = params.get("meta_oauth_status");
+    const flowId = params.get("meta_oauth_flow_id");
+    const oauthError = params.get("meta_oauth_error");
     const raw = params.get("meta_oauth_data");
+
+    if (status) {
+      const hasFlow = status === "success" && !!flowId;
+      const payload = hasFlow
+        ? { success: true, flow_id: flowId }
+        : { success: false, error: oauthError || "Não foi possível conectar sua conta Meta." };
+
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(
+          hasFlow
+            ? { type: "META_OAUTH_SUCCESS", data: payload }
+            : { type: "META_OAUTH_ERROR", error: payload.error },
+          window.location.origin
+        );
+        window.close();
+        return;
+      }
+
+      if (hasFlow) {
+        setMetaOAuthPayload(payload);
+        setActiveIntegration("meta");
+      } else {
+        toast.error(payload.error);
+      }
+
+      params.delete("meta_oauth_status");
+      params.delete("meta_oauth_flow_id");
+      params.delete("meta_oauth_error");
+      window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+      return;
+    }
+
     if (!raw) return;
 
     try {
@@ -82,7 +118,14 @@ export function IntegrationsTab({
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
-      if (!event.data || event.data.type !== "META_OAUTH_SUCCESS") return;
+      if (!event.data) return;
+
+      if (event.data.type === "META_OAUTH_ERROR") {
+        toast.error(event.data.error || "Não foi possível conectar sua conta Meta.");
+        return;
+      }
+
+      if (event.data.type !== "META_OAUTH_SUCCESS") return;
 
       setMetaOAuthPayload(event.data.data || null);
       setActiveIntegration("meta");
