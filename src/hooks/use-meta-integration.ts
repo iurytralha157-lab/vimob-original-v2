@@ -38,6 +38,18 @@ export interface MetaPage {
   facebook_user_name?: string;
 }
 
+export interface MetaOAuthPayload {
+  success?: boolean;
+  error?: string;
+  flow_id?: string;
+  pages?: MetaPage[];
+  user_token?: string;
+  userToken?: string;
+  adAccountId?: string | null;
+  facebook_user_id?: string | null;
+  facebook_user_name?: string | null;
+}
+
 // Fetch connected pages for organization
 export function useMetaIntegrations() {
   const { profile } = useAuth();
@@ -91,6 +103,36 @@ export function useMetaGetAuthUrl() {
       }
 
       return response.json() as Promise<{ auth_url: string }>;
+    },
+  });
+}
+
+export function useMetaConsumeOAuthResult() {
+  return useMutation({
+    mutationFn: async ({ flowId }: { flowId: string }) => {
+      const { data: sessionData } = await supabase.auth.getSession();
+
+      const response = await fetch(
+        `https://iemalzlfnbouobyjwlwi.supabase.co/functions/v1/meta-oauth`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionData.session?.access_token}`,
+          },
+          body: JSON.stringify({
+            action: "consume_oauth_result",
+            flow_id: flowId,
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to consume OAuth result");
+      }
+
+      return data as MetaOAuthPayload;
     },
   });
 }

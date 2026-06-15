@@ -17,10 +17,71 @@ const META_GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") || "v25.0";
 const META_GRAPH_BASE_URL = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 const META_DIALOG_BASE_URL = `https://www.facebook.com/${META_GRAPH_VERSION}`;
 const MAX_META_FORM_PAGES = 30;
+const DEFAULT_RETURN_URL = "https://vimob.vettercompany.com.br/settings?tab=integrations";
+const OAUTH_FLOW_TTL_MS = 15 * 60 * 1000;
 
-function generateSuccessPage(payload: Record<string, unknown>, returnUrl: string): Response {
-  const encodedData = encodeURIComponent(JSON.stringify(payload));
-  const safeReturnUrl = JSON.stringify(`${returnUrl}${returnUrl.includes("?") ? "&" : "?"}meta_oauth_data=${encodedData}`);
+type OAuthFlow = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  nonce: string;
+  return_url: string;
+  status: string;
+  payload?: Record<string, unknown> | null;
+  error_message?: string | null;
+  expires_at: string;
+};
+
+function sanitizeReturnUrl(raw?: string | null): string {
+  try {
+    const parsed = new URL(raw || DEFAULT_RETURN_URL);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return DEFAULT_RETURN_URL;
+    return parsed.toString();
+  } catch (_error) {
+    return DEFAULT_RETURN_URL;
+  }
+}
+
+function appendOAuthParams(returnUrl: string, params: Record<string, string | undefined>): string {
+  const safeUrl = sanitizeReturnUrl(returnUrl);
+
+  try {
+    const url = new URL(safeUrl);
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") url.searchParams.set(key, value);
+    }
+    return url.toString();
+  } catch (_error) {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") search.set(key, value);
+    }
+    const separator = safeUrl.includes("?") ? "&" : "?";
+    return `${safeUrl}${separator}${search.toString()}`;
+  }
+}
+
+function randomNonce(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function parseState(state: string | null): Record<string, unknown> {
+  if (!state) return {};
+  try {
+    return JSON.parse(atob(state));
+  } catch (_error) {
+    return {};
+  }
+}
+
+function generateSuccessPage(flowId: string, returnUrl: string): Response {
+  const payload = { success: true, flow_id: flowId };
+  const safeReturnUrl = JSON.stringify(appendOAuthParams(returnUrl, {
+    meta_oauth_status: "success",
+    meta_oauth_flow_id: flowId,
+  }));
 
   const html = `<!doctype html>
 <html>
@@ -64,8 +125,15 @@ function generateSuccessPage(payload: Record<string, unknown>, returnUrl: string
   });
 }
 
-// Redirect to frontend with success data
-function redirectWithSuccess(pages: any[], userToken: string, returnUrl: string, adAccountId?: string | null, facebookUser?: any): Response {
+async function completeOAuthFlow(
+  supabase: ReturnType<typeof createClient>,
+  flow: OAuthFlow | null,
+  pages: any[],
+  userToken: string,
+  returnUrl: string,
+  adAccountId?: string | null,
+  facebookUser?: any,
+): Promise<Response> {
   const data = {
     success: true,
     pages: pages,
@@ -75,18 +143,48 @@ function redirectWithSuccess(pages: any[], userToken: string, returnUrl: string,
     facebook_user_id: facebookUser?.id || null,
     facebook_user_name: facebookUser?.name || null,
   };
-  const encodedData = encodeURIComponent(JSON.stringify(data));
-  const separator = returnUrl.includes("?") ? "&" : "?";
-  const redirectUrl = `${returnUrl}${separator}meta_oauth_data=${encodedData}`;
 
-  return new Response(null, {
-    status: 302,
-    headers: {
-      ...corsHeaders,
-      Location: redirectUrl,
-      "cache-control": "no-store",
-    },
-  });
+  if (!flow?.id) {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        ...corsHeaders,
+        Location: appendOAuthParams(returnUrl, {
+          meta_oauth_status: "error",
+          meta_oauth_error: "Sessao OAuth nao encontrada. Tente conectar novamente.",
+        }),
+        "cache-control": "no-store",
+      },
+    });
+  }
+
+  const { error } = await supabase
+    .from("meta_oauth_flows")
+    .update({
+      status: "success",
+      payload: data,
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", flow.id)
+    .eq("nonce", flow.nonce);
+
+  if (error) {
+    console.error("Could not persist Meta OAuth flow result:", error);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        ...corsHeaders,
+        Location: appendOAuthParams(returnUrl, {
+          meta_oauth_status: "error",
+          meta_oauth_error: "Nao foi possivel salvar o retorno da Meta. Tente novamente.",
+        }),
+        "cache-control": "no-store",
+      },
+    });
+  }
+
+  return generateSuccessPage(flow.id, returnUrl);
 }
 
 async function fetchLeadFormsCollection(pageId: string, accessToken: string, status?: string): Promise<any[]> {
@@ -142,20 +240,34 @@ async function fetchAllLeadForms(pageId: string, accessToken: string): Promise<a
 }
 
 // Redirect to frontend with error
-function redirectWithError(error: string, returnUrl: string): Response {
-  const data = {
-    success: false,
-    error: error
-  };
-  const encodedData = encodeURIComponent(JSON.stringify(data));
-  const separator = returnUrl.includes("?") ? "&" : "?";
-  const redirectUrl = `${returnUrl}${separator}meta_oauth_data=${encodedData}`;
+async function redirectWithError(
+  error: string,
+  returnUrl: string,
+  supabase?: ReturnType<typeof createClient>,
+  flow?: OAuthFlow | null,
+): Promise<Response> {
+  if (supabase && flow?.id) {
+    await supabase
+      .from("meta_oauth_flows")
+      .update({
+        status: "error",
+        payload: { success: false, error },
+        error_message: error,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", flow.id)
+      .eq("nonce", flow.nonce);
+  }
 
   return new Response(null, {
     status: 302,
     headers: {
       ...corsHeaders,
-      Location: redirectUrl,
+      Location: appendOAuthParams(returnUrl, {
+        meta_oauth_status: "error",
+        meta_oauth_flow_id: flow?.id,
+        meta_oauth_error: error,
+      }),
       "cache-control": "no-store",
     },
   });
@@ -225,33 +337,55 @@ serve(async (req) => {
 
   // Handle OAuth callback (GET request from Facebook)
   if (req.method === "GET") {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
     const errorDescription = url.searchParams.get("error_description");
     
     // Parse state to get return URL
-    let returnUrl = "https://vimob.vettercompany.com.br/settings/integrations/meta";
-    try {
-      if (state) {
-        const stateData = JSON.parse(atob(state));
-        if (stateData.returnUrl) {
-          returnUrl = stateData.returnUrl;
-        }
+    let returnUrl = DEFAULT_RETURN_URL;
+    let flow: OAuthFlow | null = null;
+    const stateData = parseState(state);
+    const flowId = typeof stateData.flowId === "string" ? stateData.flowId : null;
+    const nonce = typeof stateData.nonce === "string" ? stateData.nonce : null;
+
+    if (typeof stateData.returnUrl === "string") {
+      returnUrl = sanitizeReturnUrl(stateData.returnUrl);
+    }
+
+    if (flowId && nonce) {
+      const { data: flowData, error: flowError } = await supabase
+        .from("meta_oauth_flows")
+        .select("*")
+        .eq("id", flowId)
+        .eq("nonce", nonce)
+        .single();
+
+      if (flowError || !flowData) {
+        console.error("Meta OAuth flow not found:", flowError);
+        return redirectWithError("Sessao OAuth nao encontrada. Tente conectar novamente.", returnUrl);
       }
-    } catch (e) {
-      console.log("Could not parse state, using default return URL");
+
+      flow = flowData as OAuthFlow;
+      returnUrl = sanitizeReturnUrl(flow.return_url);
+
+      if (new Date(flow.expires_at).getTime() < Date.now()) {
+        return redirectWithError("Sessao OAuth expirada. Tente conectar novamente.", returnUrl, supabase, flow);
+      }
+    } else {
+      console.warn("Meta OAuth callback without flow id in state");
     }
     
     console.log("OAuth callback received", { hasCode: !!code, error, errorDescription, returnUrl });
     
     if (error) {
       console.error("OAuth error from Facebook:", error, errorDescription);
-      return redirectWithError(errorDescription || error, returnUrl);
+      return redirectWithError(errorDescription || error, returnUrl, supabase, flow);
     }
     
     if (!code) {
-      return redirectWithError("Codigo de autorizacao nao recebido", returnUrl);
+      return redirectWithError("Codigo de autorizacao nao recebido", returnUrl, supabase, flow);
     }
     
     try {
@@ -271,7 +405,7 @@ serve(async (req) => {
 
       if (tokenData.error) {
         console.error("Token exchange error:", tokenData.error);
-        return redirectWithError(tokenData.error.message, returnUrl);
+        return redirectWithError(tokenData.error.message, returnUrl, supabase, flow);
       }
 
       console.log("Token obtained, exchanging for long-lived token...");
@@ -288,7 +422,7 @@ serve(async (req) => {
 
       if (longLivedData.error) {
         console.error("Long-lived token error:", longLivedData.error);
-        return redirectWithError(longLivedData.error.message, returnUrl);
+        return redirectWithError(longLivedData.error.message, returnUrl, supabase, flow);
       }
 
       console.log("Long-lived token obtained, fetching user and pages...");
@@ -312,7 +446,7 @@ serve(async (req) => {
 
       if (pagesData.error) {
         console.error("Pages fetch error:", pagesData.error);
-        return redirectWithError(pagesData.error.message, returnUrl);
+        return redirectWithError(pagesData.error.message, returnUrl, supabase, flow);
       }
 
       const pages = (pagesData.data || []).map((page: any) => ({
@@ -346,12 +480,12 @@ serve(async (req) => {
       }
 
       console.log(`Found ${pages.length} pages, redirecting back...`);
-      return redirectWithSuccess(pages, longLivedData.access_token, returnUrl, ad_account_id, facebookUser);
+      return completeOAuthFlow(supabase, flow, pages, longLivedData.access_token, returnUrl, ad_account_id, facebookUser);
       
     } catch (error: unknown) {
       console.error("OAuth callback error:", error);
       const message = error instanceof Error ? error.message : "Erro desconhecido";
-      return redirectWithError(message, returnUrl);
+      return redirectWithError(message, returnUrl, supabase, flow);
     }
   }
 
@@ -422,10 +556,41 @@ serve(async (req) => {
       case "get_auth_url": {
         // Generate OAuth URL for Meta - redirect to this edge function
         const callbackUrl = `${SUPABASE_URL}/functions/v1/meta-oauth`;
+        const flowId = crypto.randomUUID();
+        const nonce = randomNonce();
+        const flowReturnUrl = sanitizeReturnUrl(return_url || DEFAULT_RETURN_URL);
+        const expiresAt = new Date(Date.now() + OAUTH_FLOW_TTL_MS).toISOString();
+
+        await supabase
+          .from("meta_oauth_flows")
+          .delete()
+          .eq("user_id", user.id)
+          .lt("expires_at", new Date().toISOString());
         
-        // Create state with return URL
+        const { error: flowError } = await supabase
+          .from("meta_oauth_flows")
+          .insert({
+            id: flowId,
+            organization_id: userData.organization_id,
+            user_id: user.id,
+            nonce,
+            return_url: flowReturnUrl,
+            expires_at: expiresAt,
+            status: "pending",
+          });
+
+        if (flowError) {
+          console.error("Could not create Meta OAuth flow:", flowError);
+          return new Response(JSON.stringify({ error: "Nao foi possivel iniciar a conexao com a Meta" }), {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // Create state with a short flow reference. The large OAuth payload is stored server-side.
         const stateData = {
-          returnUrl: return_url || "https://vimob.vettercompany.com.br/settings/integrations/meta",
+          flowId,
+          nonce,
           timestamp: Date.now()
         };
         const state = btoa(JSON.stringify(stateData));
@@ -447,9 +612,83 @@ serve(async (req) => {
           `&state=${encodeURIComponent(state)}` +
           `&response_type=code`;
 
-        console.log("Generated auth URL with callback:", callbackUrl, "returnUrl:", stateData.returnUrl);
+        console.log("Generated auth URL with callback:", callbackUrl, "returnUrl:", flowReturnUrl, "flowId:", flowId);
 
         return new Response(JSON.stringify({ auth_url: authUrl }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      case "consume_oauth_result": {
+        const flowId = body.flow_id || body.flowId;
+        if (!flowId) {
+          return new Response(JSON.stringify({ error: "Missing OAuth flow id" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { data: flowData, error: flowError } = await supabase
+          .from("meta_oauth_flows")
+          .select("id, organization_id, user_id, status, payload, error_message, expires_at, consumed_at")
+          .eq("id", flowId)
+          .single();
+
+        if (flowError || !flowData) {
+          return new Response(JSON.stringify({ error: "OAuth flow not found" }), {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        if (flowData.organization_id !== userData.organization_id || flowData.user_id !== user.id) {
+          return new Response(JSON.stringify({ error: "OAuth flow not available for this user" }), {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        if (new Date(flowData.expires_at).getTime() < Date.now()) {
+          return new Response(JSON.stringify({ error: "OAuth flow expired" }), {
+            status: 410,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        if (flowData.status === "error") {
+          return new Response(JSON.stringify({
+            success: false,
+            error: flowData.error_message || "Nao foi possivel concluir a conexao com a Meta",
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        if (flowData.status !== "success" && flowData.status !== "consumed") {
+          return new Response(JSON.stringify({ error: "OAuth flow is not ready yet" }), {
+            status: 409,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        if (!flowData.payload) {
+          return new Response(JSON.stringify({ error: "OAuth flow payload not found" }), {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        await supabase
+          .from("meta_oauth_flows")
+          .update({
+            status: "consumed",
+            consumed_at: flowData.consumed_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", flowId);
+
+        return new Response(JSON.stringify(flowData.payload), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }

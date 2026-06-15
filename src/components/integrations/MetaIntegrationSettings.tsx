@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -60,8 +60,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import {
   MetaIntegration,
+  MetaOAuthPayload,
   MetaPage,
   useMetaConnectPage,
+  useMetaConsumeOAuthResult,
   useMetaDisconnectPage,
   useMetaGetAuthUrl,
   useMetaIntegrations,
@@ -76,12 +78,7 @@ import {
 } from "@/hooks/use-meta-forms";
 import { MetaFormConfigDialog } from "./MetaFormConfigDialog";
 
-interface OAuthPayload {
-  pages?: MetaPage[];
-  user_token?: string;
-  facebook_user_id?: string;
-  facebook_user_name?: string;
-}
+type OAuthPayload = MetaOAuthPayload;
 
 interface AccountGroup {
   key: string;
@@ -143,17 +140,82 @@ export function MetaIntegrationSettings({
   const { data: integrations = [], isLoading, refetch: refetchIntegrations } = useMetaIntegrations();
   const { data: configs = [], refetch: refetchConfigs } = useAllMetaFormConfigs();
   const getAuthUrl = useMetaGetAuthUrl();
+  const { mutateAsync: consumeOAuthResult } = useMetaConsumeOAuthResult();
   const connectPage = useMetaConnectPage();
   const disconnectPage = useMetaDisconnectPage();
   const fetchForms = useFetchPageForms();
   const toggleForm = useToggleFormConfig();
   const deleteForm = useDeleteFormConfig();
 
+  const openOAuthWizard = useCallback((payload: OAuthPayload) => {
+    setNewOAuth(payload);
+    setSelectedAccountKey("new-oauth");
+    setWizardOpen(true);
+    setAccountModalOpen(false);
+    toast.success("Conta do Facebook conectada. Escolha a página para continuar.");
+  }, []);
+
+  const handleOAuthPayload = useCallback(async (payload: OAuthPayload | null) => {
+    if (!payload) return;
+
+    if (payload.success === false || payload.error) {
+      toast.error(payload.error || "Não foi possível conectar sua conta Meta.");
+      return;
+    }
+
+    try {
+      if (payload.flow_id && (!payload.pages || !payload.user_token)) {
+        const consumed = await consumeOAuthResult({ flowId: payload.flow_id });
+        if (consumed.success === false || consumed.error) {
+          toast.error(consumed.error || "Não foi possível conectar sua conta Meta.");
+          return;
+        }
+        openOAuthWizard(consumed);
+        return;
+      }
+
+      openOAuthWizard(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Não foi possível conectar sua conta Meta.";
+      toast.error(message);
+    }
+  }, [consumeOAuthResult, openOAuthWizard]);
+
   useEffect(() => {
     if (oauthPayload !== undefined) return;
 
     const params = new URLSearchParams(window.location.search);
+    const status = params.get("meta_oauth_status");
+    const flowId = params.get("meta_oauth_flow_id");
+    const oauthError = params.get("meta_oauth_error");
     const raw = params.get("meta_oauth_data");
+
+    if (status) {
+      const hasFlow = status === "success" && !!flowId;
+      const payload = hasFlow
+        ? { success: true, flow_id: flowId || undefined }
+        : { success: false, error: oauthError || "Não foi possível conectar sua conta Meta." };
+
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(
+          hasFlow
+            ? { type: "META_OAUTH_SUCCESS", data: payload }
+            : { type: "META_OAUTH_ERROR", error: payload.error },
+          window.location.origin
+        );
+        window.close();
+        return;
+      }
+
+      void handleOAuthPayload(payload);
+
+      params.delete("meta_oauth_status");
+      params.delete("meta_oauth_flow_id");
+      params.delete("meta_oauth_error");
+      window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+      return;
+    }
+
     if (!raw) return;
 
     try {
@@ -166,42 +228,38 @@ export function MetaIntegrationSettings({
         return;
       }
 
-      setNewOAuth(payload);
-      setSelectedAccountKey("new-oauth");
-      setWizardOpen(true);
-      toast.success("Conta do Facebook conectada. Escolha a página para continuar.");
+      void handleOAuthPayload(payload);
     } catch (error) {
       console.error("Invalid Meta OAuth payload", error);
     } finally {
       params.delete("meta_oauth_data");
       window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
     }
-  }, [oauthPayload]);
+  }, [handleOAuthPayload, oauthPayload]);
 
   useEffect(() => {
     if (!oauthPayload) return;
-    setNewOAuth(oauthPayload);
-    setSelectedAccountKey("new-oauth");
-    setWizardOpen(true);
-    setAccountModalOpen(false);
-    toast.success("Conta do Facebook conectada. Escolha a página para continuar.");
-  }, [oauthPayload]);
+    void handleOAuthPayload(oauthPayload);
+  }, [handleOAuthPayload, oauthPayload]);
 
   useEffect(() => {
     if (oauthPayload !== undefined) return;
 
     const handleMessage = (event: MessageEvent) => {
-      if (!event.data || event.data.type !== "META_OAUTH_SUCCESS") return;
-      setNewOAuth(event.data.data || null);
-      setSelectedAccountKey("new-oauth");
-      setWizardOpen(true);
-      setAccountModalOpen(false);
-      toast.success("Conta do Facebook conectada. Escolha a página para continuar.");
+      if (!event.data) return;
+
+      if (event.data.type === "META_OAUTH_ERROR") {
+        toast.error(event.data.error || "Não foi possível conectar sua conta Meta.");
+        return;
+      }
+
+      if (event.data.type !== "META_OAUTH_SUCCESS") return;
+      void handleOAuthPayload(event.data.data || null);
     };
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [oauthPayload]);
+  }, [handleOAuthPayload, oauthPayload]);
 
   const accounts = useMemo<AccountGroup[]>(() => {
     const grouped = new Map<string, AccountGroup>();
