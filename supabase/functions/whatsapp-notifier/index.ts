@@ -155,6 +155,7 @@ async function recordWhatsAppNotificationMessage(
         .from("whatsapp_conversations")
         .select("*")
         .eq("organization_id", organizationId)
+        .eq("session_id", session.id)
         .eq("lead_id", lead.id)
         .eq("is_group", false)
         .is("deleted_at", null)
@@ -176,6 +177,7 @@ async function recordWhatsAppNotificationMessage(
         .from("whatsapp_conversations")
         .select("*")
         .eq("organization_id", organizationId)
+        .eq("session_id", session.id)
         .eq("is_group", false)
         .is("deleted_at", null)
         .or(`contact_phone.in.(${variants.join(",")}),remote_jid.in.(${remoteJids.join(",")})`)
@@ -217,7 +219,6 @@ async function recordWhatsAppNotificationMessage(
       conversation = data;
     } else {
       const update: Record<string, unknown> = {
-        session_id: session.id,
         remote_jid: conversation.remote_jid || canonicalRemoteJid,
         contact_phone: conversation.contact_phone || canonicalPhone,
         last_message: message,

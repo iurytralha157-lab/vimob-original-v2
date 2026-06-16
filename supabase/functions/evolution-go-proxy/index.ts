@@ -505,7 +505,8 @@ Deno.serve(async (req) => {
       if (rateLimit.response) return rateLimit.response;
     }
 
-    // Resolve session
+    // Resolve session. Any user-facing action against an existing WhatsApp
+    // instance must be bound to a CRM session owned by the authenticated user.
     let session = null;
     if (payload.session_id) {
       const { data } = await supabase
@@ -514,6 +515,25 @@ Deno.serve(async (req) => {
         .eq("id", payload.session_id)
         .maybeSingle();
       session = data;
+    }
+
+    if (payload.session_id && !session) {
+      return new Response(JSON.stringify({ ok: false, error: "Session not found" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (!isServiceRoleRequest) {
+      const actionRequiresExistingSession = action !== "instance.create";
+
+      if (actionRequiresExistingSession && !session?.id) {
+        return new Response(JSON.stringify({ ok: false, error: "session_id is required" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      if (session?.owner_user_id !== userId) {
+        return new Response(JSON.stringify({ ok: false, error: "Forbidden" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     const instanceKey = getEvolutionInstanceKey(session || payload);

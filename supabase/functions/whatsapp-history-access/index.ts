@@ -51,6 +51,10 @@ function conversationMatchesVariants(conversation: any, variants: string[]) {
   return phoneMatchesVariants(conversation?.contact_phone || conversation?.remote_jid, variants);
 }
 
+function isOwnConversation(conversation: any, userId: string) {
+  return conversation?.session?.owner_user_id === userId;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -111,8 +115,9 @@ Deno.serve(async (req) => {
 
     // ===== ALL MESSAGES MODE: return every message across all conversations for a lead =====
     if (allMessages && leadId) {
-      // Check access
-      let canView = requester.role === "admin" || requester.role === "super_admin";
+      // Lead access only authorizes opening the lead timeline. Message history is
+      // still filtered to conversations owned by this user's WhatsApp sessions.
+      let canView = false;
 
       if (!canView) {
         const [{ data: canAccessLead }, { data: canViewAll }] = await Promise.all([
@@ -152,7 +157,7 @@ Deno.serve(async (req) => {
       // Get conversations tied to this lead only when the phone still matches.
       const { data: linkedConversations, error: convError } = await supabase
         .from("whatsapp_conversations")
-        .select("id, session_id, contact_phone, remote_jid")
+        .select("id, session_id, contact_phone, remote_jid, session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(owner_user_id)")
         .eq("lead_id", leadId);
 
       if (convError) throw convError;
@@ -168,14 +173,14 @@ Deno.serve(async (req) => {
 
         const { data: phoneConversations, error: phoneConvError } = await supabase
           .from("whatsapp_conversations")
-          .select("id, session_id, contact_phone, remote_jid")
+          .select("id, session_id, contact_phone, remote_jid, session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(owner_user_id)")
           .eq("organization_id", leadRow.organization_id)
           .eq("is_group", false)
           .in("contact_phone", variants);
 
         const { data: remoteConversations, error: remoteConvError } = await supabase
           .from("whatsapp_conversations")
-          .select("id, session_id, contact_phone, remote_jid")
+          .select("id, session_id, contact_phone, remote_jid, session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(owner_user_id)")
           .eq("organization_id", leadRow.organization_id)
           .eq("is_group", false)
           .in("remote_jid", jidVariants);
@@ -191,6 +196,7 @@ Deno.serve(async (req) => {
       }
 
       conversations = [...new Map(conversations.map((conversation: any) => [conversation.id, conversation])).values()];
+      conversations = conversations.filter((conversation: any) => isOwnConversation(conversation, user.id));
 
       if (!conversations || conversations.length === 0) {
         return new Response(JSON.stringify({ messages: [] }), {
@@ -200,6 +206,9 @@ Deno.serve(async (req) => {
       }
 
       const conversationIds = conversations.map((c: any) => c.id);
+      const conversationSessionById = new Map(
+        conversations.map((conversation: any) => [conversation.id, conversation.session_id]),
+      );
 
       const messageSelect =
         "id, content, from_me, message_type, media_url, media_mime_type, media_status, media_error, media_size, media_storage_path, sent_at, delivered_at, read_at, status, sender_name, sender_jid, conversation_id, session_id, message_id, client_message_id, remote_jid, reaction_to_message_id, reaction_emoji, reaction_sender_jid, reaction_sender_name, metadata";
@@ -217,10 +226,13 @@ Deno.serve(async (req) => {
 
         if (pageResult.error) throw pageResult.error;
 
-        const page = pageResult.data || [];
+        const rawPage = pageResult.data || [];
+        const page = rawPage.filter((message: any) =>
+          conversationSessionById.get(message.conversation_id) === message.session_id
+        );
         fetchedMessages.push(...page);
 
-        if (page.length < pageSize) break;
+        if (rawPage.length < pageSize) break;
       }
 
       const messagesTruncated = fetchedMessages.length >= maxMessages;
@@ -296,7 +308,7 @@ Deno.serve(async (req) => {
         .from("whatsapp_conversations")
         .select(`
           *,
-          session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id),
+          session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id, owner_user_id),
           lead:leads!whatsapp_conversations_lead_id_fkey(
             id,
             name,
@@ -332,7 +344,7 @@ Deno.serve(async (req) => {
         .from("whatsapp_conversations")
         .select(`
           *,
-          session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id),
+          session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id, owner_user_id),
           lead:leads!whatsapp_conversations_lead_id_fkey(
             id,
             name,
@@ -350,7 +362,8 @@ Deno.serve(async (req) => {
 
       if (error) throw error;
       conversation = (data || []).find((candidate: any) =>
-        conversationMatchesVariants(candidate, leadPhoneVariants)
+        conversationMatchesVariants(candidate, leadPhoneVariants) &&
+        isOwnConversation(candidate, user.id)
       ) || null;
     }
 
@@ -364,7 +377,7 @@ Deno.serve(async (req) => {
         .from("whatsapp_conversations")
         .select(`
           *,
-          session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id),
+          session:whatsapp_sessions!whatsapp_conversations_session_id_fkey(id, instance_name, phone_number, status, organization_id, owner_user_id),
           lead:leads!whatsapp_conversations_lead_id_fkey(
             id,
             name,
@@ -384,7 +397,8 @@ Deno.serve(async (req) => {
 
       if (error) throw error;
       conversation = (data || []).find((candidate: any) =>
-        conversationMatchesVariants(candidate, leadPhoneVariants)
+        conversationMatchesVariants(candidate, leadPhoneVariants) &&
+        isOwnConversation(candidate, user.id)
       ) || null;
     }
 
@@ -395,35 +409,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const resolvedLeadId = conversation.lead_id || leadId;
-    let canView = requester.role === "admin" || requester.role === "super_admin";
-
-    if (!canView && resolvedLeadId) {
-      const [{ data: canAccessLead }, { data: canViewAll }] = await Promise.all([
-        supabase.rpc("can_access_lead", { p_lead_id: resolvedLeadId, p_user_id: user.id }),
-        supabase.rpc("user_has_permission", { p_permission_key: "lead_view_all", p_user_id: user.id }),
-      ]);
-
-      if (canAccessLead) {
-        canView = true;
-      } else if (canViewAll) {
-        const { data: leadRow } = await supabase
-          .from("leads")
-          .select("organization_id")
-          .eq("id", resolvedLeadId)
-          .maybeSingle();
-
-        canView = leadRow?.organization_id === requester.organization_id;
-      }
-    }
-
-    if (!canView) {
-      const { data: canAccessSession } = await supabase.rpc("can_access_whatsapp_session", {
-        p_session_id: conversation.session_id,
-        p_user_id: user.id,
-      });
-      canView = !!canAccessSession;
-    }
+    const canView = isOwnConversation(conversation, user.id);
 
     if (!canView) {
       return new Response(JSON.stringify({ error: "Forbidden" }), {
@@ -436,6 +422,7 @@ Deno.serve(async (req) => {
       .from("whatsapp_messages")
       .select("*")
       .eq("conversation_id", conversation.id)
+      .eq("session_id", conversation.session_id)
       .order("sent_at", { ascending: true });
 
     if (messagesError) throw messagesError;

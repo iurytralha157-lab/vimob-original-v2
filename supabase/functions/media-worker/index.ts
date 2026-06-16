@@ -115,6 +115,28 @@ Deno.serve(async (req) => {
     const EVOLUTION_GO_API_KEY = Deno.env.get("EVOLUTION_GO_API_KEY") || "";
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const bearerToken = authHeader.replace("Bearer ", "").trim();
+    const isServiceRoleRequest = bearerToken === SUPABASE_SERVICE_ROLE_KEY;
+    let requesterUserId: string | null = null;
+
+    if (!isServiceRoleRequest) {
+      const { data: claims, error: claimsError } = await supabase.auth.getClaims(bearerToken);
+      requesterUserId = claims?.claims?.sub ? String(claims.claims.sub) : null;
+      if (claimsError || !requesterUserId) {
+        return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // Check if this is a forced retry for a specific message
     let body: { message_id?: string; force?: boolean; scan_orphans?: boolean } = {};
@@ -124,8 +146,21 @@ Deno.serve(async (req) => {
       // No body is fine for cron jobs
     }
 
+    if (!isServiceRoleRequest && !(body.message_id && body.force)) {
+      return new Response(JSON.stringify({ success: false, error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Scan mode: create jobs for all messages that are 'pending' without a job
     if (body.scan_orphans) {
+      if (!isServiceRoleRequest) {
+        return new Response(JSON.stringify({ success: false, error: "Forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       console.log("Scanning for orphan pending media messages...");
       const { data: orphans } = await supabase
         .from("whatsapp_messages")
@@ -199,6 +234,13 @@ Deno.serve(async (req) => {
         .single();
 
       if (message) {
+        if (!isServiceRoleRequest && message.session?.owner_user_id !== requesterUserId) {
+          return new Response(JSON.stringify({ success: false, error: "Forbidden" }), {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
         if (message.media_url && message.media_status === "ready") {
           return new Response(
             JSON.stringify({ success: true, message: "Media already ready", media_url: message.media_url }),

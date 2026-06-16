@@ -146,18 +146,7 @@ export function useSessionAccess(sessionId: string | null) {
   return useQuery({
     queryKey: ["whatsapp-session-access", sessionId],
     queryFn: async () => {
-      if (!sessionId) return [];
-
-      const { data, error } = await supabase
-        .from("whatsapp_session_access")
-        .select(`
-          *,
-          user:users!whatsapp_session_access_user_id_fkey(id, name, email)
-        `)
-        .eq("session_id", sessionId);
-
-      if (error) throw error;
-      return data as WhatsAppSessionAccess[];
+      return [] as WhatsAppSessionAccess[];
     },
     enabled: !!sessionId,
   });
@@ -267,7 +256,9 @@ export function useCreateWhatsAppSession() {
         body: { name: uniqueInstanceName, token },
       };
 
-      const { data: result, error: fnError } = await supabase.functions.invoke(proxyFn, { body });
+      const { data: result, error: fnError } = await supabase.functions.invoke(proxyFn, {
+        body: { ...body, session_id: session.id },
+      });
 
       if (fnError) {
         await supabase.from("whatsapp_sessions").delete().eq("id", session.id);
@@ -390,6 +381,7 @@ export function useDeleteWhatsAppSession() {
         await supabase.functions.invoke("evolution-go-proxy", {
           body: {
             action: "instance.delete",
+            session_id: session.id,
             instanceName: session.instance_name,
             instance_id: session.instance_id,
           },
@@ -508,35 +500,16 @@ export type WhatsAppAccessMode =
 
 export function useGrantSessionAccess() {
   const queryClient = useQueryClient();
-  const { profile } = useAuth();
 
   return useMutation({
-    mutationFn: async ({
-      sessionId,
-      userId,
-      canView = true,
-      canSend = true,
-      accessMode = "assigned_leads_only",
-    }: {
+    mutationFn: async (_args: {
       sessionId: string;
       userId: string;
       canView?: boolean;
       canSend?: boolean;
       accessMode?: WhatsAppAccessMode;
     }) => {
-      const { error } = await supabase.from("whatsapp_session_access").upsert(
-        {
-          session_id: sessionId,
-          user_id: userId,
-          can_view: canView,
-          can_send: canSend,
-          access_mode: accessMode,
-          granted_by: profile?.id,
-        } as any,
-        { onConflict: "session_id,user_id" }
-      );
-
-      if (error) throw error;
+      throw new Error("Compartilhamento de conversas WhatsApp entre usuários está desativado por segurança.");
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-session-access", variables.sessionId] });
@@ -552,14 +525,8 @@ export function useRevokeSessionAccess() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ sessionId, userId }: { sessionId: string; userId: string }) => {
-      const { error } = await supabase
-        .from("whatsapp_session_access")
-        .delete()
-        .eq("session_id", sessionId)
-        .eq("user_id", userId);
-
-      if (error) throw error;
+    mutationFn: async (_args: { sessionId: string; userId: string }) => {
+      throw new Error("Compartilhamento de conversas WhatsApp entre usuários está desativado por segurança.");
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-session-access", variables.sessionId] });
@@ -584,6 +551,7 @@ export function useRecreateWhatsAppInstance() {
       const { data: result, error: fnError } = await supabase.functions.invoke("evolution-go-proxy", {
         body: {
           action: "instance.create",
+          session_id: session.id,
           body: { name: session.instance_name, token },
         },
       });

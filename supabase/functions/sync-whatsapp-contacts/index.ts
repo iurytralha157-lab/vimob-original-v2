@@ -357,10 +357,14 @@ Deno.serve(async (req) => {
 
     const { data: session } = await supabase
       .from("whatsapp_sessions")
-      .select("id, organization_id, instance_id, instance_name, provider, phone_number, advanced_settings")
+      .select("id, organization_id, owner_user_id, instance_id, instance_name, provider, phone_number, advanced_settings")
       .eq("id", session_id)
       .maybeSingle();
     if (!session) throw new Error("session not found");
+    if (session.owner_user_id !== userId) {
+      return new Response(JSON.stringify({ ok: false, error: "Forbidden" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     if (session.provider !== "evolution_go") {
       throw new Error("only evolution_go provider supported here");
     }

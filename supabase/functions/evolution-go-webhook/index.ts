@@ -691,6 +691,7 @@ async function findOrCreateConversation(
     .from("whatsapp_conversations")
     .select("*")
     .eq("organization_id", organizationId)
+    .eq("session_id", sessionId)
     .is("deleted_at", null)
     .in("remote_jid", remoteJidVariants(remoteJid));
 
@@ -701,12 +702,6 @@ async function findOrCreateConversation(
       : true;
 
     const update: any = {};
-    // Se a conversa veio de uma session diferente (session mudou por reconexão),
-    // migrar para a nova session automaticamente
-    if (conv.session_id !== sessionId) {
-      update.session_id = sessionId;
-      console.log(`[findOrCreateConversation] Migrando conversa ${conv.id} da session ${conv.session_id} para ${sessionId}`);
-    }
     if (groupMeta?.subject && conv.contact_name !== groupMeta.subject) update.contact_name = groupMeta.subject;
     if (groupMeta?.pictureUrl && !conv.contact_picture) update.contact_picture = groupMeta.pictureUrl;
     if (!isGroup && contactPicture && !conv.contact_picture) update.contact_picture = contactPicture;
@@ -732,6 +727,7 @@ async function findOrCreateConversation(
       .from("whatsapp_conversations")
       .select("*")
       .eq("organization_id", organizationId)
+      .eq("session_id", sessionId)
       .eq("is_group", false)
       .eq("contact_name", contactName)
       .is("deleted_at", null)
@@ -769,6 +765,7 @@ async function findOrCreateConversation(
         .from("whatsapp_conversations")
         .select("*")
         .eq("organization_id", organizationId)
+        .eq("session_id", sessionId)
         .eq("is_group", false)
         .eq("lead_id", leadId)
         .is("deleted_at", null)
@@ -792,6 +789,7 @@ async function findOrCreateConversation(
         .from("whatsapp_conversations")
         .select("*")
         .eq("organization_id", organizationId)
+        .eq("session_id", sessionId)
         .eq("is_group", false)
         .is("deleted_at", null)
         .or(`contact_phone.in.(${variants.join(",")}),remote_jid.in.(${remoteVariants.join(",")})`)
@@ -806,7 +804,6 @@ async function findOrCreateConversation(
 
     if (canonicalConversation) {
       const update: any = {};
-      if (canonicalConversation.session_id !== sessionId) update.session_id = sessionId;
       if (hasRealPhone && canonicalConversation.remote_jid !== canonicalJid) update.remote_jid = canonicalJid;
       if (hasRealPhone && !canonicalConversation.contact_phone) update.contact_phone = phone;
       if (leadId && !canonicalConversation.lead_id) update.lead_id = leadId;
