@@ -1,0 +1,66 @@
+services:
+  backend-api:
+    build: .
+    command: ["/app/api"]
+    environment:
+      BACKEND_CORE_ADDR: ":8090"
+      DATABASE_URL: ${DATABASE_URL}
+    ports:
+      - "8090:8090"
+
+  worker-events:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_TYPES: "events"
+
+  worker-rules:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_TYPES: "rules"
+
+  worker-scheduler:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_TYPES: "scheduler"
+
+  worker-memory:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_TYPES: "memory"
+
+  worker-agent:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_TYPES: "agent"
+      AGENT_SERVICE_URL: ${AGENT_SERVICE_URL:-}
+
+  worker-outbox:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_TYPES: "outbox"
+
+  worker-campaigns:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_TYPES: "campaigns"
+
+  worker-notifications:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      WORKER_TYPES: "notifications"
