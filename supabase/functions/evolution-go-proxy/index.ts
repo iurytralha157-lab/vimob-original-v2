@@ -517,15 +517,52 @@ Deno.serve(async (req) => {
       session = data;
     }
 
+    if (!session && action === "instance.create" && !payload.session_id) {
+      const instanceName = String(
+        payload?.body?.name ||
+        payload?.body?.instanceName ||
+        payload?.instance_name ||
+        payload?.instanceName ||
+        "",
+      ).trim();
+
+      if (instanceName) {
+        const recentCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data, error } = await supabase
+          .from("whatsapp_sessions")
+          .select("*")
+          .eq("owner_user_id", userId)
+          .eq("instance_name", instanceName)
+          .eq("provider", "evolution_go")
+          .gte("created_at", recentCutoff)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.warn("[EvolutionProxy] Could not resolve create session by instance name:", {
+            instanceName,
+            userId,
+            error: error.message,
+          });
+        } else if (data?.id) {
+          console.log("[EvolutionProxy] Resolved create session by instance name fallback:", {
+            session_id: data.id,
+            instanceName,
+            userId,
+          });
+          session = data;
+        }
+      }
+    }
+
     if (payload.session_id && !session) {
       return new Response(JSON.stringify({ ok: false, error: "Session not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (!isServiceRoleRequest) {
-      const actionRequiresExistingSession = action !== "instance.create";
-
-      if (actionRequiresExistingSession && !session?.id) {
+      if (!session?.id) {
         return new Response(JSON.stringify({ ok: false, error: "session_id is required" }),
           { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
