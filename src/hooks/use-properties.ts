@@ -210,27 +210,6 @@ export function useUpdateProperty() {
   
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Property> & { id: string }) => {
-      // Se o tipo de imóvel mudou, regenerar o código
-      if (updates.tipo_de_imovel) {
-        const { data: current, error: fetchErr } = await supabase
-          .from('properties')
-          .select('tipo_de_imovel, organization_id, code')
-          .eq('id', id)
-          .single();
-        
-        console.log('[useUpdateProperty] Current property:', current, 'New tipo:', updates.tipo_de_imovel);
-        
-        if (fetchErr) {
-          console.error('[useUpdateProperty] Error fetching current property:', fetchErr);
-        }
-        
-        if (current && current.tipo_de_imovel !== updates.tipo_de_imovel && current.organization_id) {
-          const newCode = await generatePropertyCode(current.organization_id, updates.tipo_de_imovel);
-          console.log('[useUpdateProperty] Code changed from', current.code, 'to', newCode);
-          updates.code = newCode;
-        }
-      }
-
       const { data, error } = await supabase
         .from('properties')
         .update(updates)
