@@ -36,6 +36,7 @@ interface PropertyCardProps {
   onToggleVisibility?: (id: string, isPublic: boolean) => void;
   formatPrice: (value: number | null, tipo: string | null) => string;
   canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 export function PropertyCard({ 
@@ -47,9 +48,11 @@ export function PropertyCard({
   onToggleVisibility,
   formatPrice,
   canEdit = false,
+  canDelete,
 }: PropertyCardProps) {
   const isSold = property.status === 'vendido';
   const isPublic = property.status !== 'privado';
+  const canDeleteRecord = canDelete ?? canEdit;
   const propertyType = (property.tipo_de_imovel || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const isLand = propertyType === 'terreno' || propertyType === 'lote';
   const displayArea = isLand ? property.area_total : (property.area_util || property.area_total);
@@ -179,7 +182,7 @@ export function PropertyCard({
                   )}
                 </DropdownMenuItem>
               )}
-              {canEdit && (
+              {canDeleteRecord && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem 
