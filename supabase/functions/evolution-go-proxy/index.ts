@@ -847,7 +847,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    let finalRes = await evolutionFetch(method, path, { body, query, token, instanceId: instanceKey });
+    const evolutionAuthToken = action === "instance.create" ? undefined : token;
+    let finalRes = await evolutionFetch(method, path, { body, query, token: evolutionAuthToken, instanceId: instanceKey });
     let resolvedInstanceKey = instanceKey;
 
     if (isSendAction(action) && session?.id && isInstanceMissingResponse(finalRes)) {
