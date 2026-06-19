@@ -142,6 +142,7 @@ export function useStartConversation() {
           .eq("organization_id", orgId)
           .eq("lead_id", leadId)
           .is("deleted_at", null)
+          .order("last_message_received_at", { ascending: false, nullsFirst: false })
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(1);
 
@@ -183,6 +184,7 @@ export function useStartConversation() {
         .eq("organization_id", orgId)
         .or(orFilter)
         .is("deleted_at", null)
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .limit(1);
 
@@ -256,6 +258,7 @@ export function useFindConversationByPhone() {
           .eq("lead_id", leadId)
           .eq("session_id", sessionId)
           .is("deleted_at", null)
+          .order("last_message_received_at", { ascending: false, nullsFirst: false })
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(1);
 
@@ -289,6 +292,7 @@ export function useFindConversationByPhone() {
           `)
           .eq("lead_id", leadId)
           .is("deleted_at", null)
+          .order("last_message_received_at", { ascending: false, nullsFirst: false })
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(1);
 
@@ -342,6 +346,7 @@ export function useFindConversationByPhone() {
         `)
         .or(orFilter)
         .is("deleted_at", null)
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .limit(1);
 

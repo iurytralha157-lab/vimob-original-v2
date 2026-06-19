@@ -8149,6 +8149,7 @@ export type Database = {
           is_group: boolean | null
           last_message: string | null
           last_message_at: string | null
+          last_message_received_at: string | null
           lead_id: string | null
           organization_id: string | null
           presence_updated_at: string | null
@@ -8169,6 +8170,7 @@ export type Database = {
           is_group?: boolean | null
           last_message?: string | null
           last_message_at?: string | null
+          last_message_received_at?: string | null
           lead_id?: string | null
           organization_id?: string | null
           presence_updated_at?: string | null
@@ -8189,6 +8191,7 @@ export type Database = {
           is_group?: boolean | null
           last_message?: string | null
           last_message_at?: string | null
+          last_message_received_at?: string | null
           lead_id?: string | null
           organization_id?: string | null
           presence_updated_at?: string | null
@@ -8525,6 +8528,7 @@ export type Database = {
           message_id: string
           message_type: string | null
           read_at: string | null
+          received_at: string | null
           remote_jid: string | null
           sender_jid: string | null
           sender_name: string | null
@@ -8548,6 +8552,7 @@ export type Database = {
           message_id: string
           message_type?: string | null
           read_at?: string | null
+          received_at?: string | null
           remote_jid?: string | null
           sender_jid?: string | null
           sender_name?: string | null
@@ -8571,6 +8576,7 @@ export type Database = {
           message_id?: string
           message_type?: string | null
           read_at?: string | null
+          received_at?: string | null
           remote_jid?: string | null
           sender_jid?: string | null
           sender_name?: string | null

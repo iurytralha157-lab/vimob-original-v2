@@ -769,6 +769,7 @@ async function findOrCreateConversation(
         .eq("is_group", false)
         .eq("lead_id", leadId)
         .is("deleted_at", null)
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
         .limit(1)
@@ -793,6 +794,7 @@ async function findOrCreateConversation(
         .eq("is_group", false)
         .is("deleted_at", null)
         .or(`contact_phone.in.(${variants.join(",")}),remote_jid.in.(${remoteVariants.join(",")})`)
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
         .limit(10);
@@ -1155,6 +1157,11 @@ async function handleSingleMessageUpsert(session: any, m: any) {
   const messageId = key.id || key.ID || info.ID || info.Id || m.id || m.ID || m.messageId;
   const timestamp = m.messageTimestamp || m.MessageTimestamp || m.timestamp || m.Timestamp || info.Timestamp || Date.now();
   const sentAt = new Date(typeof timestamp === "number" && timestamp < 1e12 ? timestamp * 1000 : timestamp).toISOString();
+  const receivedAt = new Date().toISOString();
+  const deliveryDelaySeconds = Math.max(
+    0,
+    Math.round((Date.parse(receivedAt) - Date.parse(sentAt)) / 1000),
+  );
   const senderName = m.pushName || m.PushName || info.PushName || m.senderName || null;
 
   // Extract content + type
@@ -1333,6 +1340,7 @@ async function handleSingleMessageUpsert(session: any, m: any) {
     from_me: fromMe,
     status: fromMe ? "sent" : "delivered",
     sent_at: sentAt,
+    received_at: receivedAt,
     remote_jid: remoteJid,
     sender_jid: senderJid,
     sender_name: senderName,
@@ -1342,6 +1350,8 @@ async function handleSingleMessageUpsert(session: any, m: any) {
     reaction_sender_name: messageType === "reaction" ? senderName : null,
     metadata: {
       provider: "evolution_go",
+      received_at: receivedAt,
+      delivery_delay_seconds: deliveryDelaySeconds,
       raw_remote_jid: rawRemoteJid,
       used_lid_fallback: isLidJid(String(rawRemoteJid)) && !isLidJid(remoteJid),
       avatar_payload_found: !!incomingAvatar,
@@ -1385,6 +1395,8 @@ async function handleSingleMessageUpsert(session: any, m: any) {
         media_status: messageInsert.media_status,
         reaction_to_message_id: reactionToMessageId,
         sent_at: sentAt,
+        received_at: receivedAt,
+        delivery_delay_seconds: deliveryDelaySeconds,
         raw_message: m,
       },
     }));
@@ -1405,7 +1417,7 @@ async function handleSingleMessageUpsert(session: any, m: any) {
         conversation: conv,
         message: content,
         contactName: senderName,
-        receivedAt: sentAt,
+        receivedAt,
       }));
     }
   }
@@ -1497,8 +1509,9 @@ async function handleSingleMessageUpsert(session: any, m: any) {
     await supabase.from("whatsapp_conversations").update({
       last_message: lastMessage || content || `[${messageType}]`,
       last_message_at: sentAt,
+      last_message_received_at: receivedAt,
       unread_count: fromMe ? conv.unread_count : (conv.unread_count || 0) + 1,
-      updated_at: new Date().toISOString(),
+      updated_at: receivedAt,
     }).eq("id", conv.id);
   }
 }
@@ -1720,11 +1733,20 @@ Deno.serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Run handler (fire-and-forget via waitUntil if possible)
+    const normalizedEvent = String(event || "").toLowerCase().replace(/_/g, ".");
+    const shouldPersistBeforeAck = [
+      "messages.upsert",
+      "message.upsert",
+      "messages.received",
+      "message.received",
+      "messages",
+      "message",
+    ].includes(normalizedEvent);
+
+    // Persist incoming messages before the provider receives 200. Other
+    // event types can keep running in the background.
     const work = (async () => {
       try {
-        const normalizedEvent = event.toLowerCase().replace(/_/g, ".");
-        
         switch (normalizedEvent) {
           case "qrcode.updated":
           case "qr.updated":
@@ -1774,9 +1796,13 @@ Deno.serve(async (req) => {
       }
     })();
 
-    // @ts-expect-error EdgeRuntime is provided by Supabase
-    if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(work);
-    else await work;
+    if (shouldPersistBeforeAck) {
+      await work;
+    } else {
+      // @ts-expect-error EdgeRuntime is provided by Supabase
+      if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(work);
+      else await work;
+    }
 
     return new Response(JSON.stringify({ ok: true }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } });

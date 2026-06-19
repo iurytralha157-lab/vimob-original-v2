@@ -23,6 +23,7 @@ export interface WhatsAppConversation {
   presence_updated_at: string | null;
   last_message: string | null;
   last_message_at: string | null;
+  last_message_received_at?: string | null;
   unread_count: number;
   is_group: boolean;
   archived_at: string | null;
@@ -85,6 +86,7 @@ export interface WhatsAppMessage {
   metadata?: Record<string, any>;
   status: string;
   sent_at: string;
+  received_at?: string | null;
   delivered_at: string | null;
   read_at: string | null;
   sender_jid: string | null;
@@ -316,6 +318,7 @@ export function useWhatsAppConversations(
         .is("deleted_at", null)
         // Relaxado conforme solicitado para nao ocultar conversas que podem ter last_message_at nulo
         // .not("last_message_at", "is", null) 
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
 
@@ -839,6 +842,7 @@ export function useSendWhatsAppMessage() {
         session_id: session.id,
         message_id: messageId,
       });
+      const persistedAt = new Date().toISOString();
       const { error: insertError } = await supabase.from("whatsapp_messages").upsert({
         conversation_id: conversation.id,
         session_id: session.id,
@@ -853,7 +857,8 @@ export function useSendWhatsAppMessage() {
         media_storage_path: storedMediaPath,
         remote_jid: conversation.remote_jid,
         status: "sent",
-        sent_at: new Date().toISOString(),
+        sent_at: persistedAt,
+        received_at: persistedAt,
         sender_name: profile?.name || null,
       }, { onConflict: "conversation_id,message_id" });
 
@@ -907,7 +912,8 @@ export function useSendWhatsAppMessage() {
           .from("whatsapp_conversations")
           .update({
             last_message: formatOutgoingLastMessage(mediaType, actualContent, profile?.name || null, isGroup),
-            last_message_at: new Date().toISOString(),
+            last_message_at: persistedAt,
+            last_message_received_at: persistedAt,
             unread_count: 0,
             session_id: session.id,
           })
@@ -960,6 +966,7 @@ export function useSendWhatsAppMessage() {
         remote_jid: variables.conversation.remote_jid,
         status: "pending",
         sent_at: new Date().toISOString(),
+        received_at: new Date().toISOString(),
         delivered_at: null,
         read_at: null,
         sender_jid: null,

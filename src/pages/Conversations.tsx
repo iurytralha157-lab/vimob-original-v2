@@ -1203,7 +1203,7 @@ function ConversationItem({
           </Button>
         )}
         <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
-          {formatTime(conversation.last_message_at)}
+          {formatTime(conversation.last_message_received_at || conversation.last_message_at)}
         </span>
       </div>
 
