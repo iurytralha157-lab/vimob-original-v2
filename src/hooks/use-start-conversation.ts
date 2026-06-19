@@ -50,18 +50,52 @@ function conversationMatchesPhone(conversation: Pick<WhatsAppConversation, "cont
   return phonesMatch(conversation.contact_phone || conversation.remote_jid, phone);
 }
 
+function extractStartErrorMessage(error: unknown) {
+  if (!error) return "";
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+
+  if (typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const parts = ["message", "error", "details", "hint", "code"]
+      .map((key) => record[key])
+      .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+      .map(String)
+      .filter(Boolean);
+
+    if (parts.length > 0) return parts.join(" ");
+
+    try {
+      const serialized = JSON.stringify(error);
+      return serialized === "{}" ? "" : serialized;
+    } catch {
+      return "";
+    }
+  }
+
+  return String(error);
+}
+
 export function getWhatsAppStartErrorMessage(error: unknown) {
   if (error instanceof WhatsAppStartError) return error.userMessage;
 
-  const message = error instanceof Error ? error.message : String(error || "");
+  const message = extractStartErrorMessage(error);
   const normalized = message.toLowerCase();
 
-  if (normalized.includes("statement timeout") || normalized.includes("timeout")) {
-    return "Não foi possível abrir a conversa agora. Tente novamente em alguns instantes.";
+  if (normalized.includes("row-level security") || normalized.includes("42501") || normalized.includes("rls")) {
+    return "Voce nao tem permissao para iniciar conversa nesta sessao WhatsApp.";
   }
 
-  if (normalized.includes("invalid") || normalized.includes("jid") || normalized.includes("phone")) {
-    return "Este lead não tem um WhatsApp válido cadastrado.";
+  if (normalized.includes("duplicate key") || normalized.includes("unique constraint") || normalized.includes("23505")) {
+    return "Ja existe uma conversa para este telefone nesta sessao WhatsApp.";
+  }
+
+  if (normalized.includes("statement timeout") || normalized.includes("timeout")) {
+    return "Nao foi possivel abrir a conversa agora. Tente novamente em alguns instantes.";
+  }
+
+  if (normalized.includes("invalid") || normalized.includes("jid") || normalized.includes("phone") || normalized.includes("telefone")) {
+    return "Este lead nao tem um WhatsApp valido cadastrado.";
   }
 
   return message || "Ocorreu um erro inesperado ao tentar abrir o chat.";
