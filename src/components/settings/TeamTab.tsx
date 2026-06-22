@@ -52,7 +52,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { RolesTab } from './RolesTab';
 
 export function TeamTab() {
-  const { profile, isSuperAdmin } = useAuth();
+  const { profile, organization, isSuperAdmin } = useAuth();
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   
@@ -136,26 +136,39 @@ export function TeamTab() {
         return;
       }
       const { data: result, error } = await supabase.functions.invoke('create-user', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: {
           name: newUserName.trim(),
           email: newUserEmail.trim(),
           phone: newUserPhone.trim() || undefined,
           whatsapp: newUserPhone.trim() || undefined,
           endereco: newUserEndereco.trim() || undefined,
-          role: newUserRole
+          role: newUserRole,
+          organizationId: organization?.id || profile?.organization_id
         }
       });
-      if (error) throw new Error(error.message || 'Erro ao criar usuário');
+      if (error) {
+        let message = error.message || 'Erro ao criar usuário';
+        const response = (error as any).context;
+        if (response && typeof response.json === 'function') {
+          try {
+            const payload = await response.json();
+            message = payload?.error || payload?.message || message;
+          } catch {
+            // Keep Supabase fallback message when the function did not return JSON.
+          }
+        }
+        throw new Error(message);
+      }
 
       if (result.wasMultiOrg || result.wasOrphan) {
         toast.success(result.message || 'Usuário vinculado à organização! Acesso com senha existente.');
       } else if (result.whatsappSent) {
         toast.success('Usuário criado! Credenciais de acesso enviadas via WhatsApp.');
       } else {
-        toast.success(
-          `Usuário criado! Senha gerada: ${result.generatedPassword}. ⚠️ WhatsApp não enviado — copie a senha agora.`,
-          { duration: 15000 }
-        );
+        toast.success('Usuário criado! O envio das credenciais via WhatsApp não foi confirmado. Gere uma nova senha se precisar reenviar o acesso.');
       }
       queryClient.invalidateQueries({ queryKey: ['organization-users'] });
       setUserDialogOpen(false);

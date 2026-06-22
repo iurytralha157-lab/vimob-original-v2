@@ -137,12 +137,35 @@ Deno.serve(async (req) => {
       });
     }
 
+    const requestBody = await req.json();
+    const name = requestBody?.name?.toString().trim();
+    const email = requestBody?.email?.toString().trim().toLowerCase();
+    const role = requestBody?.role;
+    const organizationId = requestBody?.organizationId;
+    const phone = requestBody?.phone;
+    const whatsapp = requestBody?.whatsapp;
+    const endereco = requestBody?.endereco;
+
+    if (!name || !email || !role) {
+      return new Response(JSON.stringify({ error: 'Preencha nome, email e função do usuário.' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (role !== 'admin' && role !== 'user') {
+      return new Response(JSON.stringify({ error: 'Função inválida para o usuário.' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Get caller's profile to check permissions
     const { data: callerProfile } = await supabaseAdmin
       .from('users')
       .select('organization_id, role, name')
       .eq('id', callerUser.id)
-      .single();
+      .maybeSingle();
 
     // Check if caller is super admin
     const { data: superAdminRole } = await supabaseAdmin
@@ -150,35 +173,15 @@ Deno.serve(async (req) => {
       .select('role')
       .eq('user_id', callerUser.id)
       .eq('role', 'super_admin')
-      .single();
+      .maybeSingle();
 
     const isSuperAdmin = !!superAdminRole;
-    const isOrgAdmin = callerProfile?.role === 'admin';
-
-    if (!isSuperAdmin && !isOrgAdmin) {
-      return new Response(JSON.stringify({ error: 'Insufficient permissions. Must be an admin.' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const { name, email, role, organizationId, phone, whatsapp, endereco } = await req.json();
-
-    if (!name || !email || !role) {
-      return new Response(JSON.stringify({ error: 'Missing required fields: name, email, role' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
 
     // Determine which organization to use
-    let targetOrgId = organizationId;
-    if (!isSuperAdmin) {
-      targetOrgId = callerProfile?.organization_id;
-    }
+    const targetOrgId = organizationId || callerProfile?.organization_id;
 
     if (!targetOrgId) {
-      return new Response(JSON.stringify({ error: 'Organization ID is required' }), {
+      return new Response(JSON.stringify({ error: 'Organização ativa não encontrada. Selecione uma organização e tente novamente.' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -198,6 +201,27 @@ Deno.serve(async (req) => {
       });
     }
 
+    const { data: callerMembership } = await supabaseAdmin
+      .from('organization_members')
+      .select('role, is_active')
+      .eq('user_id', callerUser.id)
+      .eq('organization_id', targetOrgId)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    const isProfileAdminForTarget =
+      callerProfile?.organization_id === targetOrgId && callerProfile?.role === 'admin';
+    const isMembershipAdmin = callerMembership?.role === 'admin';
+
+    if (!isSuperAdmin && !isProfileAdminForTarget && !isMembershipAdmin) {
+      return new Response(JSON.stringify({
+        error: 'Você não tem permissão de administrador nesta organização para criar usuários.'
+      }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Generate a random password for this account
     const generatedPassword = generateRandomPassword(12);
     // Use whatsapp field if provided, fallback to phone
@@ -207,7 +231,7 @@ Deno.serve(async (req) => {
     const { data: existingUser } = await supabaseAdmin
       .from('users')
       .select('id, organization_id, name')
-      .eq('email', email)
+      .ilike('email', email)
       .maybeSingle();
 
     // If not found in public.users, check auth.users (orphan auth entry from previous failed deletion)
@@ -275,7 +299,6 @@ Deno.serve(async (req) => {
         success: true,
         user: { id: authMatch.id, email, name, role },
         wasAuthOrphan: true,
-        generatedPassword,
         whatsappSent: welcomeResult.success,
         message: 'Usuário recuperado de cadastro órfão. Nova senha enviada.',
       }), {
@@ -360,7 +383,6 @@ Deno.serve(async (req) => {
           role,
         },
         wasAuthOrphan: true,
-        generatedPassword,
         whatsappSent: welcomeResult.success,
       }), {
         status: 200,
@@ -586,7 +608,6 @@ Deno.serve(async (req) => {
         name,
         role,
       },
-      generatedPassword,
       whatsappSent: welcomeResult.success,
       whatsappReason: welcomeResult.reason || null,
     }), {
