@@ -27,7 +27,7 @@ window.addEventListener('error', handleChunkError);
 window.addEventListener('unhandledrejection', handleChunkError);
 
 // Aggressive version management and cache busting
-const CACHE_BUST_VERSION = '2.1.9-push-vapid-20260609';
+const CACHE_BUST_VERSION = '2.2.1';
 const BUST_KEY = 'lovable_app_version';
 const BUST_RELOAD_KEY = 'lovable_app_version_reload_at';
 
