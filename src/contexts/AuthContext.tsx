@@ -555,6 +555,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Persistir como a última organização ativa para este usuário
     localStorage.setItem(`vimob_active_organization_${activeUser.id}`, orgId);
+    sessionStorage.setItem(`vimob_selected_organization_${activeUser.id}`, orgId);
     
     // sessionStorage org_selected removido - não dependemos mais dele
     console.log('[AuthContext] switching organization to:', orgId);
@@ -673,7 +674,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
         } else if (count > 1) {
-          if (options?.forceSelectorForMultiOrg) {
+          const selectedOrgThisSession = sessionStorage.getItem(`vimob_selected_organization_${userId}`);
+
+          if (options?.forceSelectorForMultiOrg || !selectedOrgThisSession) {
             console.log('[AuthContext] multiple organizations found; forcing organization selector');
             setOrganization(null);
             setProfile(prev => prev ? { ...prev, organization_id: null } : prev);
@@ -681,7 +684,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           // Se tiver múltiplas, tenta carregar a última usada se houver flag de sessão
-          const savedOrgId = localStorage.getItem(`vimob_active_organization_${userId}`);
+          const savedOrgId = selectedOrgThisSession || localStorage.getItem(`vimob_active_organization_${userId}`);
           
           if (savedOrgId && (!organization || organization.id !== savedOrgId)) {
             // Validar se a org salva ainda está na lista de orgs acessíveis
