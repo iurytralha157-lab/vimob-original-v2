@@ -7828,6 +7828,7 @@ export type Database = {
           phone: string | null
           points: number | null
           role: string | null
+          theme_preference: string | null
           uf: string | null
           updated_at: string
           whatsapp: string | null
@@ -7852,6 +7853,7 @@ export type Database = {
           phone?: string | null
           points?: number | null
           role?: string | null
+          theme_preference?: string | null
           uf?: string | null
           updated_at?: string
           whatsapp?: string | null
@@ -7876,6 +7878,7 @@ export type Database = {
           phone?: string | null
           points?: number | null
           role?: string | null
+          theme_preference?: string | null
           uf?: string | null
           updated_at?: string
           whatsapp?: string | null

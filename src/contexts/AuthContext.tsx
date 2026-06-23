@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
+import { useTheme } from 'next-themes';
 import { supabase } from '@/integrations/supabase/client';
 import { logAuditAction } from '@/hooks/use-audit-logs';
 import { performanceTracker } from '@/lib/performance';
@@ -15,6 +16,7 @@ interface UserProfile {
   language?: string;
   phone?: string;
   whatsapp?: string;
+  theme_preference?: 'light' | 'dark' | null;
   cpf?: string;
   cep?: string;
   endereco?: string;
@@ -93,6 +95,7 @@ interface AuthContextType {
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { setTheme } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const userRef = useRef<User | null>(null);
   const isLoggingOutRef = useRef(false);
@@ -117,6 +120,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       organizationsLoaded,
     };
   }, [authInitialized, organizationsLoaded]);
+
+  useEffect(() => {
+    if (profile?.theme_preference === 'light' || profile?.theme_preference === 'dark') {
+      setTheme(profile.theme_preference);
+    }
+  }, [profile?.theme_preference, setTheme]);
 
   useEffect(() => {
     if (organization) {
@@ -162,7 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const [userResult, superAdmin] = await Promise.all([
           supabase
             .from('users')
-            .select('id, organization_id, name, email, role, avatar_url, is_active, language, phone, whatsapp, cpf, cep, endereco, numero, complemento, bairro, cidade, uf')
+            .select('id, organization_id, name, email, role, avatar_url, is_active, language, phone, whatsapp, theme_preference, cpf, cep, endereco, numero, complemento, bairro, cidade, uf')
             .eq('id', userId)
             .single(),
           checkSuperAdmin(userId)
