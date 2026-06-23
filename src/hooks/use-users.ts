@@ -3,20 +3,48 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Tables } from '@/integrations/supabase/types';
 import { logAuditAction } from './use-audit-logs';
+import { useAuth } from '@/contexts/AuthContext';
 export type User = Tables<'users'>;
 
 export function useOrganizationUsers() {
+  const { organization, profile } = useAuth();
+  const organizationId = organization?.id || profile?.organization_id || null;
+
   return useQuery({
-    queryKey: ['organization-users'],
+    queryKey: ['organization-users', organizationId],
+    enabled: !!organizationId,
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: users, error } = await supabase
         .from('users')
         .select('*')
         .eq('is_active', true)
         .order('name');
       
       if (error) throw error;
-      return data as User[];
+
+      const { data: memberships } = await supabase
+        .from('organization_members' as any)
+        .select('user_id, role, is_active, organization_id')
+        .eq('organization_id', organizationId)
+        .eq('is_active', true);
+
+      const membershipByUserId = new Map(
+        (memberships || []).map((member: any) => [member.user_id, member])
+      );
+
+      return (users || [])
+        .filter((user) => user.organization_id === organizationId || membershipByUserId.has(user.id))
+        .map((user) => {
+          const membership = membershipByUserId.get(user.id);
+          if (!membership) return user as User;
+
+          return {
+            ...user,
+            organization_id: organizationId,
+            role: membership.role || user.role,
+            is_active: membership.is_active ?? user.is_active,
+          } as User;
+        });
     },
   });
 }
@@ -48,7 +76,7 @@ export function useUpdateUser() {
       return data.user as User;
     },
     onSuccess: (updatedUser) => {
-      queryClient.setQueryData(['organization-users'], (current: User[] | undefined) => {
+      queryClient.setQueriesData({ queryKey: ['organization-users'] }, (current: User[] | undefined) => {
         if (!Array.isArray(current)) return current;
         return current.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user);
       });
