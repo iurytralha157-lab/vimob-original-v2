@@ -69,8 +69,8 @@ export const sourceLabels: Record<string, string> = {
   import: "Importação",
 };
 
-export function getDateRangeFromPreset(preset: DatePreset): { from: Date; to: Date } {
-  const now = new Date();
+export function getDateRangeFromPreset(preset: DatePreset, baseDate: Date = new Date()): { from: Date; to: Date } {
+  const now = baseDate;
 
   switch (preset) {
     case "today":

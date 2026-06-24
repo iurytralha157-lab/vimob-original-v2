@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from '
 import { useAuth } from './AuthContext';
 import { DatePreset, getDateRangeFromPreset } from '@/hooks/use-dashboard-filters';
 
+const CLOCK_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const CLOCK_DRIFT_WARNING_MS = 5 * 60 * 1000;
+
 interface FilterContextType {
   datePreset: DatePreset;
   customDateRange: { from: Date; to: Date } | null;
@@ -22,6 +25,45 @@ export function FilterProvider({ children }: { children: React.ReactNode }) {
 
   const [datePreset, setDatePresetInternal] = useState<DatePreset>('last30days');
   const [customDateRange, setCustomDateRangeInternal] = useState<{ from: Date; to: Date } | null>(null);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncServerClock = async () => {
+      try {
+        const response = await fetch(`/version.json?clock=${Date.now()}`, { cache: 'no-store' });
+        const serverDateHeader = response.headers.get('date');
+        if (!serverDateHeader) return;
+
+        const serverDate = new Date(serverDateHeader);
+        if (!Number.isFinite(serverDate.getTime())) return;
+
+        const offsetMs = serverDate.getTime() - Date.now();
+        if (!isMounted) return;
+
+        setServerClockOffsetMs(offsetMs);
+
+        if (Math.abs(offsetMs) > CLOCK_DRIFT_WARNING_MS) {
+          console.warn('[FilterContext] Client clock differs from server clock. Date filters will use server time.', {
+            offsetMs,
+            serverDate: serverDate.toISOString(),
+            clientDate: new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        console.warn('[FilterContext] Could not sync server clock. Date filters will use client time.', error);
+      }
+    };
+
+    syncServerClock();
+    const intervalId = window.setInterval(syncServerClock, CLOCK_SYNC_INTERVAL_MS);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   // Load from sessionStorage on mount or when storageKey changes
   useEffect(() => {
@@ -81,8 +123,8 @@ export function FilterProvider({ children }: { children: React.ReactNode }) {
     if (datePreset === 'custom' && customDateRange) {
       return customDateRange;
     }
-    return getDateRangeFromPreset(datePreset);
-  }, [datePreset, customDateRange]);
+    return getDateRangeFromPreset(datePreset, new Date(Date.now() + serverClockOffsetMs));
+  }, [datePreset, customDateRange, serverClockOffsetMs]);
 
   return (
     <FilterContext.Provider value={{
