@@ -116,6 +116,9 @@ export default function AdminOnboarding() {
       if (data.error) throw new Error(data.error);
 
       toast.success('Organização aprovada e link de pagamento enviado!');
+      if (data?.whatsappNotification?.success === false) {
+        toast.warning('Organizacao aprovada, mas o WhatsApp com login e senha nao foi enviado.');
+      }
       setSelectedRequest(null);
       setCreatedCredentials({
         email: data.email,

@@ -126,6 +126,77 @@ async function createInitialPipeline(supabaseAdmin: any, organizationId: string,
   if (stagesError) console.error('Failed to create initial stages:', stagesError);
 }
 
+async function sendWhatsAppNotification(
+  supabaseUrl: string,
+  serviceKey: string,
+  payload: { organization_id?: string; phone: string; message: string },
+) {
+  const response = await fetch(`${supabaseUrl}/functions/v1/whatsapp-notifier`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${serviceKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await response.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
+  }
+
+  const success = response.ok && data?.success !== false;
+  if (!success) {
+    console.warn('WhatsApp access notification failed:', response.status, data);
+  }
+
+  return {
+    success,
+    status: response.status,
+    error: success ? null : data?.error || data?.message || 'Failed to send WhatsApp notification',
+    data,
+  };
+}
+
+async function sendTrialAccessNotification(
+  supabaseUrl: string,
+  serviceKey: string,
+  params: {
+    organizationId: string;
+    name: string;
+    email: string;
+    phone?: string | null;
+    password?: string;
+    planName?: string | null;
+  },
+) {
+  const cleanPhone = onlyDigits(params.phone);
+  if (!cleanPhone) return null;
+
+  const message =
+`Ola ${params.name}!
+
+Sua conta no Vimob foi ativada com sucesso.
+
+Dados de acesso:
+https://vimob.vettercompany.com.br/auth
+Email: ${params.email}
+Senha temporaria: ${params.password || 'use a senha cadastrada no onboarding'}
+
+Plano: ${params.planName || 'Vimob'}
+
+Qualquer duvida, estamos a disposicao.`;
+
+  return sendWhatsAppNotification(supabaseUrl, serviceKey, {
+    organization_id: params.organizationId,
+    phone: cleanPhone,
+    message,
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -348,6 +419,7 @@ Deno.serve(async (req) => {
     await createInitialPipeline(supabaseAdmin, org.id, segment);
 
     let paymentUrl: string | undefined;
+    let whatsappNotification: any = null;
     if (requiresPayment) {
       try {
         const { data: linkData, error: linkError } = await supabaseAdmin.functions.invoke('asaas-create-payment-link', {
@@ -367,9 +439,19 @@ Deno.serve(async (req) => {
 
         if (linkError) throw linkError;
         paymentUrl = linkData?.payment_link_url;
+        whatsappNotification = linkData?.whatsapp_notification || null;
       } catch (paymentError) {
         console.error('Failed to create payment link:', paymentError);
       }
+    } else {
+      whatsappNotification = await sendTrialAccessNotification(supabaseUrl, serviceRoleKey, {
+        organizationId: org.id,
+        name: responsible_name,
+        email,
+        phone: responsible_phone || company_whatsapp || company_phone,
+        password: createdAuthUser ? tempPassword : undefined,
+        planName: plan.name || null,
+      });
     }
 
     return new Response(JSON.stringify({
@@ -380,6 +462,7 @@ Deno.serve(async (req) => {
       status: org.subscription_status,
       requires_payment: requiresPayment,
       paymentUrl,
+      whatsapp_notification: whatsappNotification,
       email,
       temp_password: createdAuthUser ? tempPassword : undefined,
     }), {

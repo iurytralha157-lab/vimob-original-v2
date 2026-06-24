@@ -434,6 +434,9 @@ export default function Onboarding() {
       if (user) await refreshProfile();
       setSubmitted(true);
       toast.success(data?.requires_payment ? 'Ambiente criado. Pagamento pendente.' : 'Ambiente criado com sucesso!');
+      if (data?.whatsapp_notification?.success === false) {
+        toast.warning('Ambiente criado, mas o WhatsApp com login e senha nao foi enviado.');
+      }
     } catch (e: any) {
       toast.error('Erro: ' + e.message);
     } finally {

@@ -55,10 +55,25 @@ async function sendWhatsAppNotification(
     body: JSON.stringify(payload),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    console.warn('WhatsApp notification failed:', response.status, text);
+  const text = await response.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
   }
+
+  const success = response.ok && data?.success !== false;
+  if (!success) {
+    console.warn('WhatsApp notification failed:', response.status, data);
+  }
+
+  return {
+    success,
+    status: response.status,
+    error: success ? null : data?.error || data?.message || 'Failed to send WhatsApp notification',
+    data,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -133,6 +148,7 @@ Deno.serve(async (req) => {
       asaas_payment_link_url: link.url,
     }).eq('id', organization_id);
 
+    let whatsappNotification: any = null;
     if (cleanPhone) {
       const formattedValue = Number(value).toLocaleString('pt-BR', {
         style: 'currency',
@@ -157,7 +173,7 @@ Voce pode pagar via Pix, cartao de credito${isAnnual ? ' parcelado em ate 12x' :
 
 Qualquer duvida, estamos a disposicao.`;
 
-      await sendWhatsAppNotification(SUPABASE_URL, SERVICE_KEY, {
+      whatsappNotification = await sendWhatsAppNotification(SUPABASE_URL, SERVICE_KEY, {
         organization_id,
         phone: cleanPhone,
         message,
@@ -169,6 +185,7 @@ Qualquer duvida, estamos a disposicao.`;
       asaas_customer_id: customer.id,
       payment_link_id: link.id,
       payment_link_url: link.url,
+      whatsapp_notification: whatsappNotification,
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
