@@ -92,19 +92,23 @@ export function MissionManager() {
 
   const createMissionMutation = useMutation({
     mutationFn: async (mission: typeof newMission) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('gamification_missions' as any)
         .insert([{
           ...mission,
           organization_id: organization?.id,
           target_user_id: mission.target_scope === 'user' ? mission.target_user_id : null,
           is_active: true,
-        }]);
+        }])
+        .select('id')
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new Error('Não foi possível criar a missão. Verifique sua permissão de administrador.');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gamification-missions-admin'] });
+      queryClient.invalidateQueries({ queryKey: ['gamification-missions'] });
       setIsOpen(false);
       setNewMission(EMPTY_MISSION);
       toast.success('Missão criada com sucesso!');
@@ -116,30 +120,48 @@ export function MissionManager() {
 
   const updateMissionMutation = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('gamification_missions' as any)
-        .update({ is_active })
-        .eq('id', id);
+        .update({ is_active, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select('id, is_active')
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new Error('Não foi possível alterar a missão. Verifique sua permissão de administrador.');
+      return data;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['gamification-missions-admin'] });
+      queryClient.invalidateQueries({ queryKey: ['gamification-missions'] });
+      toast.success(variables.is_active ? 'Missão ativada.' : 'Missão desativada.');
+    },
+    onError: (error: any) => {
+      console.error('Erro ao alterar missão:', error);
+      toast.error('Erro ao alterar missão: ' + error.message);
     },
   });
 
   const deleteMissionMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('gamification_missions' as any)
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .select('id')
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new Error('Não foi possível remover a missão. Verifique sua permissão de administrador.');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gamification-missions-admin'] });
+      queryClient.invalidateQueries({ queryKey: ['gamification-missions'] });
       toast.success('Missão removida.');
+    },
+    onError: (error: any) => {
+      console.error('Erro ao remover missão:', error);
+      toast.error('Erro ao remover missão: ' + error.message);
     },
   });
 
@@ -180,6 +202,14 @@ export function MissionManager() {
                   key={mission.id}
                   className="border rounded-lg p-4 bg-card hover:border-primary/30 transition-colors"
                 >
+                  {(() => {
+                    const isUpdating = updateMissionMutation.isPending
+                      && updateMissionMutation.variables?.id === mission.id;
+                    const isDeleting = deleteMissionMutation.isPending
+                      && deleteMissionMutation.variables === mission.id;
+
+                    return (
+                      <>
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="bg-orange-500/10 p-2 rounded-lg shrink-0">
@@ -200,6 +230,7 @@ export function MissionManager() {
                       </Badge>
                       <Switch
                         checked={mission.is_active}
+                        disabled={isUpdating || isDeleting}
                         onCheckedChange={(checked) =>
                           updateMissionMutation.mutate({ id: mission.id, is_active: checked })
                         }
@@ -208,9 +239,10 @@ export function MissionManager() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-destructive"
+                        disabled={isUpdating || isDeleting}
                         onClick={() => deleteMissionMutation.mutate(mission.id)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       </Button>
                     </div>
                   </div>
@@ -248,6 +280,9 @@ export function MissionManager() {
                         : 'Toda a equipe'}
                     </span>
                   </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

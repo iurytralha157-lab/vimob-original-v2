@@ -117,6 +117,11 @@ export function CreateLeadDialog({
           .eq("id", conversationId);
       }
 
+      if ((newLead as { reentry?: boolean })?.reentry) {
+        onOpenChange(false);
+        return;
+      }
+
       toast({
         title: "Lead criado",
         description: "O lead foi criado com sucesso",
@@ -125,6 +130,13 @@ export function CreateLeadDialog({
       onOpenChange(false);
     } catch (error) {
       console.error("Error creating lead:", error);
+      if (
+        (error as { name?: string; message?: string })?.name === "DuplicateLeadPhoneError" ||
+        (error as { name?: string; message?: string })?.message === "duplicate_lead_phone"
+      ) {
+        return;
+      }
+
       toast({
         title: "Erro ao criar lead",
         description: "Não foi possível criar o lead",

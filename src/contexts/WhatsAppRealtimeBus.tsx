@@ -118,6 +118,21 @@ export function WhatsAppRealtimeBus() {
       return createdTime >= notifyAfterRef.current - 5000;
     };
 
+    const isRecentWhatsAppMessage = (sentAt?: string | null, receivedAt?: string | null) => {
+      if (!sentAt) return true;
+      const sentTime = Date.parse(sentAt);
+      const receivedTime = receivedAt ? Date.parse(receivedAt) : Date.now();
+      if (Number.isNaN(sentTime) || Number.isNaN(receivedTime)) return true;
+      return receivedTime - sentTime <= 15 * 60 * 1000;
+    };
+
+    const sortMessagesBySentAt = (messages: any[]) =>
+      [...messages].sort((a, b) => {
+        const aTime = Date.parse(a.sent_at || a.received_at || "");
+        const bTime = Date.parse(b.sent_at || b.received_at || "");
+        return (Number.isNaN(aTime) ? 0 : aTime) - (Number.isNaN(bTime) ? 0 : bTime);
+      });
+
     const findCachedConversation = (conversationId: string) =>
       queryClient
         .getQueriesData({ queryKey: ["whatsapp-conversations"] })
@@ -172,11 +187,13 @@ export function WhatsAppRealtimeBus() {
             ...old,
             pages: old.pages.map((page: any) => ({
               ...page,
-              messages: page.messages.map((m: any) =>
-                m.id === msg.id ||
-                (m.client_message_id && newCid && m.client_message_id === newCid)
-                  ? { ...m, ...msg, media_url: msg.media_url || m.media_url }
-                  : m,
+              messages: sortMessagesBySentAt(
+                page.messages.map((m: any) =>
+                  m.id === msg.id ||
+                  (m.client_message_id && newCid && m.client_message_id === newCid)
+                    ? { ...m, ...msg, media_url: msg.media_url || m.media_url }
+                    : m,
+                ),
               ),
             })),
           };
@@ -184,7 +201,7 @@ export function WhatsAppRealtimeBus() {
         return {
           ...old,
           pages: [
-            { ...old.pages[0], messages: [...old.pages[0].messages, msg] },
+            { ...old.pages[0], messages: sortMessagesBySentAt([...old.pages[0].messages, msg]) },
             ...old.pages.slice(1),
           ],
         };
@@ -232,14 +249,16 @@ export function WhatsAppRealtimeBus() {
                 (m.client_message_id && cid && m.client_message_id === cid),
             );
             if (exists) {
-              return msgs.map((m) =>
-                m.id === msg.id ||
-                (m.client_message_id && cid && m.client_message_id === cid)
-                  ? { ...m, ...msg }
-                  : m,
+              return sortMessagesBySentAt(
+                msgs.map((m) =>
+                  m.id === msg.id ||
+                  (m.client_message_id && cid && m.client_message_id === cid)
+                    ? { ...m, ...msg }
+                    : m,
+                ),
               );
             }
-            return [...msgs, msg];
+            return sortMessagesBySentAt([...msgs, msg]);
           });
 
           // Conversations list updates (last_message, unread_count via DB trigger)
@@ -248,7 +267,11 @@ export function WhatsAppRealtimeBus() {
           // Lead messages cache — invalidate by conversation->lead lookup
           const conv = await fetchConversationForNotification(msg.conversation_id);
 
-          if (!msg.from_me && isFreshRealtimeInsert(msg.created_at)) {
+          if (
+            !msg.from_me &&
+            isFreshRealtimeInsert(msg.received_at || msg.created_at) &&
+            isRecentWhatsAppMessage(msg.sent_at, msg.received_at)
+          ) {
             const floating = floatingChatStateRef.current;
             const isSameFloatingConversation =
               floating.isOpen &&

@@ -191,9 +191,11 @@ function normalizePhone(jidOrNumber: string): string {
 function phoneVariants(p: string): string[] {
   const digits = normalizePhone(p);
   const variants = new Set<string>([digits]);
-  const local = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
+  const withoutCountry = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
+  const local = withoutCountry.startsWith("0") && withoutCountry.length >= 11 ? withoutCountry.slice(1) : withoutCountry;
 
   if (local) {
+    variants.add(withoutCountry);
     variants.add(local);
     variants.add(`55${local}`);
   }
@@ -216,11 +218,7 @@ function phoneVariants(p: string): string[] {
 function phonesMatch(a: string, b: string): boolean {
   const aVariants = new Set(phoneVariants(a));
   const bVariants = phoneVariants(b);
-  if (bVariants.some((variant) => aVariants.has(variant))) return true;
-
-  const aDigits = normalizePhone(a);
-  const bDigits = normalizePhone(b);
-  return aDigits.length >= 8 && bDigits.length >= 8 && aDigits.slice(-8) === bDigits.slice(-8);
+  return bVariants.some((variant) => aVariants.has(variant));
 }
 
 function normalizeRemoteJid(jid: string): string {
@@ -304,6 +302,35 @@ async function findLeadByPhone(organizationId: string, phone: string) {
   }
 
   return (tailMatches || []).find((lead: any) => phonesMatch(lead.phone || "", phone)) || null;
+}
+
+function conversationMatchesPhone(conversation: any, phone: string): boolean {
+  return phonesMatch(conversation?.contact_phone || conversation?.remote_jid || "", phone);
+}
+
+async function clearInvalidConversationLead(conversation: any, organizationId: string, phone: string) {
+  if (!conversation?.lead_id || !organizationId || !phone) return true;
+
+  const { data: linkedLead, error } = await supabase
+    .from("leads")
+    .select("id, phone")
+    .eq("id", conversation.lead_id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[findOrCreateConversation] lead validation error:", error);
+    return true;
+  }
+
+  if (linkedLead?.phone && phonesMatch(linkedLead.phone, phone)) return true;
+
+  await supabase
+    .from("whatsapp_conversations")
+    .update({ lead_id: null, updated_at: new Date().toISOString() })
+    .eq("id", conversation.id);
+  conversation.lead_id = null;
+  return false;
 }
 
 function getNested(obj: any, paths: string[]) {
@@ -664,22 +691,21 @@ async function findOrCreateConversation(
     .from("whatsapp_conversations")
     .select("*")
     .eq("organization_id", organizationId)
+    .eq("session_id", sessionId)
     .is("deleted_at", null)
     .in("remote_jid", remoteJidVariants(remoteJid));
 
   const conv = (convs || []).find((c: any) => c.lead_id) || (convs || []).find((c: any) => c.session_id === sessionId) || (convs || [])[0];
   if (conv) {
+    const leadStillValid = !isGroup && phone
+      ? await clearInvalidConversationLead(conv, organizationId, phone)
+      : true;
+
     const update: any = {};
-    // Se a conversa veio de uma session diferente (session mudou por reconexão),
-    // migrar para a nova session automaticamente
-    if (conv.session_id !== sessionId) {
-      update.session_id = sessionId;
-      console.log(`[findOrCreateConversation] Migrando conversa ${conv.id} da session ${conv.session_id} para ${sessionId}`);
-    }
     if (groupMeta?.subject && conv.contact_name !== groupMeta.subject) update.contact_name = groupMeta.subject;
     if (groupMeta?.pictureUrl && !conv.contact_picture) update.contact_picture = groupMeta.pictureUrl;
     if (!isGroup && contactPicture && !conv.contact_picture) update.contact_picture = contactPicture;
-    if (!isGroup && contactName && !conv.contact_name) update.contact_name = contactName;
+    if (!isGroup && contactName && (!conv.contact_name || !leadStillValid)) update.contact_name = contactName;
     if (!isGroup && !conv.lead_id && phone) {
       const lead = await findLeadByPhone(organizationId, phone);
       if (lead?.id) {
@@ -701,9 +727,11 @@ async function findOrCreateConversation(
       .from("whatsapp_conversations")
       .select("*")
       .eq("organization_id", organizationId)
+      .eq("session_id", sessionId)
       .eq("is_group", false)
       .eq("contact_name", contactName)
       .is("deleted_at", null)
+      .is("lead_id", null)
       .limit(5);
 
     const lidConversation = (lidMatches || []).find((c: any) => isLidJid(String(c.remote_jid || "")));
@@ -717,44 +745,6 @@ async function findOrCreateConversation(
       Object.assign(lidConversation, update);
       return lidConversation;
     }
-  }
-
-  if (!isGroup && isLidJid(canonicalJid) && contactName) {
-    const { data: nameMatches } = await supabase
-      .from("whatsapp_conversations")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .eq("is_group", false)
-      .eq("contact_name", contactName)
-      .is("deleted_at", null)
-      .limit(10);
-
-    const stableMatches = (nameMatches || []).filter((c: any) => !isLidJid(String(c.remote_jid || "")));
-    const preferredMatches = stableMatches.filter((c: any) => c.lead_id);
-    const candidates = preferredMatches.length ? preferredMatches : stableMatches;
-
-    if (candidates.length === 1) {
-      const existing = candidates[0];
-      const update: any = {};
-      if (contactPicture && !existing.contact_picture) update.contact_picture = contactPicture;
-      if (Object.keys(update).length) {
-        await supabase.from("whatsapp_conversations").update(update).eq("id", existing.id);
-        Object.assign(existing, update);
-      }
-      return existing;
-    }
-
-    const { data: leadMatches } = await supabase
-      .from("whatsapp_conversations")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .eq("is_group", false)
-      .eq("contact_name", contactName)
-      .is("deleted_at", null)
-      .not("lead_id", "is", null)
-      .limit(2);
-
-    if (leadMatches?.length === 1) return leadMatches[0];
   }
 
   let leadId: string | null = null;
@@ -775,14 +765,18 @@ async function findOrCreateConversation(
         .from("whatsapp_conversations")
         .select("*")
         .eq("organization_id", organizationId)
+        .eq("session_id", sessionId)
         .eq("is_group", false)
         .eq("lead_id", leadId)
         .is("deleted_at", null)
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      canonicalConversation = leadConversation || null;
+      canonicalConversation = leadConversation && conversationMatchesPhone(leadConversation, phone)
+        ? leadConversation
+        : null;
     }
 
     if (!canonicalConversation && hasRealPhone) {
@@ -796,9 +790,11 @@ async function findOrCreateConversation(
         .from("whatsapp_conversations")
         .select("*")
         .eq("organization_id", organizationId)
+        .eq("session_id", sessionId)
         .eq("is_group", false)
         .is("deleted_at", null)
         .or(`contact_phone.in.(${variants.join(",")}),remote_jid.in.(${remoteVariants.join(",")})`)
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
         .limit(10);
@@ -810,7 +806,6 @@ async function findOrCreateConversation(
 
     if (canonicalConversation) {
       const update: any = {};
-      if (canonicalConversation.session_id !== sessionId) update.session_id = sessionId;
       if (hasRealPhone && canonicalConversation.remote_jid !== canonicalJid) update.remote_jid = canonicalJid;
       if (hasRealPhone && !canonicalConversation.contact_phone) update.contact_phone = phone;
       if (leadId && !canonicalConversation.lead_id) update.lead_id = leadId;
@@ -1162,6 +1157,11 @@ async function handleSingleMessageUpsert(session: any, m: any) {
   const messageId = key.id || key.ID || info.ID || info.Id || m.id || m.ID || m.messageId;
   const timestamp = m.messageTimestamp || m.MessageTimestamp || m.timestamp || m.Timestamp || info.Timestamp || Date.now();
   const sentAt = new Date(typeof timestamp === "number" && timestamp < 1e12 ? timestamp * 1000 : timestamp).toISOString();
+  const receivedAt = new Date().toISOString();
+  const deliveryDelaySeconds = Math.max(
+    0,
+    Math.round((Date.parse(receivedAt) - Date.parse(sentAt)) / 1000),
+  );
   const senderName = m.pushName || m.PushName || info.PushName || m.senderName || null;
 
   // Extract content + type
@@ -1340,6 +1340,7 @@ async function handleSingleMessageUpsert(session: any, m: any) {
     from_me: fromMe,
     status: fromMe ? "sent" : "delivered",
     sent_at: sentAt,
+    received_at: receivedAt,
     remote_jid: remoteJid,
     sender_jid: senderJid,
     sender_name: senderName,
@@ -1349,6 +1350,8 @@ async function handleSingleMessageUpsert(session: any, m: any) {
     reaction_sender_name: messageType === "reaction" ? senderName : null,
     metadata: {
       provider: "evolution_go",
+      received_at: receivedAt,
+      delivery_delay_seconds: deliveryDelaySeconds,
       raw_remote_jid: rawRemoteJid,
       used_lid_fallback: isLidJid(String(rawRemoteJid)) && !isLidJid(remoteJid),
       avatar_payload_found: !!incomingAvatar,
@@ -1392,6 +1395,8 @@ async function handleSingleMessageUpsert(session: any, m: any) {
         media_status: messageInsert.media_status,
         reaction_to_message_id: reactionToMessageId,
         sent_at: sentAt,
+        received_at: receivedAt,
+        delivery_delay_seconds: deliveryDelaySeconds,
         raw_message: m,
       },
     }));
@@ -1412,7 +1417,7 @@ async function handleSingleMessageUpsert(session: any, m: any) {
         conversation: conv,
         message: content,
         contactName: senderName,
-        receivedAt: sentAt,
+        receivedAt,
       }));
     }
   }
@@ -1504,8 +1509,9 @@ async function handleSingleMessageUpsert(session: any, m: any) {
     await supabase.from("whatsapp_conversations").update({
       last_message: lastMessage || content || `[${messageType}]`,
       last_message_at: sentAt,
+      last_message_received_at: receivedAt,
       unread_count: fromMe ? conv.unread_count : (conv.unread_count || 0) + 1,
-      updated_at: new Date().toISOString(),
+      updated_at: receivedAt,
     }).eq("id", conv.id);
   }
 }
@@ -1727,11 +1733,20 @@ Deno.serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Run handler (fire-and-forget via waitUntil if possible)
+    const normalizedEvent = String(event || "").toLowerCase().replace(/_/g, ".");
+    const shouldPersistBeforeAck = [
+      "messages.upsert",
+      "message.upsert",
+      "messages.received",
+      "message.received",
+      "messages",
+      "message",
+    ].includes(normalizedEvent);
+
+    // Persist incoming messages before the provider receives 200. Other
+    // event types can keep running in the background.
     const work = (async () => {
       try {
-        const normalizedEvent = event.toLowerCase().replace(/_/g, ".");
-        
         switch (normalizedEvent) {
           case "qrcode.updated":
           case "qr.updated":
@@ -1781,9 +1796,13 @@ Deno.serve(async (req) => {
       }
     })();
 
-    // @ts-expect-error EdgeRuntime is provided by Supabase
-    if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(work);
-    else await work;
+    if (shouldPersistBeforeAck) {
+      await work;
+    } else {
+      // @ts-expect-error EdgeRuntime is provided by Supabase
+      if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(work);
+      else await work;
+    }
 
     return new Response(JSON.stringify({ ok: true }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } });

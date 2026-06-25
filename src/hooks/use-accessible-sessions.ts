@@ -4,17 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { WhatsAppSession } from "./use-whatsapp-sessions";
 
 /**
- * Hook to get only WhatsApp sessions that the current user can access conversations for.
- * 
- * - All users see only:
- *   - Sessions they own (owner_user_id)
- *   - Sessions they have explicit access to via whatsapp_session_access (can_view=true)
- *
- * NOTE: The whatsapp_session_access RLS has a circular dependency with whatsapp_sessions.
- * To work around this, we use two separate queries for regular users:
- * 1. Fetch owned sessions (bypasses access grant check)
- * 2. Fetch session_ids from access grants using only user_id filter
- * 3. Fetch those sessions by ID
+ * Hook to get only WhatsApp sessions owned by the current user.
  */
 export function useAccessibleSessions() {
   const { profile } = useAuth();
@@ -36,12 +26,11 @@ export function useAccessibleSessions() {
         role: profile.role
       });
 
-      // We trust the RLS policy 'whatsapp_sessions_select_accessible' to return
-      // only sessions the user is allowed to see (owned or shared).
       const { data, error } = await supabase
         .from("whatsapp_sessions")
         .select("*")
-        .eq("organization_id", profile.organization_id);
+        .eq("organization_id", profile.organization_id)
+        .eq("owner_user_id", profile.id);
 
       if (error) {
         console.error("[useAccessibleSessions] Error fetching sessions:", error);

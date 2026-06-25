@@ -505,7 +505,8 @@ Deno.serve(async (req) => {
       if (rateLimit.response) return rateLimit.response;
     }
 
-    // Resolve session
+    // Resolve session. Any user-facing action against an existing WhatsApp
+    // instance must be bound to a CRM session owned by the authenticated user.
     let session = null;
     if (payload.session_id) {
       const { data } = await supabase
@@ -514,6 +515,62 @@ Deno.serve(async (req) => {
         .eq("id", payload.session_id)
         .maybeSingle();
       session = data;
+    }
+
+    if (!session && action === "instance.create" && !payload.session_id) {
+      const instanceName = String(
+        payload?.body?.name ||
+        payload?.body?.instanceName ||
+        payload?.instance_name ||
+        payload?.instanceName ||
+        "",
+      ).trim();
+
+      if (instanceName) {
+        const recentCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data, error } = await supabase
+          .from("whatsapp_sessions")
+          .select("*")
+          .eq("owner_user_id", userId)
+          .eq("instance_name", instanceName)
+          .eq("provider", "evolution_go")
+          .gte("created_at", recentCutoff)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.warn("[EvolutionProxy] Could not resolve create session by instance name:", {
+            instanceName,
+            userId,
+            error: error.message,
+          });
+        } else if (data?.id) {
+          console.log("[EvolutionProxy] Resolved create session by instance name fallback:", {
+            session_id: data.id,
+            instanceName,
+            userId,
+          });
+          session = data;
+        }
+      }
+    }
+
+    if (payload.session_id && !session) {
+      return new Response(JSON.stringify({ ok: false, error: "Session not found" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (!isServiceRoleRequest) {
+      if (!session?.id) {
+        return new Response(JSON.stringify({ ok: false, error: "session_id is required" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      if (session?.owner_user_id !== userId) {
+        return new Response(JSON.stringify({ ok: false, error: "Forbidden" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     const instanceKey = getEvolutionInstanceKey(session || payload);
@@ -790,7 +847,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    let finalRes = await evolutionFetch(method, path, { body, query, token, instanceId: instanceKey });
+    const evolutionAuthToken = action === "instance.create" ? undefined : token;
+    let finalRes = await evolutionFetch(method, path, { body, query, token: evolutionAuthToken, instanceId: instanceKey });
     let resolvedInstanceKey = instanceKey;
 
     if (isSendAction(action) && session?.id && isInstanceMissingResponse(finalRes)) {

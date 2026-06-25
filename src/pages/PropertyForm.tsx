@@ -23,6 +23,7 @@ import { useUsers } from '@/hooks/use-users';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cleanPropertyDescription } from '@/lib/property-description';
+import { canEditProperty } from '@/lib/property-permissions';
 import { toast } from 'sonner';
 
 interface PropertyFormData {
@@ -235,10 +236,8 @@ export default function PropertyForm() {
   const seedFeatures = useSeedDefaultFeatures();
   const seedProximities = useSeedDefaultProximities();
 
-  // Permission check: only admin or the creator can edit
-  const isAdmin = profile?.role === 'admin' || isSuperAdmin;
-  const isCreator = property && (property as any).cadastrado_por === user?.id;
-  const canEdit = !isEditing || isAdmin || isCreator;
+  // Permission check: only admins or the responsible captor/broker can edit.
+  const canEdit = !isEditing || canEditProperty(property, profile, isSuperAdmin);
 
   useEffect(() => {
     if (isEditing && property && !loadingProperty && !canEdit) {

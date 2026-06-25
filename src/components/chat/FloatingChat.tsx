@@ -1124,7 +1124,7 @@ export function FloatingChat() {
                     </Button>
                   )}
                   <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-                    {formatConversationTime(conv.last_message_at)}
+                    {formatConversationTime(conv.last_message_received_at || conv.last_message_at)}
                   </span>
                 </div>
               </div>;

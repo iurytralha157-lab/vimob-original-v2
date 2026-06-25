@@ -18,18 +18,84 @@ export class WhatsAppStartError extends Error {
   }
 }
 
+function phoneVariantsForMatch(value?: string | null) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return [];
+
+  const withoutCountry = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
+  const local = withoutCountry.startsWith("0") && withoutCountry.length >= 11 ? withoutCountry.slice(1) : withoutCountry;
+  const variants = new Set([digits, withoutCountry, local, local ? `55${local}` : ""].filter(Boolean));
+
+  if (local.length === 11 && local[2] === "9") {
+    const withoutNinthDigit = `${local.slice(0, 2)}${local.slice(3)}`;
+    variants.add(withoutNinthDigit);
+    variants.add(`55${withoutNinthDigit}`);
+  }
+
+  if (local.length === 10) {
+    const withNinthDigit = `${local.slice(0, 2)}9${local.slice(2)}`;
+    variants.add(withNinthDigit);
+    variants.add(`55${withNinthDigit}`);
+  }
+
+  return [...variants];
+}
+
+function phonesMatch(a?: string | null, b?: string | null) {
+  const aVariants = new Set(phoneVariantsForMatch(a));
+  return phoneVariantsForMatch(b).some((variant) => aVariants.has(variant));
+}
+
+function conversationMatchesPhone(conversation: Pick<WhatsAppConversation, "contact_phone" | "remote_jid">, phone?: string | null) {
+  return phonesMatch(conversation.contact_phone || conversation.remote_jid, phone);
+}
+
+function extractStartErrorMessage(error: unknown) {
+  if (!error) return "";
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+
+  if (typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const parts = ["message", "error", "details", "hint", "code"]
+      .map((key) => record[key])
+      .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+      .map(String)
+      .filter(Boolean);
+
+    if (parts.length > 0) return parts.join(" ");
+
+    try {
+      const serialized = JSON.stringify(error);
+      return serialized === "{}" ? "" : serialized;
+    } catch {
+      return "";
+    }
+  }
+
+  return String(error);
+}
+
 export function getWhatsAppStartErrorMessage(error: unknown) {
   if (error instanceof WhatsAppStartError) return error.userMessage;
 
-  const message = error instanceof Error ? error.message : String(error || "");
+  const message = extractStartErrorMessage(error);
   const normalized = message.toLowerCase();
 
-  if (normalized.includes("statement timeout") || normalized.includes("timeout")) {
-    return "Não foi possível abrir a conversa agora. Tente novamente em alguns instantes.";
+  if (normalized.includes("row-level security") || normalized.includes("42501") || normalized.includes("rls")) {
+    return "Voce nao tem permissao para iniciar conversa nesta sessao WhatsApp.";
   }
 
-  if (normalized.includes("invalid") || normalized.includes("jid") || normalized.includes("phone")) {
-    return "Este lead não tem um WhatsApp válido cadastrado.";
+  if (normalized.includes("duplicate key") || normalized.includes("unique constraint") || normalized.includes("23505")) {
+    return "Ja existe uma conversa para este telefone nesta sessao WhatsApp.";
+  }
+
+  if (normalized.includes("statement timeout") || normalized.includes("timeout")) {
+    return "Nao foi possivel abrir a conversa agora. Tente novamente em alguns instantes.";
+  }
+
+  if (normalized.includes("invalid") || normalized.includes("jid") || normalized.includes("phone") || normalized.includes("telefone")) {
+    return "Este lead nao tem um WhatsApp valido cadastrado.";
   }
 
   return message || "Ocorreu um erro inesperado ao tentar abrir o chat.";
@@ -84,7 +150,7 @@ export function useStartConversation() {
 
       if (existingConversation) {
         console.log('[WhatsApp Start] Conversa encontrada na session atual:', existingConversation.id);
-        if (leadId && existingConversation.lead_id !== leadId) {
+        if (leadId && existingConversation.lead_id !== leadId && conversationMatchesPhone(existingConversation as WhatsAppConversation, cleanPhone)) {
           console.log('[WhatsApp Start] Atualizando lead_id da conversa existente');
           await supabase
             .from("whatsapp_conversations")
@@ -110,17 +176,26 @@ export function useStartConversation() {
           .eq("organization_id", orgId)
           .eq("lead_id", leadId)
           .is("deleted_at", null)
+          .order("last_message_received_at", { ascending: false, nullsFirst: false })
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(1);
 
         if (byLead?.[0]) {
-          console.log('[WhatsApp Start] Encontrado cross-session por lead_id:', byLead[0].id, '— migrando session...');
-          // Migrar para a nova session
-          await supabase
-            .from("whatsapp_conversations")
-            .update({ session_id: sessionId, remote_jid: remoteJid, contact_phone: cleanPhone })
-            .eq("id", byLead[0].id);
-          return { ...byLead[0], session_id: sessionId, remote_jid: remoteJid } as WhatsAppConversation;
+          const leadConversation = (byLead as WhatsAppConversation[]).find((conversation) =>
+            conversationMatchesPhone(conversation, cleanPhone),
+          );
+
+          if (!leadConversation) {
+            console.warn('[WhatsApp Start] Ignorando conversa por lead_id com telefone divergente:', byLead[0].id);
+          } else {
+            console.log('[WhatsApp Start] Encontrado cross-session por lead_id:', leadConversation.id, '— migrando session...');
+            // Migrar para a nova session
+            await supabase
+              .from("whatsapp_conversations")
+              .update({ session_id: sessionId, remote_jid: remoteJid, contact_phone: cleanPhone })
+              .eq("id", leadConversation.id);
+            return { ...leadConversation, session_id: sessionId, remote_jid: remoteJid } as WhatsAppConversation;
+          }
         }
       }
 
@@ -143,6 +218,7 @@ export function useStartConversation() {
         .eq("organization_id", orgId)
         .or(orFilter)
         .is("deleted_at", null)
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .limit(1);
 
@@ -216,6 +292,7 @@ export function useFindConversationByPhone() {
           .eq("lead_id", leadId)
           .eq("session_id", sessionId)
           .is("deleted_at", null)
+          .order("last_message_received_at", { ascending: false, nullsFirst: false })
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(1);
 
@@ -224,8 +301,16 @@ export function useFindConversationByPhone() {
           throw byLeadSessionError;
         }
         if (byLeadSession?.[0]) {
-          console.log('[WhatsApp Start] Encontrado por leadId + sessionId:', byLeadSession[0].id);
-          return byLeadSession[0] as WhatsAppConversation;
+          const leadConversation = (byLeadSession as WhatsAppConversation[]).find((conversation) =>
+            canSearchByPhone && conversationMatchesPhone(conversation, phone),
+          );
+
+          if (leadConversation) {
+            console.log('[WhatsApp Start] Encontrado por leadId + sessionId:', leadConversation.id);
+            return leadConversation as WhatsAppConversation;
+          }
+
+          console.warn('[WhatsApp Start] Ignorando conversa por leadId + sessionId com telefone divergente:', byLeadSession[0].id);
         }
       }
 
@@ -241,6 +326,7 @@ export function useFindConversationByPhone() {
           `)
           .eq("lead_id", leadId)
           .is("deleted_at", null)
+          .order("last_message_received_at", { ascending: false, nullsFirst: false })
           .order("last_message_at", { ascending: false, nullsFirst: false })
           .limit(1);
 
@@ -249,8 +335,16 @@ export function useFindConversationByPhone() {
           throw byLeadError;
         }
         if (byLead?.[0]) {
-          console.log('[WhatsApp Start] Encontrado por leadId:', byLead[0].id);
-          return byLead[0] as WhatsAppConversation;
+          const leadConversation = (byLead as WhatsAppConversation[]).find((conversation) =>
+            canSearchByPhone && conversationMatchesPhone(conversation, phone),
+          );
+
+          if (leadConversation) {
+            console.log('[WhatsApp Start] Encontrado por leadId:', leadConversation.id);
+            return leadConversation as WhatsAppConversation;
+          }
+
+          console.warn('[WhatsApp Start] Ignorando conversa por leadId com telefone divergente:', byLead[0].id);
         }
       }
 
@@ -286,6 +380,7 @@ export function useFindConversationByPhone() {
         `)
         .or(orFilter)
         .is("deleted_at", null)
+        .order("last_message_received_at", { ascending: false, nullsFirst: false })
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .limit(1);
 

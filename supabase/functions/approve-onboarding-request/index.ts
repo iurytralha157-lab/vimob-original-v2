@@ -128,7 +128,9 @@ Deno.serve(async (req) => {
       .insert({
         name: onboardingRequest.company_name,
         segment: onboardingRequest.segment || "imobiliario",
-        whatsapp: onboardingRequest.company_whatsapp || null,
+        whatsapp: onboardingRequest.company_whatsapp || onboardingRequest.responsible_phone || null,
+        telefone: onboardingRequest.company_phone || onboardingRequest.responsible_phone || null,
+        email: onboardingRequest.company_email || onboardingRequest.responsible_email || null,
         cnpj: onboardingRequest.cnpj || null,
         creci: onboardingRequest.creci || null,
         endereco: onboardingRequest.company_address || null,
@@ -195,8 +197,9 @@ Deno.serve(async (req) => {
 
     // 5. Trigger Asaas payment link (opcional)
     let paymentUrl: string | undefined;
+    let whatsappNotification: any = null;
     try {
-      const { data: linkData } = await supabaseAdmin.functions.invoke("asaas-create-payment-link", {
+      const { data: linkData, error: linkError } = await supabaseAdmin.functions.invoke("asaas-create-payment-link", {
         body: {
           organization_id: org.id,
           onboarding_id: requestId,
@@ -210,7 +213,9 @@ Deno.serve(async (req) => {
           temp_password: generatedPassword,
         },
       });
+      if (linkError) throw linkError;
       paymentUrl = linkData?.payment_link_url;
+      whatsappNotification = linkData?.whatsapp_notification || null;
     } catch (e) {
       console.error("Failed to create Asaas link:", e);
       // Não lança erro — pagamento é opcional, não bloqueia o fluxo
@@ -223,6 +228,7 @@ Deno.serve(async (req) => {
         email: onboardingRequest.responsible_email,
         password: generatedPassword,
         paymentUrl,
+        whatsappNotification,
         organizationId: org.id,
       }),
       {

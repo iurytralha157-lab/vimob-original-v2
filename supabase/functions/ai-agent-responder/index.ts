@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
     }
 
     const aiResult = await callLovableAI(LOVABLE_API_KEY, fullSystemPrompt, history);
-    let aiResponse = appendActionConfirmation(aiResult.content, visitAction);
+    const aiResponse = appendActionConfirmation(aiResult.content, visitAction);
 
     if (!aiResponse) {
       console.error("[ai-agent-responder] Empty AI response");
@@ -259,9 +259,20 @@ async function resolveLead(
   contactName?: string | null,
 ) {
   const leadId = storedLeadId || conversation.lead_id;
-  if (leadId) return await fetchLead(supabase, leadId);
-
   const phone = conversation.contact_phone || conversation.remote_jid || "";
+
+  if (leadId) {
+    const storedLead = await fetchLead(supabase, leadId);
+    if (storedLead?.phone && phonesMatch(storedLead.phone, phone)) return storedLead;
+
+    if (conversation.lead_id === leadId) {
+      await supabase
+        .from("whatsapp_conversations")
+        .update({ lead_id: null, updated_at: new Date().toISOString() })
+        .eq("id", conversation.id);
+    }
+  }
+
   const variants = phoneVariants(phone);
   if (!variants.length) return null;
 
@@ -1440,7 +1451,9 @@ function phoneVariants(value: string) {
   if (!digits) return [];
 
   variants.add(digits);
-  const local = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
+  const withoutCountry = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
+  const local = withoutCountry.startsWith("0") && withoutCountry.length >= 11 ? withoutCountry.slice(1) : withoutCountry;
+  variants.add(withoutCountry);
   variants.add(local);
   variants.add(`55${local}`);
 

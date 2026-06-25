@@ -2,7 +2,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Tables } from '@/integrations/supabase/types';
-import { normalizePhone } from '@/lib/phone-utils';
 import { enforceClientActionRateLimit, getClientRateLimitMessage } from '@/lib/client-action-rate-limit';
 import { notifyLeadCreated } from './use-lead-notifications';
 import { logAuditAction } from './use-audit-logs';
@@ -21,6 +20,109 @@ const LEAD_LIST_FIELDS = `
   stage:stages(id, name, color, stage_key),
   assignee:users!leads_assigned_user_id_fkey(id, name, avatar_url)
 `;
+
+function phoneVariantsForMatch(value?: string | null) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return [];
+
+  const withoutCountry = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+  const local = withoutCountry.startsWith('0') && withoutCountry.length >= 11 ? withoutCountry.slice(1) : withoutCountry;
+  const variants = new Set([digits, withoutCountry, local, local ? `55${local}` : ''].filter(Boolean));
+
+  if (local.length === 11 && local[2] === '9') {
+    const withoutNinthDigit = `${local.slice(0, 2)}${local.slice(3)}`;
+    variants.add(withoutNinthDigit);
+    variants.add(`55${withoutNinthDigit}`);
+  }
+
+  if (local.length === 10) {
+    const withNinthDigit = `${local.slice(0, 2)}9${local.slice(2)}`;
+    variants.add(withNinthDigit);
+    variants.add(`55${withNinthDigit}`);
+  }
+
+  return [...variants];
+}
+
+function phonesMatch(a?: string | null, b?: string | null) {
+  const aVariants = new Set(phoneVariantsForMatch(a));
+  return phoneVariantsForMatch(b).some((variant) => aVariants.has(variant));
+}
+
+function normalizePhoneForLeadDedup(value?: string | null) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+
+  if (digits.length > 11 && digits.startsWith('55')) {
+    return digits;
+  }
+
+  if (digits.length >= 10 && digits.length <= 11) {
+    return `55${digits}`;
+  }
+
+  return digits;
+}
+
+function isDuplicateLeadPhoneError(error: unknown) {
+  const supabaseError = error as { code?: string; message?: string; details?: string; hint?: string };
+  const text = [supabaseError?.message, supabaseError?.details, supabaseError?.hint]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    supabaseError?.code === '23505' &&
+    (text.includes('leads_org_phone_unique') || text.toLowerCase().includes('duplicate key'))
+  );
+}
+
+type DuplicateLeadInfo = {
+  lead_id?: string | null;
+  lead_name?: string | null;
+  responsible_user_id?: string | null;
+  responsible_name?: string | null;
+};
+
+class DuplicateLeadPhoneError extends Error {
+  duplicate?: DuplicateLeadInfo | null;
+
+  constructor(duplicate?: DuplicateLeadInfo | null) {
+    super('duplicate_lead_phone');
+    this.name = 'DuplicateLeadPhoneError';
+    this.duplicate = duplicate;
+  }
+}
+
+function isDuplicateLeadPhoneNotice(error: unknown): error is DuplicateLeadPhoneError {
+  return error instanceof DuplicateLeadPhoneError || (error as { name?: string })?.name === 'DuplicateLeadPhoneError';
+}
+
+function getDuplicateLeadDescription(duplicate?: DuplicateLeadInfo | null) {
+  const responsibleName = duplicate?.responsible_name || 'responsável não identificado';
+  return `Responsável atual: ${responsibleName}. Lead não pode ser cadastrado novamente.`;
+}
+
+async function findDuplicateLeadByPhone(phone?: string | null): Promise<DuplicateLeadInfo | null> {
+  if (!phone) return null;
+
+  const { data, error } = await (supabase.rpc as any)('find_duplicate_lead_by_phone', {
+    p_phone: phone,
+  });
+
+  if (error) {
+    console.error('Erro ao localizar lead duplicado por telefone:', error);
+    return null;
+  }
+
+  return Array.isArray(data) ? data[0] || null : data || null;
+}
+
+function conversationMatchesLeadPhone(
+  conversation: { contact_phone?: string | null; remote_jid?: string | null },
+  leadPhone?: string | null
+) {
+  return phonesMatch(conversation.contact_phone || conversation.remote_jid, leadPhone);
+}
 
 export function useLeads(filters?: { 
   stageId?: string; 
@@ -188,7 +290,7 @@ export function useCreateLead() {
       
       // ===== VERIFICAR SE JÃ EXISTE LEAD COM ESTE TELEFONE =====
       if (lead.phone) {
-        const normalizedPhone = normalizePhone(lead.phone);
+        const normalizedPhone = normalizePhoneForLeadDedup(lead.phone);
         
         if (normalizedPhone) {
           // Buscar leads existentes com telefone similar
@@ -201,7 +303,7 @@ export function useCreateLead() {
           // Verificar se algum lead tem o mesmo telefone normalizado
           const existingLead = existingLeads?.find(l => {
             if (!l.phone) return false;
-            return normalizePhone(l.phone) === normalizedPhone;
+            return normalizePhoneForLeadDedup(l.phone) === normalizedPhone;
           });
           
           if (existingLead) {
@@ -285,7 +387,9 @@ export function useCreateLead() {
               console.error('Erro ao registrar atividade de reentrada manual:', manualReentryActivityError);
             }
 
-            toast.success(`Lead já existia e foi atualizado. Responsável atual: ${assignedUserName}`);
+            toast.error('Ops... Lead já criado na sua imobiliária.', {
+              description: getDuplicateLeadDescription({ responsible_name: assignedUserName }),
+            });
             
             // Notify assignee about re-entry
             if (existingLead.id && organizationId) {
@@ -345,7 +449,14 @@ export function useCreateLead() {
         .select()
         .single();
       
-      if (error) throw error;
+      if (error) {
+        if (isDuplicateLeadPhoneError(error)) {
+          const duplicate = await findDuplicateLeadByPhone(lead.phone);
+          throw new DuplicateLeadPhoneError(duplicate);
+        }
+
+        throw error;
+      }
       
       // Add tags if provided
       if (tag_ids && tag_ids.length > 0) {
@@ -356,18 +467,21 @@ export function useCreateLead() {
       
       // Vincular conversas WhatsApp existentes ao novo lead
       if (lead.phone) {
-        const normalizedPhone = normalizePhone(lead.phone);
+        const matchingPhoneVariants = phoneVariantsForMatch(lead.phone);
         
-        if (normalizedPhone) {
+        if (matchingPhoneVariants.length > 0) {
           // Buscar conversas sem lead vinculado
           const { data: conversations } = await supabase
             .from('whatsapp_conversations')
-            .select('id, contact_phone')
+            .select('id, contact_phone, remote_jid')
+            .eq('organization_id', organizationId)
+            .eq('is_group', false)
+            .is('deleted_at', null)
             .is('lead_id', null);
           
           // Atualizar conversas que correspondem ao telefone
           for (const conv of conversations || []) {
-            if (conv.contact_phone && normalizePhone(conv.contact_phone) === normalizedPhone) {
+            if (conversationMatchesLeadPhone(conv, lead.phone)) {
               await supabase
                 .from('whatsapp_conversations')
                 .update({ lead_id: data.id })
@@ -435,6 +549,18 @@ export function useCreateLead() {
       const rateLimitMessage = getClientRateLimitMessage(error);
       if (rateLimitMessage) {
         toast.error(rateLimitMessage);
+        return;
+      }
+      if (isDuplicateLeadPhoneNotice(error)) {
+        toast.error('Ops... Lead já criado na sua imobiliária.', {
+          description: getDuplicateLeadDescription(error.duplicate),
+        });
+        return;
+      }
+      if (isDuplicateLeadPhoneError(error)) {
+        toast.error('Ops... Lead já criado na sua imobiliária.', {
+          description: getDuplicateLeadDescription(null),
+        });
         return;
       }
       toast.error('Erro ao criar lead: ' + error.message);

@@ -20,6 +20,7 @@ import { PropertyPreviewDialog } from '@/components/properties/PropertyPreviewDi
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { canDeleteProperty, canEditProperty } from '@/lib/property-permissions';
 import { toast } from 'sonner';
 
 const formatPrice = (value: number | null, tipo: string | null) => {
@@ -45,7 +46,7 @@ export default function Properties() {
   const [gridCols, setGridCols] = useState('4');
   const isMobile = useIsMobile();
   const { profile, isSuperAdmin } = useAuth();
-  const isAdmin = profile?.role === 'admin' || isSuperAdmin;
+  const canDeleteProperties = canDeleteProperty(profile, isSuperAdmin);
 
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
   
@@ -236,7 +237,7 @@ export default function Properties() {
         {/* Properties Grid */}
         <div className={`grid ${getGridClasses()} gap-4`}>
           {properties.map((property) => {
-            const canEditProperty = isAdmin || (property as any).cadastrado_por === profile?.id;
+            const canEdit = canEditProperty(property, profile, isSuperAdmin);
             return (
               <PropertyCard
                 key={property.id}
@@ -250,7 +251,8 @@ export default function Properties() {
                   setPreviewOpen(true);
                 }}
                 formatPrice={formatPrice}
-                canEdit={canEditProperty}
+                canEdit={canEdit}
+                canDelete={canDeleteProperties}
               />
             );
           })}

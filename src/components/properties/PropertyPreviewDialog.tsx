@@ -8,10 +8,12 @@ import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Property, useProperty, useUpdateProperty } from '@/hooks/use-properties';
+import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { cleanPropertyDescription } from '@/lib/property-description';
+import { canEditProperty } from '@/lib/property-permissions';
 import useEmblaCarousel from 'embla-carousel-react';
 import {
   MapPin,
@@ -53,6 +55,7 @@ export function PropertyPreviewDialog({
   const isMobile = useIsMobile();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const updateProperty = useUpdateProperty();
+  const { profile, isSuperAdmin } = useAuth();
   
   // Embla carousel com transição suave e drag
   const [emblaRef, emblaApi] = useEmblaCarousel({ 
@@ -65,6 +68,7 @@ export function PropertyPreviewDialog({
   
   // Use full property if available, otherwise fallback to list property
   const property = fullProperty || propertyFromList;
+  const canEdit = canEditProperty(property, profile, isSuperAdmin);
   const cadastroUserId = property?.cadastrado_por && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(property.cadastrado_por)
     ? property.cadastrado_por
     : null;
@@ -150,7 +154,7 @@ export function PropertyPreviewDialog({
   };
 
   const handleToggleStatus = () => {
-    if (!property) return;
+    if (!property || !canEdit) return;
     updateProperty.mutate({
       id: property.id,
       status: isActive ? 'inativo' : 'ativo',
@@ -323,13 +327,15 @@ export function PropertyPreviewDialog({
           </h2>
         </div>
 
-        <div className="shrink-0 pt-1">
-          <Switch
-            checked={isActive}
-            onCheckedChange={handleToggleStatus}
-            disabled={updateProperty.isPending}
-          />
-        </div>
+        {canEdit && (
+          <div className="shrink-0 pt-1">
+            <Switch
+              checked={isActive}
+              onCheckedChange={handleToggleStatus}
+              disabled={updateProperty.isPending}
+            />
+          </div>
+        )}
       </div>
 
       {(property.endereco || property.bairro || property.cidade) && (

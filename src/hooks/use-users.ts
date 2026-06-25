@@ -3,20 +3,58 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Tables } from '@/integrations/supabase/types';
 import { logAuditAction } from './use-audit-logs';
+import { useAuth } from '@/contexts/AuthContext';
 export type User = Tables<'users'>;
+export type OrganizationUser = User & {
+  organization_member_id?: string;
+  organization_member_is_active?: boolean;
+};
 
 export function useOrganizationUsers() {
+  const { organization, profile } = useAuth();
+  const organizationId = organization?.id || profile?.organization_id || null;
+
   return useQuery({
-    queryKey: ['organization-users'],
+    queryKey: ['organization-users', organizationId],
+    enabled: !!organizationId,
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: users, error } = await supabase
         .from('users')
         .select('*')
-        .eq('is_active', true)
         .order('name');
       
       if (error) throw error;
-      return data as User[];
+
+      const { data: memberships } = await supabase
+        .from('organization_members' as any)
+        .select('id, user_id, role, is_active, organization_id')
+        .eq('organization_id', organizationId);
+
+      const membershipByUserId = new Map(
+        (memberships || []).map((member: any) => [member.user_id, member])
+      );
+
+      return (users || [])
+        .filter((user) => user.organization_id === organizationId || membershipByUserId.has(user.id))
+        .map((user) => {
+          const membership = membershipByUserId.get(user.id);
+          if (!membership) return user as OrganizationUser;
+
+          return {
+            ...user,
+            organization_id: organizationId,
+            role: membership.role || user.role,
+            is_active: (user.is_active !== false) && (membership.is_active !== false),
+            organization_member_id: membership.id,
+            organization_member_is_active: membership.is_active,
+          } as OrganizationUser;
+        })
+        .sort((a, b) => {
+          if ((a.is_active !== false) !== (b.is_active !== false)) {
+            return a.is_active === false ? 1 : -1;
+          }
+          return a.name.localeCompare(b.name);
+        });
     },
   });
 }
@@ -26,11 +64,13 @@ export const useUsers = useOrganizationUsers;
 
 export function useUpdateUser() {
   const queryClient = useQueryClient();
+  const { organization, profile } = useAuth();
+  const organizationId = organization?.id || profile?.organization_id || null;
   
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<User> & { id: string }) => {
       const { data, error } = await supabase.functions.invoke('update-organization-user', {
-        body: { userId: id, updates },
+        body: { userId: id, organizationId, updates },
       });
 
       if (error) throw error;
@@ -48,7 +88,7 @@ export function useUpdateUser() {
       return data.user as User;
     },
     onSuccess: (updatedUser) => {
-      queryClient.setQueryData(['organization-users'], (current: User[] | undefined) => {
+      queryClient.setQueriesData({ queryKey: ['organization-users'] }, (current: User[] | undefined) => {
         if (!Array.isArray(current)) return current;
         return current.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user);
       });

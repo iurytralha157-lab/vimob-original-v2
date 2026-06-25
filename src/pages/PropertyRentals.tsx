@@ -1,4 +1,5 @@
 import { useState, useDeferredValue } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,8 @@ import {
 import { useProperties, Property } from '@/hooks/use-properties';
 import { PropertyCard } from '@/components/properties/PropertyCard';
 import { PropertyPreviewDialog } from '@/components/properties/PropertyPreviewDialog';
+import { useAuth } from '@/contexts/AuthContext';
+import { canEditProperty } from '@/lib/property-permissions';
 
 const formatPrice = (value: number | null, tipo: string | null) => {
   if (!value) return 'Preço não informado';
@@ -22,9 +25,11 @@ const formatPrice = (value: number | null, tipo: string | null) => {
 };
 
 export default function PropertyRentals() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [previewProperty, setPreviewProperty] = useState<Property | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const { profile, isSuperAdmin } = useAuth();
 
   const deferredSearch = useDeferredValue(search);
   
@@ -119,19 +124,24 @@ export default function PropertyRentals() {
 
         {/* Properties Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {properties.map((property) => (
-            <PropertyCard
-              key={property.id}
-              property={property}
-              onEdit={() => {}}
-              onDelete={() => {}}
-              onPreview={(p) => {
-                setPreviewProperty(p);
-                setPreviewOpen(true);
-              }}
-              formatPrice={formatPrice}
-            />
-          ))}
+          {properties.map((property) => {
+            const canEdit = canEditProperty(property, profile, isSuperAdmin);
+            return (
+              <PropertyCard
+                key={property.id}
+                property={property}
+                onEdit={(p) => navigate(`/properties/${p.id}/edit`)}
+                onDelete={() => {}}
+                onPreview={(p) => {
+                  setPreviewProperty(p);
+                  setPreviewOpen(true);
+                }}
+                formatPrice={formatPrice}
+                canEdit={canEdit}
+                canDelete={false}
+              />
+            );
+          })}
         </div>
 
         {/* Preview Dialog */}

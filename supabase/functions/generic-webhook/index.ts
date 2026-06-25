@@ -15,6 +15,37 @@ function normalizePhone(phone?: string | null) {
   return digits;
 }
 
+function phoneVariants(phone?: string | null) {
+  const digits = normalizePhone(phone);
+  if (!digits) return [];
+  const withoutCountry = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+  const local = withoutCountry.startsWith('0') && withoutCountry.length >= 11 ? withoutCountry.slice(1) : withoutCountry;
+  const variants = new Set([digits, withoutCountry, local, local ? `55${local}` : ''].filter(Boolean));
+
+  if (local.length === 11 && local[2] === '9') {
+    const withoutNinthDigit = `${local.slice(0, 2)}${local.slice(3)}`;
+    variants.add(withoutNinthDigit);
+    variants.add(`55${withoutNinthDigit}`);
+  }
+
+  if (local.length === 10) {
+    const withNinthDigit = `${local.slice(0, 2)}9${local.slice(2)}`;
+    variants.add(withNinthDigit);
+    variants.add(`55${withNinthDigit}`);
+  }
+
+  return [...variants];
+}
+
+function phonesMatch(a?: string | null, b?: string | null) {
+  const aVariants = new Set(phoneVariants(a));
+  return phoneVariants(b).some((variant) => aVariants.has(variant));
+}
+
+function conversationMatchesPhone(conversation: any, phone: string) {
+  return phonesMatch(conversation?.contact_phone || conversation?.remote_jid, phone);
+}
+
 function firstName(name?: string | null) {
   const clean = String(name || '').trim();
   if (!clean) return '';
@@ -166,7 +197,7 @@ async function sendAIFirstContactNow(
 
   let { data: conversation } = await supabase
     .from('whatsapp_conversations')
-    .select('id, session_id, remote_jid, lead_id')
+    .select('id, session_id, remote_jid, contact_phone, lead_id')
     .eq('organization_id', input.organizationId)
     .eq('lead_id', input.leadId)
     .is('deleted_at', null)
@@ -174,14 +205,34 @@ async function sendAIFirstContactNow(
     .limit(1)
     .maybeSingle();
 
+  if (conversation && !conversationMatchesPhone(conversation, phone)) {
+    conversation = null;
+  }
+
   if (!conversation) {
     const { data: byJid } = await supabase
       .from('whatsapp_conversations')
-      .select('id, session_id, remote_jid, lead_id')
+      .select('id, session_id, remote_jid, contact_phone, lead_id')
       .eq('session_id', session.id)
       .eq('remote_jid', remoteJid)
       .maybeSingle();
     conversation = byJid;
+  }
+
+  if (conversation?.lead_id && conversation.lead_id !== input.leadId) {
+    const { data: linkedLead } = await supabase
+      .from('leads')
+      .select('id, phone')
+      .eq('id', conversation.lead_id)
+      .maybeSingle();
+
+    if (!linkedLead?.phone || !phonesMatch(linkedLead.phone, phone)) {
+      await supabase
+        .from('whatsapp_conversations')
+        .update({ lead_id: input.leadId, contact_name: lead.name || null, contact_phone: lead.phone || phone })
+        .eq('id', conversation.id);
+      conversation.lead_id = input.leadId;
+    }
   }
 
   if (!conversation) {
