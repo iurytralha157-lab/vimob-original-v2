@@ -230,7 +230,7 @@ Deno.serve(async (req) => {
     // Check if email already exists in public.users
     const { data: existingUser } = await supabaseAdmin
       .from('users')
-      .select('id, organization_id, name')
+      .select('id, organization_id, name, is_active')
       .ilike('email', email)
       .maybeSingle();
 
@@ -459,12 +459,65 @@ Deno.serve(async (req) => {
       if (existingUser.organization_id === targetOrgId) {
         const { data: existingMember } = await supabaseAdmin
           .from('organization_members')
-          .select('id')
+          .select('id, role, is_active')
           .eq('user_id', existingUser.id)
           .eq('organization_id', targetOrgId)
           .maybeSingle();
 
         if (existingMember) {
+          if (existingMember.is_active === false || existingUser.is_active === false) {
+            const { error: memberReactivateError } = await supabaseAdmin
+              .from('organization_members')
+              .update({
+                role: role as 'admin' | 'user',
+                is_active: true,
+              })
+              .eq('user_id', existingUser.id)
+              .eq('organization_id', targetOrgId);
+
+            if (memberReactivateError) {
+              return new Response(JSON.stringify({ error: memberReactivateError.message }), {
+                status: 500,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+
+            const { error: userReactivateError } = await supabaseAdmin
+              .from('users')
+              .update({
+                role: role as 'admin' | 'user',
+                is_active: true,
+                organization_id: targetOrgId,
+                name: name || existingUser.name,
+                phone: contactWhatsapp,
+                whatsapp: contactWhatsapp,
+                endereco: endereco || null,
+              })
+              .eq('id', existingUser.id);
+
+            if (userReactivateError) {
+              return new Response(JSON.stringify({ error: userReactivateError.message }), {
+                status: 500,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+
+            return new Response(JSON.stringify({
+              success: true,
+              user: {
+                id: existingUser.id,
+                email,
+                name: name || existingUser.name,
+                role,
+              },
+              wasReactivated: true,
+              whatsappSent: false,
+              message: 'Usuario ja existia nesta organizacao e foi reativado. A senha atual dele continua valida.',
+            }), {
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
           return new Response(JSON.stringify({ error: 'Este usuário já pertence a esta organização' }), {
             status: 409,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },

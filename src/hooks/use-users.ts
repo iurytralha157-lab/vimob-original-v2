@@ -5,6 +5,10 @@ import { Tables } from '@/integrations/supabase/types';
 import { logAuditAction } from './use-audit-logs';
 import { useAuth } from '@/contexts/AuthContext';
 export type User = Tables<'users'>;
+export type OrganizationUser = User & {
+  organization_member_id?: string;
+  organization_member_is_active?: boolean;
+};
 
 export function useOrganizationUsers() {
   const { organization, profile } = useAuth();
@@ -17,16 +21,14 @@ export function useOrganizationUsers() {
       const { data: users, error } = await supabase
         .from('users')
         .select('*')
-        .eq('is_active', true)
         .order('name');
       
       if (error) throw error;
 
       const { data: memberships } = await supabase
         .from('organization_members' as any)
-        .select('user_id, role, is_active, organization_id')
-        .eq('organization_id', organizationId)
-        .eq('is_active', true);
+        .select('id, user_id, role, is_active, organization_id')
+        .eq('organization_id', organizationId);
 
       const membershipByUserId = new Map(
         (memberships || []).map((member: any) => [member.user_id, member])
@@ -36,14 +38,22 @@ export function useOrganizationUsers() {
         .filter((user) => user.organization_id === organizationId || membershipByUserId.has(user.id))
         .map((user) => {
           const membership = membershipByUserId.get(user.id);
-          if (!membership) return user as User;
+          if (!membership) return user as OrganizationUser;
 
           return {
             ...user,
             organization_id: organizationId,
             role: membership.role || user.role,
-            is_active: membership.is_active ?? user.is_active,
-          } as User;
+            is_active: (user.is_active !== false) && (membership.is_active !== false),
+            organization_member_id: membership.id,
+            organization_member_is_active: membership.is_active,
+          } as OrganizationUser;
+        })
+        .sort((a, b) => {
+          if ((a.is_active !== false) !== (b.is_active !== false)) {
+            return a.is_active === false ? 1 : -1;
+          }
+          return a.name.localeCompare(b.name);
         });
     },
   });
@@ -54,11 +64,13 @@ export const useUsers = useOrganizationUsers;
 
 export function useUpdateUser() {
   const queryClient = useQueryClient();
+  const { organization, profile } = useAuth();
+  const organizationId = organization?.id || profile?.organization_id || null;
   
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<User> & { id: string }) => {
       const { data, error } = await supabase.functions.invoke('update-organization-user', {
-        body: { userId: id, updates },
+        body: { userId: id, organizationId, updates },
       });
 
       if (error) throw error;

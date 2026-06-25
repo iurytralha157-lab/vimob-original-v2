@@ -163,7 +163,9 @@ export function TeamTab() {
         throw new Error(message);
       }
 
-      if (result.wasMultiOrg || result.wasOrphan) {
+      if (result.wasReactivated) {
+        toast.success(result.message || 'Usuario reativado nesta organizacao.');
+      } else if (result.wasMultiOrg || result.wasOrphan) {
         toast.success(result.message || 'Usuário vinculado à organização! Acesso com senha existente.');
       } else if (result.whatsappSent) {
         toast.success('Usuário criado! Credenciais de acesso enviadas via WhatsApp.');
