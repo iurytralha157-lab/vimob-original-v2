@@ -132,6 +132,8 @@ export default function Contacts() {
   const deferredSearch = useDeferredValue(search);
   const dateRange = sharedFilters.dateRange;
   const effectiveDealStatus = lostLeadsView ? "lost" : selectedDealStatus;
+  const hasSearchTerm = deferredSearch.trim().length > 0;
+  const shouldBypassDefaultDateForSearch = hasSearchTerm && datePreset === "last30days" && !customDateRange;
 
   const filters: ContactListFilters = {
     search: deferredSearch || undefined,
@@ -150,8 +152,8 @@ export default function Contacts() {
       effectiveDealStatus && effectiveDealStatus !== "all"
         ? (effectiveDealStatus as "open" | "won" | "lost")
         : undefined,
-    createdFrom: dateRange ? dateRange.from.toISOString() : undefined,
-    createdTo: dateRange ? dateRange.to.toISOString() : undefined,
+    createdFrom: !shouldBypassDefaultDateForSearch && dateRange ? dateRange.from.toISOString() : undefined,
+    createdTo: !shouldBypassDefaultDateForSearch && dateRange ? dateRange.to.toISOString() : undefined,
     sortBy,
     sortDir,
     page,
@@ -215,8 +217,8 @@ export default function Contacts() {
           adSetId: adSetId || undefined,
           adId: adId || undefined,
           dealStatus: effectiveDealStatus !== "all" ? effectiveDealStatus : undefined,
-          createdFrom: dateRange ? dateRange.from.toISOString() : undefined,
-          createdTo: dateRange ? dateRange.to.toISOString() : undefined,
+          createdFrom: !shouldBypassDefaultDateForSearch && dateRange ? dateRange.from.toISOString() : undefined,
+          createdTo: !shouldBypassDefaultDateForSearch && dateRange ? dateRange.to.toISOString() : undefined,
         },
         filename: `contatos-${format(new Date(), "yyyy-MM-dd")}`,
       });

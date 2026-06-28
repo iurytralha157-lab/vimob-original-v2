@@ -19,6 +19,12 @@ const META_DIALOG_BASE_URL = `https://www.facebook.com/${META_GRAPH_VERSION}`;
 const MAX_META_FORM_PAGES = 30;
 const DEFAULT_RETURN_URL = "https://vimob.vettercompany.com.br/settings?tab=integrations";
 const OAUTH_FLOW_TTL_MS = 15 * 60 * 1000;
+const META_OAUTH_RETURN_PARAMS = [
+  "meta_oauth_data",
+  "meta_oauth_status",
+  "meta_oauth_flow_id",
+  "meta_oauth_error",
+];
 
 type OAuthFlow = {
   id: string;
@@ -36,6 +42,10 @@ function sanitizeReturnUrl(raw?: string | null): string {
   try {
     const parsed = new URL(raw || DEFAULT_RETURN_URL);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return DEFAULT_RETURN_URL;
+    for (const param of META_OAUTH_RETURN_PARAMS) {
+      parsed.searchParams.delete(param);
+    }
+    if (parsed.hash === "#_=_") parsed.hash = "";
     return parsed.toString();
   } catch (_error) {
     return DEFAULT_RETURN_URL;
@@ -76,51 +86,18 @@ function parseState(state: string | null): Record<string, unknown> {
   }
 }
 
-function generateSuccessPage(flowId: string, returnUrl: string): Response {
-  const payload = { success: true, flow_id: flowId };
-  const safeReturnUrl = JSON.stringify(appendOAuthParams(returnUrl, {
+function redirectWithSuccess(flowId: string, returnUrl: string): Response {
+  const safeReturnUrl = appendOAuthParams(returnUrl, {
     meta_oauth_status: "success",
     meta_oauth_flow_id: flowId,
-  }));
+  });
 
-  const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-  <title>Facebook conectado</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0f0f10; color: #fff; }
-    .box { text-align: center; max-width: 420px; padding: 32px; }
-    .icon { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 18px; display: grid; place-items: center; background: #1877f2; font-weight: 800; font-size: 30px; }
-    p { color: #b9b9b9; }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <div class="icon">f</div>
-    <h2>Conta conectada</h2>
-    <p>Voltando para o Vimob para concluir a configuracao.</p>
-  </div>
-  <script>
-    const payload = ${JSON.stringify(payload)};
-    if (window.opener) {
-      window.opener.postMessage({ type: 'META_OAUTH_SUCCESS', data: payload }, '*');
-      window.close();
-    } else {
-      window.location.href = ${safeReturnUrl};
-    }
-  </script>
-</body>
-</html>`;
-
-  return new Response(html, {
-    status: 200,
+  return new Response(null, {
+    status: 302,
     headers: {
       ...corsHeaders,
-      "content-type": "text/html; charset=utf-8",
+      Location: safeReturnUrl,
       "cache-control": "no-store",
-      "x-content-type-options": "nosniff",
     },
   });
 }
@@ -184,7 +161,7 @@ async function completeOAuthFlow(
     });
   }
 
-  return generateSuccessPage(flow.id, returnUrl);
+  return redirectWithSuccess(flow.id, returnUrl);
 }
 
 async function fetchLeadFormsCollection(pageId: string, accessToken: string, status?: string): Promise<any[]> {

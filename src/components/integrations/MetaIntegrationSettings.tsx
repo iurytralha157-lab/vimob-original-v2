@@ -59,6 +59,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import {
+  buildMetaOAuthReturnUrl,
+  parseMetaOAuthPayload,
+  replaceCurrentUrlWithoutMetaOAuthParams,
+} from "@/lib/meta-oauth-url";
+import {
   MetaIntegration,
   MetaOAuthPayload,
   MetaPage,
@@ -207,20 +212,15 @@ export function MetaIntegrationSettings({
         return;
       }
 
+      replaceCurrentUrlWithoutMetaOAuthParams();
       void handleOAuthPayload(payload);
-
-      params.delete("meta_oauth_status");
-      params.delete("meta_oauth_flow_id");
-      params.delete("meta_oauth_error");
-      window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
       return;
     }
 
     if (!raw) return;
 
     try {
-      const decoded = decodeURIComponent(raw);
-      const payload = JSON.parse(decoded);
+      const payload = parseMetaOAuthPayload(raw) as OAuthPayload;
 
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage({ type: "META_OAUTH_SUCCESS", data: payload }, window.location.origin);
@@ -228,12 +228,12 @@ export function MetaIntegrationSettings({
         return;
       }
 
+      replaceCurrentUrlWithoutMetaOAuthParams();
       void handleOAuthPayload(payload);
     } catch (error) {
       console.error("Invalid Meta OAuth payload", error);
     } finally {
-      params.delete("meta_oauth_data");
-      window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+      replaceCurrentUrlWithoutMetaOAuthParams();
     }
   }, [handleOAuthPayload, oauthPayload]);
 
@@ -312,7 +312,7 @@ export function MetaIntegrationSettings({
   });
 
   const openOAuth = async () => {
-    const returnUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+    const returnUrl = buildMetaOAuthReturnUrl();
     const result = await getAuthUrl.mutateAsync({ returnUrl });
     const popup = window.open(result.auth_url, "meta_oauth", "width=600,height=720");
     if (!popup) window.location.href = result.auth_url;

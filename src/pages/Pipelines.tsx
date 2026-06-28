@@ -109,6 +109,7 @@ const formatCompactCurrency = (value: number): string => {
 };
 
 const NO_VISIBLE_USER_ID = '00000000-0000-0000-0000-000000000000';
+const PIPELINE_SELECTION_STORAGE_PREFIX = 'vimob:selected-pipeline';
 
 type LeadDialogBoundaryProps = {
   leadId?: string | null;
@@ -172,6 +173,7 @@ export default function Pipelines() {
   const navigate = useNavigate();
   const { profile, organization } = useAuth();
   const [shouldLoadFilterOptions, setShouldLoadFilterOptions] = useState(false);
+  const activeOrganizationId = organization?.id || profile.organization_id || null;
   const isAdmin = profile.role === 'admin' || profile.role === 'super_admin';
   const isTelecom = organization.segment === 'telecom';
   const newButtonLabel = isTelecom ? 'Novo Cliente' : 'Novo Lead';
@@ -220,6 +222,25 @@ export default function Pipelines() {
   const [editingStageName, setEditingStageName] = useState('');
   const [settingsStage, setSettingsStage] = useState<any | null>(null);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
+  const pipelineSelectionStorageKey = useMemo(
+    () => activeOrganizationId ? `${PIPELINE_SELECTION_STORAGE_PREFIX}:${activeOrganizationId}` : null,
+    [activeOrganizationId]
+  );
+  const persistSelectedPipelineId = useCallback((pipelineId: string | null) => {
+    setSelectedPipelineId(pipelineId);
+
+    if (!pipelineSelectionStorageKey || typeof window === 'undefined') return;
+
+    try {
+      if (pipelineId) {
+        window.localStorage.setItem(pipelineSelectionStorageKey, pipelineId);
+      } else {
+        window.localStorage.removeItem(pipelineSelectionStorageKey);
+      }
+    } catch (error) {
+      console.warn('[Pipeline] Nao foi possivel salvar a pipeline selecionada', error);
+    }
+  }, [pipelineSelectionStorageKey]);
   const [newPipelineDialogOpen, setNewPipelineDialogOpen] = useState(false);
   const [newPipelineName, setNewPipelineName] = useState('');
   const [newStageDialogOpen, setNewStageDialogOpen] = useState(false);
@@ -245,13 +266,35 @@ export default function Pipelines() {
   const createStage = useCreateStage();
   const loadMoreLeads = useLoadMoreLeads();
   
-  // Set initial pipeline when pipelines load
+  // Keep the selected pipeline stable across page navigation, scoped by organization.
   useEffect(() => {
-    if (pipelines.length > 0 && !selectedPipelineId) {
-      const defaultPipeline = pipelines.find(p => p.is_default) || pipelines[0];
-      setSelectedPipelineId(defaultPipeline.id);
+    if (pipelines.length === 0) {
+      if (selectedPipelineId !== null) setSelectedPipelineId(null);
+      return;
     }
-  }, [pipelines, selectedPipelineId]);
+
+    const selectedStillExists = Boolean(
+      selectedPipelineId && pipelines.some(pipeline => pipeline.id === selectedPipelineId)
+    );
+
+    if (selectedStillExists) return;
+
+    let storedPipelineId: string | null = null;
+    if (pipelineSelectionStorageKey && typeof window !== 'undefined') {
+      try {
+        storedPipelineId = window.localStorage.getItem(pipelineSelectionStorageKey);
+      } catch (error) {
+        console.warn('[Pipeline] Nao foi possivel ler a pipeline selecionada', error);
+      }
+    }
+
+    const storedPipeline = storedPipelineId
+      ? pipelines.find(pipeline => pipeline.id === storedPipelineId)
+      : null;
+    const fallbackPipeline = storedPipeline || pipelines.find(pipeline => pipeline.is_default) || pipelines[0];
+
+    setSelectedPipelineId(fallbackPipeline?.id || null);
+  }, [pipelines, pipelineSelectionStorageKey, selectedPipelineId]);
   
   // Check if user has lead_view_all permission
   const { isLoading: permissionLoading } = useHasPermission('lead_view_all');
@@ -434,7 +477,6 @@ export default function Pipelines() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const leadId = params.get('lead_id') || params.get('lead');
-    const activeOrganizationId = organization?.id || profile.organization_id;
 
     if (!leadId || !activeOrganizationId) return;
 
@@ -453,7 +495,7 @@ export default function Pipelines() {
         const lead = stage.leads.find((l: any) => l.id === leadId);
         if (lead) {
           if (lead.pipeline_id && lead.pipeline_id !== selectedPipelineId) {
-            setSelectedPipelineId(lead.pipeline_id);
+            persistSelectedPipelineId(lead.pipeline_id);
           }
           setSelectedLead(lead);
           clearLeadParam();
@@ -525,7 +567,7 @@ export default function Pipelines() {
         };
 
         if (formattedLead.pipeline_id && formattedLead.pipeline_id !== selectedPipelineId) {
-          setSelectedPipelineId(formattedLead.pipeline_id);
+          persistSelectedPipelineId(formattedLead.pipeline_id);
         }
         setSelectedLead(formattedLead);
         clearLeadParam();
@@ -536,7 +578,7 @@ export default function Pipelines() {
 
     fetchLead();
     return () => { cancelled = true; };
-  }, [location.search, stages, navigate, organization?.id, profile.organization_id, selectedPipelineId]);
+  }, [location.search, stages, navigate, activeOrganizationId, selectedPipelineId, persistSelectedPipelineId]);
 
   const queryClient = useQueryClient();
 
@@ -1030,7 +1072,7 @@ export default function Pipelines() {
     
     try {
       const pipeline = await createPipeline.mutateAsync({ name: newPipelineName.trim() });
-      setSelectedPipelineId(pipeline.id);
+      persistSelectedPipelineId(pipeline.id);
       setNewPipelineDialogOpen(false);
       setNewPipelineName('');
       toast.success('Pipeline criada com sucesso!');
@@ -1048,7 +1090,7 @@ export default function Pipelines() {
     try {
       await deletePipeline.mutateAsync(pipelineId);
       const remaining = pipelines.filter(p => p.id !== pipelineId);
-      setSelectedPipelineId(remaining[0].id || null);
+      persistSelectedPipelineId(remaining[0].id || null);
       toast.success('Pipeline exclu?da!');
     } catch (error: any) {
       toast.error('Erro ao excluir: ' + error.message);
@@ -1077,7 +1119,7 @@ export default function Pipelines() {
                   {pipelines.map(pipeline => (
                     <DropdownMenuItem 
                       key={pipeline.id}
-                      onClick={() => setSelectedPipelineId(pipeline.id)}
+                      onClick={() => persistSelectedPipelineId(pipeline.id)}
                       className={cn(
                         "flex items-center justify-between cursor-pointer rounded-sm py-2",
                         pipeline.id === selectedPipelineId && "bg-primary/10 text-primary"

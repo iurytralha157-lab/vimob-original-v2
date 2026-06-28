@@ -19,6 +19,10 @@ import { useMetaIntegrations } from "@/hooks/use-meta-integration";
 import { useWhatsAppSessions } from "@/hooks/use-whatsapp-sessions";
 import { useVistaIntegration } from "@/hooks/use-vista-integration";
 import { useImoviewIntegration } from "@/hooks/use-imoview-integration";
+import {
+  parseMetaOAuthPayload,
+  replaceCurrentUrlWithoutMetaOAuthParams,
+} from "@/lib/meta-oauth-url";
 
 type IntegrationKey = "whatsapp" | "meta" | "ai-agent" | "google-calendar" | "vista" | "imoview" | "webhooks" | "api";
 
@@ -49,14 +53,6 @@ export function IntegrationsTab({
   const disabledIntegrations = new Set<IntegrationKey>(["google-calendar"]);
 
   useEffect(() => {
-    const parseOAuthPayload = (raw: string) => {
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return JSON.parse(decodeURIComponent(raw));
-      }
-    };
-
     const params = new URLSearchParams(window.location.search);
     const status = params.get("meta_oauth_status");
     const flowId = params.get("meta_oauth_flow_id");
@@ -81,23 +77,21 @@ export function IntegrationsTab({
       }
 
       if (hasFlow) {
+        replaceCurrentUrlWithoutMetaOAuthParams();
         setMetaOAuthPayload(payload);
         setActiveIntegration("meta");
       } else {
+        replaceCurrentUrlWithoutMetaOAuthParams();
         toast.error(payload.error);
       }
 
-      params.delete("meta_oauth_status");
-      params.delete("meta_oauth_flow_id");
-      params.delete("meta_oauth_error");
-      window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
       return;
     }
 
     if (!raw) return;
 
     try {
-      const payload = parseOAuthPayload(raw);
+      const payload = parseMetaOAuthPayload(raw);
 
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage({ type: "META_OAUTH_SUCCESS", data: payload }, window.location.origin);
@@ -105,13 +99,13 @@ export function IntegrationsTab({
         return;
       }
 
+      replaceCurrentUrlWithoutMetaOAuthParams();
       setMetaOAuthPayload(payload);
       setActiveIntegration("meta");
     } catch (error) {
       console.error("Invalid Meta OAuth payload", error);
     } finally {
-      params.delete("meta_oauth_data");
-      window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+      replaceCurrentUrlWithoutMetaOAuthParams();
     }
   }, []);
 
