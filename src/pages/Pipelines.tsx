@@ -174,6 +174,7 @@ export default function Pipelines() {
   const { profile, organization } = useAuth();
   const [shouldLoadFilterOptions, setShouldLoadFilterOptions] = useState(false);
   const activeOrganizationId = organization?.id || profile.organization_id || null;
+  const activeUserId = profile.id || null;
   const isAdmin = profile.role === 'admin' || profile.role === 'super_admin';
   const isTelecom = organization.segment === 'telecom';
   const newButtonLabel = isTelecom ? 'Novo Cliente' : 'Novo Lead';
@@ -223,8 +224,10 @@ export default function Pipelines() {
   const [settingsStage, setSettingsStage] = useState<any | null>(null);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
   const pipelineSelectionStorageKey = useMemo(
-    () => activeOrganizationId ? `${PIPELINE_SELECTION_STORAGE_PREFIX}:${activeOrganizationId}` : null,
-    [activeOrganizationId]
+    () => activeOrganizationId && activeUserId
+      ? `${PIPELINE_SELECTION_STORAGE_PREFIX}:${activeOrganizationId}:${activeUserId}`
+      : null,
+    [activeOrganizationId, activeUserId]
   );
   const persistSelectedPipelineId = useCallback((pipelineId: string | null) => {
     setSelectedPipelineId(pipelineId);
@@ -266,7 +269,7 @@ export default function Pipelines() {
   const createStage = useCreateStage();
   const loadMoreLeads = useLoadMoreLeads();
   
-  // Keep the selected pipeline stable across page navigation, scoped by organization.
+  // Keep the selected pipeline stable across page navigation, scoped by organization and user.
   useEffect(() => {
     if (pipelines.length === 0) {
       if (selectedPipelineId !== null) setSelectedPipelineId(null);
