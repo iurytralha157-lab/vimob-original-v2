@@ -112,6 +112,7 @@ export function SharedFilters({
   // ✅ FIX: Usamos apenas refs para o input de busca — sem useState controlado
   // Isso evita re-renders a cada keystroke que causavam o "piscar" e perda de foco
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchCommitTimerRef = useRef<number | null>(null);
   const onSearchChangeRef = useRef(onSearchChange);
   const searchQueryRef = useRef(searchQuery);
 
@@ -132,11 +133,34 @@ export function SharedFilters({
   }, [searchQuery]);
 
   const commitSearch = useCallback(() => {
+    if (searchCommitTimerRef.current) {
+      window.clearTimeout(searchCommitTimerRef.current);
+      searchCommitTimerRef.current = null;
+    }
+
     const nextSearch = searchInputRef.current?.value ?? "";
     if (nextSearch !== searchQueryRef.current) {
       onSearchChangeRef.current(nextSearch);
       searchQueryRef.current = nextSearch;
     }
+  }, []);
+
+  const scheduleSearchCommit = useCallback(() => {
+    if (searchCommitTimerRef.current) {
+      window.clearTimeout(searchCommitTimerRef.current);
+    }
+
+    searchCommitTimerRef.current = window.setTimeout(() => {
+      commitSearch();
+    }, 350);
+  }, [commitSearch]);
+
+  useEffect(() => {
+    return () => {
+      if (searchCommitTimerRef.current) {
+        window.clearTimeout(searchCommitTimerRef.current);
+      }
+    };
   }, []);
 
   const handleClearFilters = useCallback(() => {
@@ -325,6 +349,8 @@ export function SharedFilters({
                       ref={searchInputRef}
                       placeholder="Buscar..."
                       defaultValue={searchQuery}
+                      onInput={scheduleSearchCommit}
+                      onBlur={commitSearch}
                       onKeyDown={(e) => {
                         e.stopPropagation();
                         if (e.key === "Enter") {
