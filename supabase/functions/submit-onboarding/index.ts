@@ -121,7 +121,13 @@ async function createInitialPipeline(supabaseAdmin: any, organizationId: string,
 
   const { error: stagesError } = await supabaseAdmin
     .from('stages')
-    .insert(stages.map((stage) => ({ ...stage, pipeline_id: pipeline.id })));
+    .insert(stages.map((stage) => ({
+      ...stage,
+      pipeline_id: pipeline.id,
+      organization_id: organizationId,
+      is_won: ['ativado', 'fechado'].includes(stage.stage_key),
+      is_lost: stage.stage_key === 'perdido',
+    })));
 
   if (stagesError) console.error('Failed to create initial stages:', stagesError);
 }
@@ -269,8 +275,21 @@ Deno.serve(async (req) => {
       }
 
       if (existingProfile?.id) {
-        userId = existingProfile.id;
-      } else {
+        const { data: authUserData } = await supabaseAdmin.auth.admin.getUserById(existingProfile.id);
+        if (authUserData?.user?.id) {
+          userId = existingProfile.id;
+        } else {
+          const { error: deleteOrphanError } = await supabaseAdmin
+            .from('users')
+            .delete()
+            .eq('id', existingProfile.id)
+            .is('organization_id', null);
+
+          if (deleteOrphanError) throw deleteOrphanError;
+        }
+      }
+
+      if (!userId) {
         const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
           email,
           password: tempPassword,
@@ -384,7 +403,8 @@ Deno.serve(async (req) => {
 
     const { error: userError } = await supabaseAdmin
       .from('users')
-      .update({
+      .upsert({
+        id: userId,
         name: responsible_name,
         email,
         role: 'admin',
@@ -393,8 +413,7 @@ Deno.serve(async (req) => {
         whatsapp: responsible_phone || company_whatsapp || null,
         phone: responsible_phone || null,
         cpf: responsible_cpf || null,
-      })
-      .eq('id', userId);
+      }, { onConflict: 'id' });
 
     if (userError) throw userError;
 
