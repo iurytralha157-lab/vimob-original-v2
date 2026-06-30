@@ -72,6 +72,27 @@ const fallbackPlans: OnboardingPlan[] = [
   },
 ];
 
+async function getFunctionErrorMessage(error: any) {
+  const response = error?.context;
+  if (response && typeof response.clone === 'function') {
+    try {
+      const clone = response.clone();
+      const contentType = clone.headers?.get?.('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const payload = await clone.json();
+        return payload?.error || payload?.message || null;
+      }
+
+      const text = await clone.text();
+      return text || null;
+    } catch {
+      return null;
+    }
+  }
+
+  return error?.message || null;
+}
+
 type LegalModalSection = {
   title: string;
   eyebrow: string;
@@ -427,7 +448,10 @@ export default function Onboarding() {
           legal_accepted_at: new Date().toISOString(),
         },
       });
-      if (error) throw error;
+      if (error) {
+        const functionMessage = await getFunctionErrorMessage(error);
+        throw new Error(functionMessage || error.message || 'Nao foi possivel enviar o onboarding');
+      }
       if (data?.error) throw new Error(data.error);
       setPaymentUrl(data?.paymentUrl || null);
       setRequiresPayment(Boolean(data?.requires_payment));
@@ -438,7 +462,7 @@ export default function Onboarding() {
         toast.warning('Ambiente criado, mas o WhatsApp com login e senha nao foi enviado.');
       }
     } catch (e: any) {
-      toast.error('Erro: ' + e.message);
+      toast.error('Erro: ' + (e?.message || 'Nao foi possivel enviar o onboarding'));
     } finally {
       setLoading(false);
     }

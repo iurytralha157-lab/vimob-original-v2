@@ -147,6 +147,9 @@ verify_jwt = false
 [functions.global-whatsapp-status]
 verify_jwt = false
 
+[functions.submit-onboarding]
+verify_jwt = false
+
 [functions.vista-sync]
 verify_jwt = false
 
