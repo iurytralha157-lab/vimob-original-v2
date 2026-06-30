@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
       .select(`
         *,
         session:whatsapp_sessions!outbox_messages_session_id_fkey(id, instance_name, status, provider),
-        conversation:whatsapp_conversations!outbox_messages_conversation_id_fkey(id, remote_jid, is_group)
+        conversation:whatsapp_conversations!outbox_messages_conversation_id_fkey(id, remote_jid, is_group, organization_id, lead_id)
       `)
       .eq("status", "pending")
       .order("created_at", { ascending: true })
@@ -248,6 +248,12 @@ Deno.serve(async (req) => {
 
         // ===== OPTIMISTIC UPDATE: Update existing message by client_message_id =====
         const outboxSenderName = getOutboxSenderName(message);
+        const messageOrganizationId = message.organization_id || message.conversation?.organization_id || null;
+        const messageLeadId = message.lead_id || message.conversation?.lead_id || null;
+        const messageRemoteJid = message.conversation?.remote_jid || null;
+        const messageSentAt = new Date().toISOString();
+        let persistError: any = null;
+
         if (message.client_message_id) {
           // Try to update the optimistic message first
           const { data: existingMsg } = await supabase
@@ -258,21 +264,28 @@ Deno.serve(async (req) => {
 
           if (existingMsg) {
             // Update existing optimistic message
-            await supabase
+            const { error: updateMessageError } = await supabase
               .from("whatsapp_messages")
               .update({
+                organization_id: messageOrganizationId,
+                lead_id: messageLeadId,
+                remote_jid: messageRemoteJid,
+                sender_user_id: message.created_by || null,
                 message_id: sentMessageId || message.client_message_id,
                 status: "sent",
-                sent_at: new Date().toISOString(),
+                sent_at: messageSentAt,
               })
               .eq("id", existingMsg.id);
+            persistError = updateMessageError;
             
             console.log(`Updated optimistic message ${existingMsg.id} with sent status`);
           } else {
             // No optimistic message found, insert new one
-            await supabase.from("whatsapp_messages").insert({
+            const { error: insertMessageError } = await supabase.from("whatsapp_messages").insert({
               conversation_id: message.conversation_id,
               session_id: message.session_id,
+              organization_id: messageOrganizationId,
+              lead_id: messageLeadId,
               message_id: sentMessageId || crypto.randomUUID(),
               client_message_id: message.client_message_id,
               from_me: true,
@@ -280,26 +293,42 @@ Deno.serve(async (req) => {
               message_type: message.message_type,
               media_url: message.media_url,
               media_mime_type: message.media_mime_type,
+              remote_jid: messageRemoteJid,
               status: "sent",
-              sent_at: new Date().toISOString(),
+              sent_at: messageSentAt,
               sender_name: outboxSenderName,
+              sender_user_id: message.created_by || null,
             });
+            persistError = insertMessageError;
           }
         } else {
           // Legacy: no client_message_id, just insert
-          await supabase.from("whatsapp_messages").insert({
+          const { error: insertMessageError } = await supabase.from("whatsapp_messages").insert({
             conversation_id: message.conversation_id,
             session_id: message.session_id,
+            organization_id: messageOrganizationId,
+            lead_id: messageLeadId,
             message_id: sentMessageId || crypto.randomUUID(),
             from_me: true,
             content: message.content,
             message_type: message.message_type,
             media_url: message.media_url,
             media_mime_type: message.media_mime_type,
+            remote_jid: messageRemoteJid,
             status: "sent",
-            sent_at: new Date().toISOString(),
+            sent_at: messageSentAt,
             sender_name: outboxSenderName,
+            sender_user_id: message.created_by || null,
           });
+          persistError = insertMessageError;
+        }
+
+        if (persistError) {
+          console.error("Message sent to WhatsApp but failed to persist CRM history:", persistError);
+          await supabase
+            .from("outbox_messages")
+            .update({ error_message: `Sent to WhatsApp but CRM history failed: ${persistError.message || "unknown error"}` })
+            .eq("id", message.id);
         }
 
         // Update conversation

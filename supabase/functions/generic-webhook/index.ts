@@ -243,6 +243,8 @@ async function sendAIFirstContactNow(
     .upsert({
       conversation_id: conversation.id,
       session_id: conversation.session_id || session.id,
+      organization_id: input.organizationId,
+      lead_id: input.leadId,
       message_id: clientMessageId,
       client_message_id: clientMessageId,
       from_me: true,

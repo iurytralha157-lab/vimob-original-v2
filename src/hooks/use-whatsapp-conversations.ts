@@ -192,10 +192,10 @@ function syncMissingConversationAvatars(conversations: WhatsAppConversation[], o
 
   for (const sessionId of sessionIds) {
     const lastStartedAt = avatarSyncStartedBySession.get(sessionId) || 0;
-    if (Date.now() - lastStartedAt < 60_000) continue;
+    if (Date.now() - lastStartedAt < 10 * 60_000) continue;
     avatarSyncStartedBySession.set(sessionId, Date.now());
     supabase.functions
-      .invoke("sync-whatsapp-contacts", { body: { session_id: sessionId, limit: 100 } })
+      .invoke("sync-whatsapp-contacts", { body: { session_id: sessionId, limit: 40, max_avatar_fetches: 2 } })
       .then(({ data, error }) => {
         if (error) {
           console.error("Error syncing WhatsApp avatars:", error);
@@ -203,7 +203,7 @@ function syncMissingConversationAvatars(conversations: WhatsAppConversation[], o
           return;
         }
         console.log("WhatsApp avatar sync finished:", data);
-        if (data?.success) {
+        if (data?.ok || data?.success) {
           onSynced?.();
         }
       });
@@ -832,6 +832,9 @@ export function useSendWhatsAppMessage() {
       const { error: insertError } = await supabase.from("whatsapp_messages").upsert({
         conversation_id: conversation.id,
         session_id: session.id,
+        organization_id: session.organization_id,
+        lead_id: conversation.lead_id || null,
+        sender_user_id: profile?.id || null,
         message_id: messageId,
         client_message_id: clientMessageId,
         from_me: true,

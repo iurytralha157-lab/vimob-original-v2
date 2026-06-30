@@ -35,7 +35,7 @@ export function useSyncContactsAvatars() {
   return useMutation({
     mutationFn: async (sessionId: string) => {
       const { data, error } = await supabase.functions.invoke("sync-whatsapp-contacts", {
-        body: { session_id: sessionId },
+        body: { session_id: sessionId, limit: 40, max_avatar_fetches: 2 },
       });
       if (error) throw new Error(error.message);
       return data;

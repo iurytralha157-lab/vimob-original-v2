@@ -1076,6 +1076,8 @@ async function insertOutboxMessage(supabase: any, conversationId: string, conten
       .upsert({
         conversation_id: conversationId,
         session_id: conv.session_id,
+        organization_id: conv.organization_id,
+        lead_id: conv.lead_id || null,
         message_id: clientMessageId,
         client_message_id: clientMessageId,
         from_me: true,

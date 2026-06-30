@@ -19,7 +19,7 @@ const diagnostics: any[] = [];
 let avatarTimeouts = 0;
 const MAX_AVATAR_TIMEOUTS = 12;
 const DEFAULT_FETCH_TIMEOUT_MS = 5000;
-const AVATAR_FETCH_TIMEOUT_MS = 30000;
+const AVATAR_FETCH_TIMEOUT_MS = 8000;
 
 function normalizePhone(p: string) {
   return String(p || "").replace(/@.*/, "").replace(/:.*/, "").replace(/\D/g, "");
@@ -352,7 +352,7 @@ Deno.serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { session_id, limit = 100, max_avatar_fetches = 8 } = await req.json().catch(() => ({}));
+    const { session_id, limit = 40, max_avatar_fetches = 2 } = await req.json().catch(() => ({}));
     if (!session_id) throw new Error("session_id required");
 
     const { data: session } = await supabase
@@ -400,7 +400,7 @@ Deno.serve(async (req) => {
       .is("deleted_at", null)
       .or("contact_picture.is.null,contact_picture.eq.")
       .order("updated_at", { ascending: false })
-      .limit(Math.min(limit, 500));
+      .limit(Math.min(limit, 80));
 
     let processedConversations = 0;
     let updatedConversations = 0;
@@ -447,7 +447,7 @@ Deno.serve(async (req) => {
       .eq("organization_id", session.organization_id)
       .not("phone", "is", null)
       .or(`whatsapp_avatar_synced_at.is.null,whatsapp_avatar_synced_at.lt.${cutoff}`)
-      .limit(Math.min(limit, 500));
+      .limit(Math.min(limit, 80));
 
     let updated = 0;
     for (const lead of leads || []) {
@@ -493,7 +493,7 @@ Deno.serve(async (req) => {
       .eq("is_group", false)
       .is("deleted_at", null)
       .not("contact_picture", "is", null)
-      .limit(Math.min(limit, 500));
+      .limit(Math.min(limit, 80));
 
     for (const conversation of conversationsWithPicture || []) {
       const avatar = conversation.contact_picture;

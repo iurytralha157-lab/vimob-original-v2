@@ -913,6 +913,8 @@ async function handleMessagesUpsert(
         .upsert({
           conversation_id: conversation.id,
           session_id: session.id,
+          organization_id: session.organization_id,
+          lead_id: conversation.lead_id || null,
           message_id: messageId,
           from_me: fromMe,
           content,

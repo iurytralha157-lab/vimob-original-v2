@@ -202,6 +202,8 @@ async function recordWhatsAppNotificationMessage(
     const { error: messageError } = await supabase.from("whatsapp_messages").insert({
       conversation_id: conversation.id,
       session_id: session.id,
+      organization_id: session.organization_id,
+      lead_id: lead?.id || conversation.lead_id || null,
       message_id: messageId,
       from_me: true,
       content: message,

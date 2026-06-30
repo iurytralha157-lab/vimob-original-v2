@@ -1331,6 +1331,8 @@ async function handleSingleMessageUpsert(session: any, m: any) {
   const messageInsert: any = {
     conversation_id: conv.id,
     session_id: session.id,
+    organization_id: session.organization_id,
+    lead_id: conv.lead_id || null,
     message_id: messageId,
     content,
     message_type: messageType,

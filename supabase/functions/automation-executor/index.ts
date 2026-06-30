@@ -817,6 +817,7 @@ async function processActionNode(
 
         await persistOutgoingMessage(supabase, {
           sessionId: configuredSessionId,
+          organizationId: execution.organization_id,
           phone: normalizePhoneNumber(lead.phone),
           contactName: lead.name,
           leadId: execution.lead_id,
@@ -858,6 +859,8 @@ async function processActionNode(
       await supabase.from("whatsapp_messages").upsert({
         conversation_id: execution.conversation_id,
         session_id: conv.session_id,
+        organization_id: conv.organization_id,
+        lead_id: conv.lead_id || execution.lead_id || null,
         message_id: sentMsgId,
         from_me: true,
         content: messageContent,
@@ -1085,7 +1088,7 @@ async function processActionNode(
 
 // deno-lint-ignore no-explicit-any
 async function persistOutgoingMessage(supabase: any, p: {
-  sessionId: string; phone: string; contactName?: string; leadId?: string;
+  sessionId: string; organizationId: string; phone: string; contactName?: string; leadId?: string;
   messageContent: string; sentMessageId: string; mediaType: "text" | "audio" | "image" | "video";
 }) {
   const remoteJid = `${p.phone}@s.whatsapp.net`;
@@ -1093,6 +1096,7 @@ async function persistOutgoingMessage(supabase: any, p: {
     .from("whatsapp_conversations")
     .select("id")
     .eq("session_id", p.sessionId)
+    .eq("organization_id", p.organizationId)
     .eq("contact_phone", p.phone)
     .is("deleted_at", null)
     .maybeSingle();
@@ -1100,6 +1104,7 @@ async function persistOutgoingMessage(supabase: any, p: {
   if (!convForMsg && p.leadId) {
     const { data: convByLead } = await supabase
       .from("whatsapp_conversations").select("id")
+      .eq("organization_id", p.organizationId)
       .eq("lead_id", p.leadId).is("deleted_at", null)
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .limit(1).maybeSingle();
@@ -1109,6 +1114,7 @@ async function persistOutgoingMessage(supabase: any, p: {
   if (!convForMsg) {
     const { data: newConv } = await supabase.from("whatsapp_conversations").insert({
       session_id: p.sessionId,
+      organization_id: p.organizationId,
       remote_jid: remoteJid,
       contact_phone: p.phone,
       contact_name: p.contactName || p.phone,
@@ -1125,6 +1131,8 @@ async function persistOutgoingMessage(supabase: any, p: {
     await supabase.from("whatsapp_messages").upsert({
       conversation_id: convForMsg.id,
       session_id: p.sessionId,
+      organization_id: p.organizationId,
+      lead_id: p.leadId || null,
       message_id: p.sentMessageId,
       from_me: true,
       content: p.messageContent,
@@ -1197,7 +1205,7 @@ async function sendMediaMessage(
     );
     const sentMsgId = getSentMessageId(result) || crypto.randomUUID();
     await persistOutgoingMessage(supabase, {
-      sessionId, phone: number, contactName: lead.name, leadId: execution.lead_id,
+      sessionId, organizationId: execution.organization_id, phone: number, contactName: lead.name, leadId: execution.lead_id,
       messageContent, sentMessageId: sentMsgId, mediaType,
     });
     await logAutomationActivity(supabase, execution.lead_id, "automation_message", messageContent,
@@ -1250,7 +1258,7 @@ async function sendMediaMessage(
   }
   const sentMsgId = getSentMessageId(result) || crypto.randomUUID();
   await persistOutgoingMessage(supabase, {
-    sessionId, phone: number, contactName: lead.name, leadId: execution.lead_id,
+    sessionId, organizationId: execution.organization_id, phone: number, contactName: lead.name, leadId: execution.lead_id,
     messageContent, sentMessageId: sentMsgId, mediaType,
   });
   await logAutomationActivity(supabase, execution.lead_id, "automation_message", messageContent,
