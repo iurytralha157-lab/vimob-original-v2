@@ -26,6 +26,7 @@ import {
   Percent
 } from 'lucide-react';
 import { Property } from '@/hooks/use-properties';
+import { isPropertyInactive, isPropertySold } from '@/lib/property-status';
 
 interface PropertyCardProps {
   property: Property;
@@ -48,8 +49,9 @@ export function PropertyCard({
   formatPrice,
   canEdit = false,
 }: PropertyCardProps) {
-  const isSold = property.status === 'vendido';
-  const isPublic = property.status !== 'privado';
+  const isSold = isPropertySold(property.status);
+  const isInactive = isPropertyInactive(property.status);
+  const isPublic = (property as any).published_on_site !== false && (property as any).anunciar !== false;
   const propertyType = (property.tipo_de_imovel || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const isLand = propertyType === 'terreno' || propertyType === 'lote';
   const displayArea = isLand ? property.area_total : (property.area_util || property.area_total);
@@ -115,7 +117,7 @@ export function PropertyCard({
         
         {/* Top right badges */}
         <div className="absolute top-2 right-2 flex gap-1">
-          {property.status === 'inativo' && (
+          {isInactive && (
             <Badge variant="outline" className="bg-background">Inativo</Badge>
           )}
         </div>

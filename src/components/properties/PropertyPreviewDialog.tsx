@@ -12,6 +12,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { cleanPropertyDescription } from '@/lib/property-description';
+import { normalizePropertyStatus } from '@/lib/property-status';
 import useEmblaCarousel from 'embla-carousel-react';
 import {
   MapPin,
@@ -127,7 +128,8 @@ export function PropertyPreviewDialog({
     });
   }
 
-  const isActive = property?.status !== 'inativo';
+  const normalizedStatus = normalizePropertyStatus(property?.status);
+  const isActive = normalizedStatus !== 'inactive' && normalizedStatus !== 'archived';
   const dealType = (property?.tipo_de_negocio || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const propertyType = (property?.tipo_de_imovel || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const isLand = propertyType === 'terreno' || propertyType === 'lote';
@@ -153,7 +155,7 @@ export function PropertyPreviewDialog({
     if (!property) return;
     updateProperty.mutate({
       id: property.id,
-      status: isActive ? 'inativo' : 'ativo',
+      status: isActive ? 'inactive' : 'active',
     });
   };
 

@@ -263,10 +263,10 @@ export function PropertyFormDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ativo">Ativo</SelectItem>
-                    <SelectItem value="inativo">Inativo</SelectItem>
-                    <SelectItem value="vendido">Vendido</SelectItem>
-                    <SelectItem value="alugado">Alugado</SelectItem>
+                    <SelectItem value="active">Ativo</SelectItem>
+                    <SelectItem value="inactive">Inativo</SelectItem>
+                    <SelectItem value="sold">Vendido</SelectItem>
+                    <SelectItem value="rented">Alugado</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

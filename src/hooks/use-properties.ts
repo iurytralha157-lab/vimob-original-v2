@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Tables } from '@/integrations/supabase/types';
 import { removeDemoProperties } from '@/lib/demo-properties';
+import { normalizePropertyStatus } from '@/lib/property-status';
 
 export type Property = Tables<'properties'>;
 
@@ -12,7 +13,8 @@ const PROPERTY_LIST_FIELDS = `
   status, destaque, bairro, cidade, uf,
   quartos, banheiros, vagas, area_util, area_total, preco, valor_locacao, 
   imagem_principal, created_at, organization_id,
-  commission_percentage, cadastrado_por
+  commission_percentage, cadastrado_por,
+  published_on_site, anunciar
 `;
 
 export function useProperties(search?: string) {
@@ -162,11 +164,15 @@ export function useCreateProperty() {
       if (!organizationId) throw new Error('Organização não encontrada');
       
       const code = await generatePropertyCode(organizationId, propertyInput.tipo_de_imovel || 'Apartamento');
+      const propertyPayload = {
+        ...propertyInput,
+        status: normalizePropertyStatus(propertyInput.status),
+      };
       
       const { data, error } = await supabase
         .from('properties')
         .insert({
-          ...propertyInput,
+          ...propertyPayload,
           code,
           organization_id: organizationId,
         })
@@ -210,30 +216,35 @@ export function useUpdateProperty() {
   
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Property> & { id: string }) => {
+      const propertyUpdates = {
+        ...updates,
+        ...(updates.status !== undefined ? { status: normalizePropertyStatus(updates.status) } : {}),
+      };
+
       // Se o tipo de imóvel mudou, regenerar o código
-      if (updates.tipo_de_imovel) {
+      if (propertyUpdates.tipo_de_imovel) {
         const { data: current, error: fetchErr } = await supabase
           .from('properties')
           .select('tipo_de_imovel, organization_id, code')
           .eq('id', id)
           .single();
         
-        console.log('[useUpdateProperty] Current property:', current, 'New tipo:', updates.tipo_de_imovel);
+        console.log('[useUpdateProperty] Current property:', current, 'New tipo:', propertyUpdates.tipo_de_imovel);
         
         if (fetchErr) {
           console.error('[useUpdateProperty] Error fetching current property:', fetchErr);
         }
         
-        if (current && current.tipo_de_imovel !== updates.tipo_de_imovel && current.organization_id) {
-          const newCode = await generatePropertyCode(current.organization_id, updates.tipo_de_imovel);
+        if (current && current.tipo_de_imovel !== propertyUpdates.tipo_de_imovel && current.organization_id) {
+          const newCode = await generatePropertyCode(current.organization_id, propertyUpdates.tipo_de_imovel);
           console.log('[useUpdateProperty] Code changed from', current.code, 'to', newCode);
-          updates.code = newCode;
+          propertyUpdates.code = newCode;
         }
       }
 
       const { data, error } = await supabase
         .from('properties')
-        .update(updates)
+        .update(propertyUpdates)
         .eq('id', id)
         .select()
         .single();

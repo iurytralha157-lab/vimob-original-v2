@@ -72,14 +72,15 @@ export default function Properties() {
   };
 
   const handleMarkSold = async (id: string) => {
-    await updateProperty.mutateAsync({ id, status: 'vendido' });
+    await updateProperty.mutateAsync({ id, status: 'sold' });
     toast.success('Imóvel marcado como vendido!');
   };
 
   const handleToggleVisibility = async (id: string, isPublic: boolean) => {
     await updateProperty.mutateAsync({ 
       id, 
-      status: isPublic ? 'ativo' : 'privado' 
+      published_on_site: isPublic,
+      anunciar: isPublic,
     });
     toast.success(isPublic ? 'Imóvel agora é público!' : 'Imóvel agora é privado!');
   };
@@ -87,8 +88,8 @@ export default function Properties() {
   const stats = {
     total: totalCount,
     destaque: properties.filter(p => p.destaque).length,
-    vendidos: properties.filter(p => p.status === 'vendido').length,
-    venda: properties.filter(p => p.tipo_de_negocio === 'Venda' && p.status !== 'vendido').length,
+    vendidos: properties.filter(p => p.status === 'sold').length,
+    venda: properties.filter(p => p.tipo_de_negocio === 'Venda' && p.status !== 'sold').length,
     aluguel: properties.filter(p => p.tipo_de_negocio === 'Aluguel').length,
   };
 

@@ -23,6 +23,7 @@ import { useUsers } from '@/hooks/use-users';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cleanPropertyDescription } from '@/lib/property-description';
+import { normalizePropertyStatus } from '@/lib/property-status';
 import { toast } from 'sonner';
 
 interface PropertyFormData {
@@ -125,7 +126,7 @@ interface PropertyFormData {
 }
 
 const initialFormData: PropertyFormData = {
-  title: '', tipo_de_imovel: 'Apartamento', tipo_de_negocio: 'Venda', status: 'ativo',
+  title: '', tipo_de_imovel: 'Apartamento', tipo_de_negocio: 'Venda', status: 'active',
   destaque: false, endereco: '', numero: '', complemento: '', bairro: '', cidade: '',
    uf: '', cep: '', public_address_visibility: 'parcial', quartos: '', suites: '', banheiros: '', vagas: '', area_util: '',
   area_total: '', mobilia: '', regra_pet: false, andar: '', ano_construcao: '', preco: '',
@@ -205,10 +206,14 @@ export default function PropertyForm() {
         const raw = localStorage.getItem(DRAFT_KEY);
         const meta = user?.user_metadata?.property_draft;
         if (raw || meta) {
-          return { 
+          const draftData = {
             ...initialFormData, 
             ...(meta ? meta : {}),
             ...(raw ? JSON.parse(raw) : {}) 
+          };
+          return {
+            ...draftData,
+            status: normalizePropertyStatus(draftData.status),
           };
         }
       } catch {
@@ -275,7 +280,7 @@ export default function PropertyForm() {
       const p = property as any;
       setFormData({
         title: p.title || '', tipo_de_imovel: p.tipo_de_imovel || 'Apartamento',
-        tipo_de_negocio: p.tipo_de_negocio || 'Venda', status: p.status || 'ativo',
+        tipo_de_negocio: p.tipo_de_negocio || 'Venda', status: normalizePropertyStatus(p.status),
         destaque: p.destaque || false, endereco: p.endereco || '', numero: p.numero || '',
         complemento: p.complemento || '', bairro: p.bairro || '', cidade: p.cidade || '',
         uf: p.uf || '', cep: p.cep || '', public_address_visibility: (p as any).public_address_visibility || 'parcial', quartos: p.quartos?.toString() || '',
@@ -355,7 +360,7 @@ export default function PropertyForm() {
 
     const propertyData: any = {
       title: formData.title || null, tipo_de_imovel: formData.tipo_de_imovel,
-      tipo_de_negocio: formData.tipo_de_negocio, status: formData.status,
+      tipo_de_negocio: formData.tipo_de_negocio, status: normalizePropertyStatus(formData.status),
       destaque: formData.destaque, endereco: formData.endereco || null,
       numero: formData.numero || null, complemento: formData.complemento || null,
       bairro: formData.bairro || null, cidade: formData.cidade || null,
@@ -626,10 +631,10 @@ export default function PropertyForm() {
                     <Select value={formData.status} onValueChange={v => set('status', v)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="ativo">Ativo</SelectItem>
-                        <SelectItem value="inativo">Inativo</SelectItem>
-                        <SelectItem value="vendido">Vendido</SelectItem>
-                        <SelectItem value="alugado">Alugado</SelectItem>
+                        <SelectItem value="active">Ativo</SelectItem>
+                        <SelectItem value="inactive">Inativo</SelectItem>
+                        <SelectItem value="sold">Vendido</SelectItem>
+                        <SelectItem value="rented">Alugado</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
