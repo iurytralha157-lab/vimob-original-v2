@@ -14,6 +14,15 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 
+const PUBLIC_PROPERTY_STATUSES = ['active', 'ativo']
+
+function applyPublicPropertyVisibility(query: any) {
+  return query
+    .in('status', PUBLIC_PROPERTY_STATUSES)
+    .not('published_on_site', 'is', false)
+    .not('anunciar', 'is', false)
+}
+
 async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input)
   const hashBuf = await crypto.subtle.digest('SHA-256', data)
@@ -167,7 +176,7 @@ serve(async (req) => {
         .from('properties')
         .select('*', { count: 'exact' })
         .eq('organization_id', organizationId)
-        .eq('status', 'ativo')
+      query = applyPublicPropertyVisibility(query)
         .order('created_at', { ascending: false })
         .range(from, to)
 
@@ -196,13 +205,13 @@ serve(async (req) => {
     const propertyMatch = path.match(/^\/properties\/([0-9a-fA-F-]{36})$/)
     if (req.method === 'GET' && propertyMatch) {
       const propertyId = propertyMatch[1]
-      const { data, error } = await supabase
+      let propertyQuery = supabase
         .from('properties')
         .select('*')
         .eq('id', propertyId)
         .eq('organization_id', organizationId)
-        .eq('status', 'ativo')
-        .maybeSingle()
+      propertyQuery = applyPublicPropertyVisibility(propertyQuery)
+      const { data, error } = await propertyQuery.maybeSingle()
 
       if (error) throw error
       if (!data) return json({ error: 'Property not found', code: 'not_found' }, 404)

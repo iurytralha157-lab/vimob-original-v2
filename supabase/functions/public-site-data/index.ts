@@ -19,6 +19,15 @@ const BILLING_BLOCKED_STATUSES = new Set([
   'cancelada',
 ]);
 
+const PUBLIC_PROPERTY_STATUSES = ['active', 'ativo'];
+
+function applyPublicPropertyVisibility(query: any) {
+  return query
+    .in('status', PUBLIC_PROPERTY_STATUSES)
+    .not('published_on_site', 'is', false)
+    .not('anunciar', 'is', false);
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -111,8 +120,8 @@ Deno.serve(async (req) => {
         let query = supabase
           .from('properties')
           .select(LIST_FIELDS, { count: 'estimated' })
-          .eq('organization_id', organizationId)
-          .eq('status', 'ativo')
+          .eq('organization_id', organizationId);
+        query = applyPublicPropertyVisibility(query)
           .order('created_at', { ascending: false });
 
         // Search filter - busca em todos os campos relevantes
@@ -214,13 +223,13 @@ Deno.serve(async (req) => {
           );
         }
 
-        const { data, error } = await supabase
+        let propertyQuery = supabase
           .from('properties')
           .select('*')
           .eq('organization_id', organizationId)
-          .eq('code', propertyCode)
-          .eq('status', 'ativo')
-          .maybeSingle();
+          .eq('code', propertyCode);
+        propertyQuery = applyPublicPropertyVisibility(propertyQuery);
+        const { data, error } = await propertyQuery.maybeSingle();
 
         if (error || !data) {
           return new Response(
@@ -234,14 +243,15 @@ Deno.serve(async (req) => {
       }
 
       case 'featured': {
-        const { data, error } = await supabase
+        let featuredQuery = supabase
           .from('properties')
           .select('*')
           .eq('organization_id', organizationId)
-          .eq('status', 'ativo')
-          .eq('destaque', true)
+          .eq('destaque', true);
+        featuredQuery = applyPublicPropertyVisibility(featuredQuery)
           .order('created_at', { ascending: false })
           .limit(6);
+        const { data, error } = await featuredQuery;
 
         if (error) {
           console.error('Error fetching featured properties:', error);
@@ -253,14 +263,15 @@ Deno.serve(async (req) => {
       }
 
       case 'exclusive': {
-        const { data, error } = await supabase
+        let exclusiveQuery = supabase
           .from('properties')
           .select('*')
           .eq('organization_id', organizationId)
-          .eq('status', 'ativo')
-          .eq('exclusividade', true)
+          .eq('exclusividade', true);
+        exclusiveQuery = applyPublicPropertyVisibility(exclusiveQuery)
           .order('created_at', { ascending: false })
           .limit(6);
+        const { data, error } = await exclusiveQuery;
 
         if (error) {
           console.error('Error fetching exclusive properties:', error);
@@ -272,12 +283,13 @@ Deno.serve(async (req) => {
       }
 
       case 'property-types': {
-        const { data, error } = await supabase
+        let propertyTypesQuery = supabase
           .from('properties')
           .select('tipo_de_imovel')
           .eq('organization_id', organizationId)
-          .eq('status', 'ativo')
           .not('tipo_de_imovel', 'is', null);
+        propertyTypesQuery = applyPublicPropertyVisibility(propertyTypesQuery);
+        const { data, error } = await propertyTypesQuery;
 
         if (error) {
           console.error('Error fetching property types:', error);
@@ -290,12 +302,13 @@ Deno.serve(async (req) => {
       }
 
       case 'cities': {
-        const { data, error } = await supabase
+        let citiesQuery = supabase
           .from('properties')
           .select('cidade')
           .eq('organization_id', organizationId)
-          .eq('status', 'ativo')
           .not('cidade', 'is', null);
+        citiesQuery = applyPublicPropertyVisibility(citiesQuery);
+        const { data, error } = await citiesQuery;
 
         if (error) {
           console.error('Error fetching cities:', error);
@@ -312,8 +325,8 @@ Deno.serve(async (req) => {
           .from('properties')
           .select('bairro')
           .eq('organization_id', organizationId)
-          .eq('status', 'ativo')
           .not('bairro', 'is', null);
+        neighborhoodQuery = applyPublicPropertyVisibility(neighborhoodQuery);
 
         // Filter by city if provided
         if (cidade) {
@@ -353,8 +366,8 @@ Deno.serve(async (req) => {
           .from('properties')
           .select('id, code, title, preco, valor_locacao, tipo_de_negocio, tipo_de_imovel, quartos, suites, banheiros, vagas, area_util, bairro, cidade, imagem_principal')
           .eq('organization_id', organizationId)
-          .eq('status', 'ativo')
-          .neq('code', propertyCode) // Exclude current property
+          .neq('code', propertyCode); // Exclude current property
+        relatedQuery = applyPublicPropertyVisibility(relatedQuery)
           .limit(parseInt(url.searchParams.get('limit') || '4'));
 
         // Filter by same type if available
@@ -380,13 +393,14 @@ Deno.serve(async (req) => {
 
       case 'map-properties': {
         // Return only properties with valid coordinates
-        const { data, error } = await supabase
+        let mapPropertiesQuery = supabase
           .from('properties')
           .select('id, code, title, preco, valor_locacao, tipo_de_negocio, tipo_de_imovel, quartos, banheiros, vagas, area_util, imagem_principal, latitude, longitude, bairro, cidade')
           .eq('organization_id', organizationId)
-          .eq('status', 'ativo')
           .not('latitude', 'is', null)
           .not('longitude', 'is', null);
+        mapPropertiesQuery = applyPublicPropertyVisibility(mapPropertiesQuery);
+        const { data, error } = await mapPropertiesQuery;
 
         if (error) {
           console.error('Error fetching map properties:', error);
@@ -409,11 +423,13 @@ Deno.serve(async (req) => {
           break;
         }
 
-        const { data, error } = await supabase
+        let favoritesQuery = supabase
           .from('properties')
           .select('*')
           .eq('organization_id', organizationId)
           .in('id', idList);
+        favoritesQuery = applyPublicPropertyVisibility(favoritesQuery);
+        const { data, error } = await favoritesQuery;
 
         if (error) {
           console.error('Error fetching favorite properties:', error);
@@ -433,11 +449,11 @@ Deno.serve(async (req) => {
           { data: typesData },
           { data: citiesData }
         ] = await Promise.all([
-          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').eq('destaque', true).order('created_at', { ascending: false }).limit(6),
-          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').eq('exclusividade', true).order('created_at', { ascending: false }).limit(6),
-          supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId).eq('status', 'ativo').order('created_at', { ascending: false }).limit(6),
-          supabase.from('properties').select('tipo_de_imovel').eq('organization_id', organizationId).eq('status', 'ativo').not('tipo_de_imovel', 'is', null),
-          supabase.from('properties').select('cidade').eq('organization_id', organizationId).eq('status', 'ativo').not('cidade', 'is', null)
+          applyPublicPropertyVisibility(supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId)).eq('destaque', true).order('created_at', { ascending: false }).limit(6),
+          applyPublicPropertyVisibility(supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId)).eq('exclusividade', true).order('created_at', { ascending: false }).limit(6),
+          applyPublicPropertyVisibility(supabase.from('properties').select('id, code, title, bairro, cidade, uf, quartos, suites, banheiros, vagas, area_util, preco, valor_locacao, tipo_de_negocio, imagem_principal').eq('organization_id', organizationId)).order('created_at', { ascending: false }).limit(6),
+          applyPublicPropertyVisibility(supabase.from('properties').select('tipo_de_imovel').eq('organization_id', organizationId)).not('tipo_de_imovel', 'is', null),
+          applyPublicPropertyVisibility(supabase.from('properties').select('cidade').eq('organization_id', organizationId)).not('cidade', 'is', null)
         ]);
 
         const types = [...new Set(typesData?.map(p => p.tipo_de_imovel).filter(Boolean))];

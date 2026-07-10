@@ -111,6 +111,9 @@ verify_jwt = false
 [functions.public-site-data]
 verify_jwt = false
 
+[functions.public-api]
+verify_jwt = false
+
 [functions.public-site-contact]
 verify_jwt = false
 
